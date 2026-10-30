@@ -34,8 +34,10 @@ import { emitPropEvent } from '../physics/props/propEvents';
 import { getRuntimeObstacles, obstacleBaseY } from '../world/obstacles';
 import { findAmbientFieldTarget } from '../fieldActions';
 import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
+import { getPlayerHarnessBridge } from './playerHarnessBridge';
+import { auditRenderIntegrity } from './renderIntegrity';
 
-const HARNESS_VERSION = 3;
+const HARNESS_VERSION = 4;
 const FULL_CONTENT_PHASE = 6;
 
 let renderRuntime = {
@@ -61,6 +63,8 @@ let frameRuntime = {
   lastFrameAt: 0,
 };
 
+const storeTrace = { entries: [], unsubscribe: null };
+
 let progressRuntime = {
   key: '',
   revision: 0,
@@ -71,6 +75,10 @@ function isE2EEnabled() {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
   return params.has('e2e') || params.has('screenshot') || params.get('testMode') === 'e2e';
+}
+
+function clampUnit(value) {
+  return Math.max(-1, Math.min(1, Number(value) || 0));
 }
 
 function finiteNumber(value, fallback = 0) {
@@ -472,6 +480,200 @@ function findNearestSpecimen() {
   };
 }
 
+function playerPosition() {
+  const state = useThreeGameStore.getState();
+  const pose = getRuntimePlayerPose() || state.playerPose;
+  return plainVector(pose?.position || state.playableSpawnPoint || {});
+}
+
+function round2(value) {
+  return Math.round(finiteNumber(value) * 100) / 100;
+}
+
+// Everything an agent might want to walk to, nearest first: rocks and other
+// obstacles, specimens (live positions) and NPCs. Positions are world x/z.
+function listNearbyTargets({ radius = 20, limit = 25, kinds = null } = {}) {
+  const state = useThreeGameStore.getState();
+  const zoneId = state.currentZoneId;
+  const origin = playerPosition();
+  const wanted = kinds ? new Set(Array.isArray(kinds) ? kinds : [kinds]) : null;
+  const items = [];
+  const push = item => {
+    const distance = Math.sqrt(squaredDistance(origin, item));
+    if (distance > radius) return;
+    if (wanted && !wanted.has(item.category)) return;
+    items.push({ ...item, x: round2(item.x), z: round2(item.z), radius: round2(item.radius), distance: round2(distance) });
+  };
+  for (const obstacle of getRuntimeObstacles(zoneId)) {
+    push({
+      category: 'obstacle',
+      id: obstacle.id,
+      kind: obstacle.kind || null,
+      x: obstacle.x,
+      z: obstacle.z,
+      radius: obstacle.radius || 0.5,
+    });
+  }
+  const collectedActors = new Set(state.collectedSpecimenActorIds || []);
+  const poses = getSpecimenRuntimePoses(zoneId);
+  for (const specimen of getThreeSpecimens(zoneId)) {
+    const actorId = actorIdFor(specimen);
+    if (!actorId || collectedActors.has(actorId) || actorId === state.playableHiddenActorId) continue;
+    const pose = poses?.get(actorId) || specimenPosition(state, specimen);
+    push({
+      category: 'specimen',
+      id: actorId,
+      kind: specimen.id || null,
+      name: specimen.name || null,
+      examined: (state.examinedTypeIds || []).includes(specimen.id),
+      x: pose.x,
+      z: pose.z,
+      radius: 0.4,
+    });
+  }
+  for (const [npcId, pose] of getNpcPoses(zoneId) || []) {
+    push({ category: 'npc', id: npcId, kind: 'npc', x: pose.x, z: pose.z, radius: 0.45 });
+  }
+  items.sort((a, b) => a.distance - b.distance);
+  return { origin: { x: round2(origin.x), y: round2(origin.y), z: round2(origin.z) }, zoneId, items: items.slice(0, limit) };
+}
+
+function resolveTarget(target) {
+  if (target && typeof target === 'object' && Number.isFinite(target.x) && Number.isFinite(target.z)) {
+    return { x: target.x, z: target.z, radius: finiteNumber(target.radius, 0), id: target.id || null };
+  }
+  const { items } = listNearbyTargets({ radius: Infinity, limit: Infinity });
+  if (typeof target !== 'string' || !target) return null;
+  // Exact id first, then category shorthands ("rock", "specimen", "npc"),
+  // then a substring of id/kind/name.
+  const exact = items.find(item => item.id === target);
+  if (exact) return exact;
+  if (target === 'rock') return items.find(item => /rock|boulder|basalt|scoria|outcrop|lava/i.test(`${item.kind} ${item.id}`)) || null;
+  if (target === 'specimen' || target === 'npc' || target === 'obstacle') return items.find(item => item.category === target) || null;
+  if (target === 'unexamined') return items.find(item => item.category === 'specimen' && !item.examined) || null;
+  const needle = target.toLowerCase();
+  return items.find(item => `${item.id} ${item.kind || ''} ${item.name || ''}`.toLowerCase().includes(needle)) || null;
+}
+
+function teleportPlayer(x, z, { heading = null, y = null } = {}) {
+  const bridge = getPlayerHarnessBridge();
+  if (!bridge) throw new Error('Player harness bridge is not registered (is the player mounted?).');
+  return bridge.teleport({ x, z, y, heading });
+}
+
+// Steers the player with the analog touch stick (camera-relative, like a real
+// joystick) until it is within `radius` of the point, stops making progress,
+// or times out. Movement input is rotated by the camera yaw in
+// PlayerController, so the world direction is rotated back by -yaw here.
+// There is no pathfinding: when progress stalls it sidesteps at alternating
+// angles for a moment (enough to slide round a boulder or a cactus), and only
+// reports `stuck` once several detours have failed.
+function walkPlayerTo(x, z, { radius = 0.9, run = false, timeoutMs = 20000, stallMs = 700, maxDetours = 6 } = {}) {
+  const bridge = getPlayerHarnessBridge();
+  if (!bridge) return Promise.reject(new Error('Player harness bridge is not registered.'));
+  return new Promise(resolve => {
+    const startedAt = performance.now();
+    const start = playerPosition();
+    let best = Infinity;
+    let bestAt = startedAt;
+    let detours = 0;
+    let detour = null;
+    const finish = reason => {
+      setTouchControl('moveX', 0);
+      setTouchControl('moveY', 0);
+      setTouchControl('run', false);
+      const end = playerPosition();
+      resolve({
+        reason,
+        arrived: reason === 'arrived',
+        distance: round2(Math.hypot(x - end.x, z - end.z)),
+        travelled: round2(Math.hypot(end.x - start.x, end.z - start.z)),
+        detours,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        position: { x: round2(end.x), y: round2(end.y), z: round2(end.z) },
+      });
+    };
+    const step = () => {
+      const now = performance.now();
+      const position = playerPosition();
+      let dx = x - position.x;
+      let dz = z - position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance <= radius) return finish('arrived');
+      if (now - startedAt > timeoutMs) return finish('timeout');
+      if (distance < best - 0.05) {
+        best = distance;
+        bestAt = now;
+      } else if (!detour && now - bestAt > stallMs) {
+        if (detours >= maxDetours) return finish('stuck');
+        detours += 1;
+        const side = detours % 2 === 1 ? 1 : -1;
+        detour = { angle: side * (Math.PI / 2.4 + detours * 0.12), until: now + 450 + detours * 120 };
+        bestAt = now;
+      }
+      if (detour && now > detour.until) detour = null;
+      if (detour) {
+        const cosA = Math.cos(detour.angle);
+        const sinA = Math.sin(detour.angle);
+        [dx, dz] = [dx * cosA + dz * sinA, -dx * sinA + dz * cosA];
+      }
+      const length = Math.hypot(dx, dz) || 1;
+      const yaw = finiteNumber(bridge.getCameraYaw?.());
+      const cos = Math.cos(-yaw);
+      const sin = Math.sin(-yaw);
+      setTouchControl('moveX', (dx * cos + dz * sin) / length);
+      setTouchControl('moveY', (-dx * sin + dz * cos) / length);
+      setTouchControl('run', Boolean(run));
+      window.requestAnimationFrame(step);
+      return undefined;
+    };
+    step();
+  });
+}
+
+const OVERLAY_SELECTOR = [
+  '[role="dialog"]',
+  '[data-testid$="-modal"]',
+  '[data-testid="examine-view"]',
+  '[data-testid="pause-menu"]',
+  '[data-testid="library-view"]',
+  '[data-testid="gesture-wheel"]',
+  '[data-testid="three-launch-overlay"]',
+].join(',');
+
+function openOverlays() {
+  const seen = new Set();
+  const result = [];
+  for (const element of document.querySelectorAll(OVERLAY_SELECTOR)) {
+    if (seen.has(element)) continue;
+    seen.add(element);
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;
+    result.push({
+      testId: element.getAttribute('data-testid') || null,
+      label: element.getAttribute('aria-label') || element.querySelector('h1,h2,h3')?.innerText?.trim() || null,
+    });
+  }
+  return result;
+}
+
+// What the player would read on screen right now: the context prompt, the
+// field-action verb, and the overlays covering the scene.
+function describePrompt() {
+  const state = useThreeGameStore.getState();
+  return {
+    contextPrompt: state.contextPrompt
+      ? { keyLabel: state.contextPrompt.keyLabel || null, label: state.contextPrompt.label || null, source: state.contextPrompt.source || null }
+      : null,
+    fieldAction: state.fieldAction
+      ? { kind: state.fieldAction.kind, label: state.fieldAction.label, toolId: state.fieldAction.toolId, targetId: state.fieldAction.target?.id || null }
+      : null,
+    activeToolId: state.activeToolId,
+    message: state.message || null,
+    overlays: openOverlays(),
+  };
+}
+
 function waitForPredicate(predicate, timeoutMs = 75000, label = 'condition') {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -490,7 +692,7 @@ function waitForPredicate(predicate, timeoutMs = 75000, label = 'condition') {
         reject(new Error(`Timed out after ${timeoutMs}ms waiting for ${label}.`));
         return;
       }
-      window.setTimeout(tick, 250);
+      window.setTimeout(tick, 50);
     };
     tick();
   });
@@ -780,6 +982,153 @@ function createHarnessApi() {
         });
       }
       return makeSnapshot();
+    },
+    // --- Agent play primitives (harness v4) ---------------------------------
+    teleport: (x, z, options = {}) => {
+      const placed = teleportPlayer(Number(x), Number(z), options);
+      return { placed, prompt: describePrompt() };
+    },
+    // Stand `distance` metres from the edge of a target (id, "rock",
+    // "specimen", "unexamined", "npc", or {x,z,radius}) and face it.
+    teleportNear: (target, { distance = 0.8, angle = null } = {}) => {
+      const resolved = resolveTarget(target);
+      if (!resolved) return { error: `No target matching ${JSON.stringify(target)}.` };
+      const origin = playerPosition();
+      const approach = Number.isFinite(angle)
+        ? angle
+        : Math.atan2(origin.x - resolved.x, origin.z - resolved.z);
+      const offset = finiteNumber(resolved.radius) + distance;
+      const x = resolved.x + Math.sin(approach) * offset;
+      const z = resolved.z + Math.cos(approach) * offset;
+      const placed = teleportPlayer(x, z, { heading: { x: resolved.x - x, z: resolved.z - z } });
+      return { target: resolved, placed, prompt: describePrompt() };
+    },
+    face: target => {
+      const resolved = resolveTarget(target);
+      if (!resolved) return { error: `No target matching ${JSON.stringify(target)}.` };
+      const origin = playerPosition();
+      const placed = teleportPlayer(origin.x, origin.z, { heading: { x: resolved.x - origin.x, z: resolved.z - origin.z } });
+      return { target: resolved, placed, prompt: describePrompt() };
+    },
+    walkTo: async (target, options = {}) => {
+      const resolved = resolveTarget(target);
+      if (!resolved) return { error: `No target matching ${JSON.stringify(target)}.` };
+      const radius = options.radius ?? finiteNumber(resolved.radius) + 0.7;
+      const walk = await walkPlayerTo(resolved.x, resolved.z, { ...options, radius });
+      return { target: resolved, ...walk, prompt: describePrompt() };
+    },
+    walk: async (forward = 1, right = 0, durationMs = 1000, { run = false } = {}) => {
+      setTouchControl('moveX', clampUnit(right));
+      setTouchControl('moveY', clampUnit(-forward));
+      setTouchControl('run', Boolean(run));
+      await new Promise(resolve => window.setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
+      setTouchControl('moveX', 0);
+      setTouchControl('moveY', 0);
+      setTouchControl('run', false);
+      return { position: playerPosition(), prompt: describePrompt() };
+    },
+    setCameraYaw: yaw => {
+      getPlayerHarnessBridge()?.setCameraYaw(Number(yaw));
+      return getPlayerHarnessBridge()?.getCameraYaw() ?? null;
+    },
+    getCameraYaw: () => getPlayerHarnessBridge()?.getCameraYaw() ?? null,
+    // Resolves once the player is grounded with no action playing (a teleport
+    // can land as a short drop, and its landing action swallows input).
+    waitForSettled: (timeoutMs = 3000, calmMs = 300) => {
+      let calmSince = null;
+      return waitForPredicate(() => {
+        const motion = getPlayerHarnessBridge()?.getMotionState?.();
+        const calm = motion && !motion.action && motion.jumpPhase === 'grounded' && motion.speed < 0.05;
+        if (!calm) {
+          calmSince = null;
+          return false;
+        }
+        calmSince ??= performance.now();
+        return performance.now() - calmSince >= calmMs;
+      }, timeoutMs, 'player settled').then(() => true, () => false);
+    },
+    getMotionState: () => JSON.parse(JSON.stringify(getPlayerHarnessBridge()?.getMotionState?.() ?? null)),
+    nearby: (options = {}) => listNearbyTargets(options),
+    // Records every change to the named store fields with a short stack, so
+    // "what closed the examine view?" is a lookup instead of a guess.
+    traceStore: (...keys) => {
+      storeTrace.unsubscribe?.();
+      storeTrace.entries = [];
+      if (!keys.length) return { tracing: [] };
+      storeTrace.unsubscribe = useThreeGameStore.subscribe((next, previous) => {
+        for (const key of keys) {
+          if (next[key] === previous[key]) continue;
+          const summarize = value => (value && typeof value === 'object'
+            ? (value.name || value.id || value.kind || (Array.isArray(value) ? `[array ${value.length}]` : '[object]'))
+            : value);
+          storeTrace.entries.push({
+            at: Math.round(performance.now()),
+            key,
+            from: summarize(previous[key]),
+            to: summarize(next[key]),
+            stack: (new Error().stack || '').split('\n').slice(2, 9).map(line => line.trim().replace(/https?:\/\/[^/]+\/_next\/static\/chunks\//, '')),
+          });
+          if (storeTrace.entries.length > 200) storeTrace.entries.shift();
+        }
+      });
+      return { tracing: keys };
+    },
+    traceLog: () => storeTrace.entries.slice(),
+    obstacle: id => {
+      const obstacle = getRuntimeObstacles(useThreeGameStore.getState().currentZoneId).find(item => item.id === id);
+      return obstacle ? JSON.parse(JSON.stringify(obstacle, (key, value) => (typeof value === 'function' ? undefined : value))) : null;
+    },
+    // Raw store fields by name, JSON-safe (functions and cycles dropped), for
+    // questions the curated snapshot does not answer.
+    store: (...keys) => {
+      const state = useThreeGameStore.getState();
+      const picked = keys.length ? Object.fromEntries(keys.map(key => [key, state[key]])) : Object.fromEntries(
+        Object.entries(state).filter(([, value]) => typeof value !== 'function').map(([key, value]) => [
+          key,
+          Array.isArray(value) ? `[array ${value.length}]` : value && typeof value === 'object' ? '[object]' : value,
+        ]),
+      );
+      const seen = new WeakSet();
+      return JSON.parse(JSON.stringify(picked, (key, value) => {
+        if (typeof value === 'function') return undefined;
+        if (value && typeof value === 'object') {
+          if (seen.has(value)) return '[cycle]';
+          seen.add(value);
+          if (value.isObject3D || value.isMaterial || value.isTexture) return `[three ${value.type}]`;
+        }
+        return value;
+      }));
+    },
+    getPrompt: () => describePrompt(),
+    getOverlays: () => openOverlays(),
+    setTimeOfDay: hours => {
+      useThreeGameStore.setState({ timeOfDay: Math.max(0, Math.min(24, Number(hours) || 0)) });
+      return makeSnapshot().timeOfDay;
+    },
+    renderAudit: (options = {}) => auditRenderIntegrity(window.__darwinScene, options),
+    // Compact one-call status for an agent loop: where am I, what can I do,
+    // what is covering the screen, is the scene healthy.
+    look: () => {
+      const state = useThreeGameStore.getState();
+      const audit = auditRenderIntegrity(window.__darwinScene, { summaryOnly: true });
+      return {
+        zoneId: state.currentZoneId,
+        mode: state.playableModeId,
+        viewMode: state.viewMode,
+        position: playerPosition(),
+        cameraYaw: getPlayerHarnessBridge()?.getCameraYaw() ?? null,
+        timeOfDay: finiteNumber(state.timeOfDay),
+        day: finiteNumber(state.day),
+        health: finiteNumber(state.health),
+        fatigue: finiteNumber(state.fatigue),
+        inventoryCount: Array.isArray(state.inventory) ? state.inventory.length : 0,
+        examinedCount: Array.isArray(state.examinedTypeIds) ? state.examinedTypeIds.length : 0,
+        examineSession: summarizeExamineSession(state.examineSession),
+        prompt: describePrompt(),
+        nearby: listNearbyTargets({ radius: 12, limit: 8 }).items,
+        render: audit,
+        ready: makeReadiness().gameplayReady,
+      };
     },
   };
 

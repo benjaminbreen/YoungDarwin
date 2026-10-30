@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { chromium } from '@playwright/test';
 
 const SANDBOX_LAUNCH_FAILURE_RE = /\b(SIGABRT|SIGTRAP|EPERM|ThermalStateObserverMac|Target page, context or browser has been closed)\b/i;
@@ -68,6 +71,54 @@ export async function probeBrowserRenderer(browser) {
   }
 }
 
+// Playwright pins one Chromium revision per release, and `npx playwright
+// install` is easy to skip or to run from a different release. Rather than
+// fail, fall back to the newest Chromium already in the Playwright cache, then
+// to installed Google Chrome. THREE_CHROMIUM_EXECUTABLE overrides everything.
+export function resolveChromiumExecutable() {
+  const override = process.env.THREE_CHROMIUM_EXECUTABLE;
+  if (override) return { executablePath: override, source: 'THREE_CHROMIUM_EXECUTABLE' };
+  let bundled = null;
+  try { bundled = chromium.executablePath(); } catch { bundled = null; }
+  if (bundled && fs.existsSync(bundled)) return { executablePath: undefined, source: 'bundled' };
+
+  const cacheRoot = process.env.PLAYWRIGHT_BROWSERS_PATH
+    || (process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library/Caches/ms-playwright')
+      : process.platform === 'win32'
+        ? path.join(os.homedir(), 'AppData/Local/ms-playwright')
+        : path.join(os.homedir(), '.cache/ms-playwright'));
+  const relativeFromBundled = bundled
+    ? bundled.split(path.sep).slice(bundled.split(path.sep).findIndex(part => /^chromium-\d+$/.test(part)) + 1)
+    : null;
+  const revisions = (() => {
+    try {
+      return fs.readdirSync(cacheRoot)
+        .filter(name => /^chromium-\d+$/.test(name))
+        .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+    } catch {
+      return [];
+    }
+  })();
+  for (const revision of revisions) {
+    const candidates = [
+      relativeFromBundled?.length ? path.join(cacheRoot, revision, ...relativeFromBundled) : null,
+      path.join(cacheRoot, revision, 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),
+      path.join(cacheRoot, revision, 'chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),
+      path.join(cacheRoot, revision, 'chrome-linux/chrome'),
+      path.join(cacheRoot, revision, 'chrome-linux64/chrome'),
+      path.join(cacheRoot, revision, 'chrome-win/chrome.exe'),
+    ].filter(Boolean);
+    const found = candidates.find(candidate => fs.existsSync(candidate));
+    if (found) return { executablePath: found, source: `cached ${revision}` };
+  }
+  const systemChrome = process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : null;
+  if (systemChrome && fs.existsSync(systemChrome)) return { executablePath: systemChrome, source: 'system Chrome' };
+  return { executablePath: undefined, source: 'bundled (missing: run `npx playwright install chromium`)' };
+}
+
 export function getBrowserRendererInfo(browser) {
   return browserRendererInfo.get(browser) || null;
 }
@@ -83,8 +134,11 @@ export async function launchChromium(options = {}) {
     console.log(
       `[playwright] requested renderer: ${requestedRenderer}; browser: ${headful ? 'headful' : 'headless'}`
     );
+    const executable = resolveChromiumExecutable();
+    if (executable.source !== 'bundled') console.log(`[playwright] chromium: ${executable.source}`);
     browser = await chromium.launch({
       headless: !headful,
+      ...(executable.executablePath ? { executablePath: executable.executablePath } : {}),
       args: [
         ...(!useHardwareGpu ? ['--disable-gpu'] : []),
         '--disable-dev-shm-usage',

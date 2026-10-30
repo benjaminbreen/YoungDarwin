@@ -4532,6 +4532,30 @@ test('Galapagos doves forage, take off, fly, land, and retain authored field ide
   }
 });
 
+test('render audit flags a loaded texture that three will never upload', () => {
+  const THREE = loadModule('node_modules/three/build/three.cjs');
+  const { auditRenderIntegrity } = loadModule('three-game/e2e/renderIntegrity.js');
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  camera.position.set(0, 0, 5);
+  camera.updateMatrixWorld();
+  const image = { width: 4, height: 4, data: new Uint8Array(64) };
+  const stale = new THREE.Texture(image);
+  const fresh = new THREE.Texture(image);
+  fresh.needsUpdate = true;
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ map: stale, name: 'stale-rock' })));
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ map: fresh })));
+  scene.updateMatrixWorld();
+  const gl = { properties: { get: texture => (texture === fresh ? { __webglTexture: {} } : {}) }, info: { programs: [] } };
+  const audit = auditRenderIntegrity({ scene, camera, gl, THREE });
+  assert.equal(audit.ok, false);
+  assert.equal(audit.counts.neverMarked, 1);
+  assert.equal(audit.issues[0].kind, 'texture-never-uploaded');
+  assert.equal(audit.issues[0].material, 'stale-rock');
+  stale.needsUpdate = true;
+  assert.equal(auditRenderIntegrity({ scene, camera, gl, THREE }).counts.neverMarked, 0);
+});
+
 test('fauna yaw damps the short way across ±π and stays wrapped', () => {
   const { dampAngle } = loadModule('three-game/fauna/motion/steering.js');
   let yaw = 3.1;

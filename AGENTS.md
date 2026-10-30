@@ -164,6 +164,11 @@ docs with `npm run docs:generate`.
   `npm run three:screenshot:fast -- --zone=BEAGLE --quality=performance`.
 - Launch flow, controls, HUD actions, specimen examination/collection, or animal
   toolbar behavior: `npm run three:e2e:smoke`.
+- Seeing or trying a gameplay change yourself (walk somewhere, press a key, read
+  the prompt, take a screenshot): `npm run play` — a persistent browser session
+  driven one command at a time, ~1s per step instead of a cold boot. Read
+  `docs/agent-play.md`; `npm run play -- scenario all` runs the saved checks in
+  `scripts/play-scenarios/`.
 - Frame rate, stutter, draw calls, or any claim that a change is cheap or free:
   `npm run perf:lab` (per-frame trace with hitch attribution) and
   `npm run perf:sweep -- --repeat=3` (what each renderer feature costs). Read

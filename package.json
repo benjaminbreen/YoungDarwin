@@ -24,6 +24,7 @@
     "perf:lab": "node scripts/three-perf-lab.mjs",
     "perf:sweep": "node scripts/three-perf-sweep.mjs",
     "look": "node scripts/three-look.mjs",
+    "play": "node scripts/play.mjs",
     "three:perf": "node scripts/three-perf-probe.mjs",
     "three:cost": "node scripts/three-scene-cost-probe.mjs",
     "three:animation-smoke": "node scripts/three-animation-smoke.mjs",

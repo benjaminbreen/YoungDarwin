@@ -1,0 +1,6 @@
+[
+  ["walkto", "syms"],
+  ["expect", "api.getPrompt().contextPrompt?.label", { "match": "Syms" }],
+  ["walk", 1, 0, 800],
+  ["expect", "api.getMotionState().jumpPhase", { "equals": "grounded" }]
+]

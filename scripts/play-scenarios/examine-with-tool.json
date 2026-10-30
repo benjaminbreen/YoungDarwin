@@ -1,0 +1,10 @@
+[
+  ["tool", "hammer"],
+  ["walkto", "post-office-bay-basalt-32", { "radius": 1.6 }],
+  ["expect", "api.getPrompt().fieldAction?.label", { "match": "^Examine " }],
+  ["examine"],
+  ["expect", "api.getState().examineSession?.name", { "match": "basalt" }],
+  ["close"],
+  ["wait", 500],
+  ["expect", "api.getState().examineSession", { "equals": "null" }]
+]

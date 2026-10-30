@@ -48,7 +48,7 @@ export function buildUrl(options = {}) {
 // exactly that case, and the resulting numbers look like a catastrophic
 // regression rather than a throttled tab. These flags keep the render loop
 // running at full rate regardless of what is on top of the window.
-const NO_THROTTLE_ARGS = [
+export const NO_THROTTLE_ARGS = [
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',

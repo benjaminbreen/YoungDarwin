@@ -117,6 +117,16 @@ export function ThreeLaunchShell({ initialModeId = null }) {
     setSaveStateKnown(true);
   }, []);
 
+  // `?e2e&autostart=darwin` skips the menu for automated runs (the play
+  // daemon, perf lab, smoke tests). Gated on a test mode so a shared link
+  // cannot silently discard someone's menu.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const testMode = params.has('e2e') || params.has('screenshot') || params.has('testMode');
+    const modeId = params.get('autostart') || 'darwin';
+    if (testMode && params.has('autostart') && DEEP_LINKABLE_MODE_IDS.has(modeId)) setRuntimeModeId(modeId);
+  }, []);
+
   useEffect(() => {
     setInteractiveReady(true);
     setQuality(readQualityPreference());

@@ -1,0 +1,10 @@
+[
+  ["tool", "insect_net"],
+  ["near", "unexamined", 0.9],
+  ["wait", 400],
+  ["expect", "api.getPrompt().fieldAction?.kind", { "equals": "observe" }],
+  ["examine"],
+  ["expect", "api.getState().examineSession?.name", { "match": "\\w" }],
+  ["expect", "api.getState().examineSession.facts.length > 0"],
+  ["close"]
+]

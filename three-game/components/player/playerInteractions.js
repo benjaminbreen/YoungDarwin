@@ -7,7 +7,7 @@ import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMa
 import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
 import { useThreeGameStore } from '../../store';
 import { triggerToolUse } from '../../input/touchControls';
-import { ACTION_DURATION } from './playerConfig';
+import { ACTION_DURATION, CONTROL_INTERRUPTIBLE_ACTIONS } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
@@ -646,7 +646,14 @@ export function updatePlayerInteractions({
   const examinePressed = examineHeld;
   if (constraintLocksInteractions && examinePressed && !lastExamineRef.current) {
     useThreeGameStore.getState().reportConstraintBlockedAction?.();
-  } else if (allowSpecimenInteractions && examinePressed && !lastExamineRef.current && !stateRef.current.action) {
+  } else if (
+    allowSpecimenInteractions
+    && examinePressed
+    && !lastExamineRef.current
+    // A stop or idle flourish that began this same frame must not eat the
+    // press: E tapped as W is released landed on stopWalking and vanished.
+    && (!stateRef.current.action || CONTROL_INTERRUPTIBLE_ACTIONS.has(stateRef.current.action))
+  ) {
     const currentState = useThreeGameStore.getState();
     if (currentState.contextPrompt?.keyLabel === 'E') {
       currentState.acknowledgeContextPrompt?.(currentState.contextPrompt.source);

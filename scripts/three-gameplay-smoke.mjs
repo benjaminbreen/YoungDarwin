@@ -797,6 +797,13 @@ async function launchMode(page, errors, modeName, { waitForSettledContent = fals
       '[data-desktop-hud][data-entrance-active="true"][data-entrance-stage="4"]'
     ).waitFor({ state: 'visible', timeout: UI_STEP_TIMEOUT_MS });
     console.log(`[three:e2e] ${modeName}: HUD ready`);
+    // A texture that never reaches the GPU renders without any error (the
+    // untextured-basalt bug), so check the visible scene explicitly.
+    const audit = await page.evaluate(() => window.__darwinE2E.renderAudit?.() ?? null);
+    if (audit?.available) {
+      assertCondition(audit.ok, `${modeName}: render integrity audit failed.`, audit);
+      console.log(`[three:e2e] ${modeName}: render audit ok (${audit.counts.texturesChecked} textures, ${audit.counts.visibleMeshes} meshes)`);
+    }
     if (waitForSettledContent) {
       console.log(`[three:e2e] ${modeName} base readiness: ${JSON.stringify(result.readiness || result.state?.readiness || result.state || result)}`);
     }

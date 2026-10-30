@@ -13,6 +13,8 @@ set.
 - Authorial/design intent: `docs/design-intent.md`.
 - Performance measurement and screenshot loop: `docs/perf-lab.md`
   (`npm run perf:lab`, `npm run perf:sweep`, `npm run look`).
+- Playing the game as an agent (move, act, read prompts, screenshot, assert):
+  `docs/agent-play.md` (`npm run play -- start`, then one command per step).
 - Current source-of-truth inventory: `docs/generated/repo-inventory.md`.
 - Regenerate volatile docs with `npm run docs:generate`; verify with
   `npm run docs:check`.

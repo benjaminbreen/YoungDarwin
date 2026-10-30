@@ -1,0 +1,9 @@
+[
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "C_HIGH"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "ASILO_SPRING"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "ALT_POST_OFFICE_BAY"],
+  ["expect", "api.renderAudit().ok"]
+]

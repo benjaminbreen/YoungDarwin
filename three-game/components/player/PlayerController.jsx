@@ -58,6 +58,7 @@ import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
+import { registerPlayerHarnessBridge } from '../../e2e/playerHarnessBridge';
 import {
   cactusSpineInjuryChance,
   findCactusHazardContact,
@@ -852,6 +853,55 @@ export function PlayerController({
     swimConfig.bodySink,
   ]);
 
+  // Harness-only placement: a cut-down spawn that moves the body, zeroes
+  // motion and re-aims the camera behind the new facing, so an automated
+  // check can stand Darwin beside a rock instead of walking a minute to it.
+  useEffect(() => registerPlayerHarnessBridge({
+    getCameraYaw: () => yawRef.current,
+    getMotionState: () => ({
+      action: stateRef.current.action || null,
+      jumpPhase: stateRef.current.jumpPhase || null,
+      speed: stateRef.current.speed || 0,
+      swimming: Boolean(stateRef.current.swimming),
+      sitting: Boolean(stateRef.current.sitting),
+      lying: Boolean(stateRef.current.lying),
+      lockMovementUntil: stateRef.current.lockMovementUntil || 0,
+      actRoute: stateRef.current.actRoute || null,
+    }),
+    setCameraYaw: yaw => {
+      if (Number.isFinite(yaw)) yawRef.current = yaw;
+    },
+    teleport: ({ x, z, y = null, heading = null } = {}) => {
+      if (!group.current || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+      const groundY = Number.isFinite(y) ? y : collisionAdapter.spawnY(x, z);
+      group.current.position.set(x, groundY, z);
+      const headingLength = Math.hypot(heading?.x || 0, heading?.z || 0);
+      if (headingLength > 0.0001) facing.current.set(heading.x / headingLength, 0, heading.z / headingLength);
+      group.current.rotation.y = Math.atan2(facing.current.x, facing.current.z);
+      characterController.sync(frameScratch.spawnSyncPosition.set(x, groundY, z));
+      velocity.current.set(0, 0, 0);
+      spawnDrop.current = { phase: 'complete', zoneId: currentZoneId, landingUntil: 0 };
+      wasAirborne.current = false;
+      stateRef.current.action = null;
+      stateRef.current.jumpPhase = 'grounded';
+      stateRef.current.climbMotion = null;
+      stateRef.current.traverseMotion = null;
+      stateRef.current.rollMotion = null;
+      stateRef.current.turnMotion = null;
+      stateRef.current.lockMovementUntil = 0;
+      stateRef.current.sitting = false;
+      stateRef.current.lying = false;
+      lastGroundedAt.current = performance.now() / 1000;
+      lastPublishedPose.current.x = NaN;
+      setPlayerPose({
+        position: { x, y: groundY, z },
+        facing: { x: facing.current.x, y: 0, z: facing.current.z },
+      });
+      resetCameraForSpawn(groundY, facing.current);
+      return { x, y: groundY, z };
+    },
+  }), [characterController, collisionAdapter, currentZoneId, frameScratch.spawnSyncPosition, resetCameraForSpawn, setPlayerPose, yawRef]);
+
   useFrame((frame, rawDelta) => {
     if (!group.current) return;
     // Clear stale intent first. Frames that reach the character move publish
@@ -1419,7 +1469,10 @@ export function PlayerController({
     if (moving) {
       interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
     }
-    if (climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed) {
+    // The action keys cut short a stop or idle flourish too: E pressed the
+    // moment Darwin halts used to land during stopWalking and be dropped.
+    const actionKeyPressed = Boolean(keys.interact || keys.useTool || touch.interact || touch.fieldAction);
+    if (climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed || actionKeyPressed) {
       interruptAction(CONTROL_INTERRUPTIBLE_ACTIONS);
     }
     // Any movement or control input ends the seated/lying rest pose.
