@@ -381,6 +381,15 @@ const WATER_ZONE_LOOKS = Object.freeze({
     ribbonWashReach: 9.4,
     foamShore: 0.6,
   }),
+  // A cone in open sea: the rock drops to deep water within a few metres, so
+  // the beach-scale wash sheet spread a pale film over water that is several
+  // metres deep a stride from the edge. Keep the swash line, drop the apron.
+  DEVILS_CROWN: Object.freeze({
+    ribbonAlpha: 0.16,
+    ribbonWash: 0.8,
+    ribbonWashReach: 4,
+    foamShore: 0.55,
+  }),
 });
 
 export const waterDev = { ...WATER_DEV_DEFAULTS };

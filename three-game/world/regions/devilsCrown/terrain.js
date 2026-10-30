@@ -118,6 +118,14 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   );
   y = THREE.MathUtils.lerp(y, -1.58 + surfaceNoise(x * 0.12 + 7, z * 0.12 - 4) * 0.08, shelf);
 
+  // The cone stands in open sea: past a narrow apron the flank drops away to
+  // deep water. A shelf at wading depth out to the map edge rendered as one
+  // pale, foam-covered sheet and let the clear water show where the seabed
+  // mesh ends. The landing, the swim channel and the outlying teeth keep their
+  // own floors below.
+  const flank = THREE.MathUtils.smoothstep(devilsCrownCraterField(x, z), 1.12, 1.55) * (1 - land * 0.9);
+  y = THREE.MathUtils.lerp(y, -5.5 + elevationNoise(x * 0.05 + 3, z * 0.05 - 6) * 0.25, flank);
+
   // The approach deliberately crosses swim-depth water before the rim.
   const swimFloor = -2.08 + elevationNoise(x * 0.06 - 4, z * 0.08 + 8) * 0.055;
   y = THREE.MathUtils.lerp(y, swimFloor, channel * (1 - landing * 0.86) * 0.95);
@@ -125,6 +133,9 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   // A small boat/landing slab where Darwin starts, separated from the crater.
   const landingY = -0.02 + landing * 0.42 + elevationNoise(x * 0.16 + 2, z * 0.18 - 3) * 0.09;
   y = THREE.MathUtils.lerp(y, landingY, landing);
+  // The slab sits against the south edge of the map. Shelve it off into deep
+  // water before the terrain mesh ends, or the clear water shows the cut.
+  y = THREE.MathUtils.lerp(y, -5.2, THREE.MathUtils.smoothstep(z, 40.5, 43.5));
 
   // Broken crater rim: low south approach, higher jagged northern crown.
   const northBias = THREE.MathUtils.smoothstep(-z, 7, 32);
@@ -163,7 +174,8 @@ export function devilsCrownHeight(x, z, { movementSurface = false } = {}) {
   y += terrainFineDetail(x, z) * dry * (movementSurface ? 0.08 : 0.16);
   y += elevationNoise(x * 0.045 + 14, z * 0.052 - 7) * Math.max(land, shelf) * 0.12;
 
-  return Math.max(-4.8, y);
+  // Stays inside the water bake's packed height range (HMIN -6).
+  return Math.max(-5.9, y);
 }
 
 export function devilsCrownBiomeAt(x, z, y = devilsCrownHeight(x, z)) {
