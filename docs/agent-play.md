@@ -60,7 +60,7 @@ requestAnimationFrame, so the game crawls and synthetic keys get lost.
 | `errors [all]` | console errors since the last call; other commands report `newConsoleErrors` |
 | `fps [ms]` | frame-time sample (fps, p50, p95, worst) |
 | `wait ms`, `run <file.json>`, `scenario <name|all>` | pause; script of `[command, ...args, {opts}]` rows; saved scenario from a fresh page |
-| `move [drill] [--at=x,z --heading=rad] [--film]` | timed key drill with per-frame motion record (see Movement drills); no name lists them |
+| `move [drill] [--at=x,z --heading=rad --yaw=rad] [--film]` | timed key drill with per-frame motion record (see Movement drills); `--yaw` sets the camera; no name lists them |
 
 Targets (`near`, `face`, `walkto`) accept an exact id from `nearby`, a category
 (`rock`, `specimen`, `unexamined`, `npc`, `obstacle`), a substring of an id,
@@ -76,8 +76,14 @@ kind or name, or `{ "x": .., "z": .. }` through `eval`.
 - `api.getMotionState()`: the player's current action (`stopWalking`,
   `jumpDown`, …), jump phase, speed and E-key route. It also reports `aiming`,
   the shotgun aim state (`aim`, including whether the pointer is locked) and
-  `toolTarget`, the subject a net or hammer swing would land on. An action that is playing
-  swallows input, so check this when a key "does nothing".
+  `toolTarget`, the subject a net or hammer swing would land on (with
+  `perched` for insects), and `netSweep`, the last net sweep (`outcome`
+  `caught`/`missed`/`empty`/`snagged`, the aimed actor, and where the hoop and
+  grip were at the strike). An action that is playing swallows input, so check
+  this when a key "does nothing".
+- `api.clearPropEvents()` then `api.propEvents(type?)`: the recent
+  `tool-swing`, `net-contact`, `net-brush`, `field-action-attempt` and
+  `prop-struck` events (the ones that drive swing, catch and brush sounds).
 - `api.obstacle(id)`: the full runtime obstacle (collider shapes, heights).
 - `api.renderAudit()`: visible materials whose texture is loaded but will never
   upload (`version 0`), in-view textures not yet on the GPU, and failed shader
@@ -112,7 +118,7 @@ start latency, stop time and distance, time locked in an action, a clip
 timeline, and foot slide (how fast a planted toe moves in the world; under
 ~1 m/s reads as planted). `--film` adds a contact sheet from a CDP screencast.
 Start the session with `--params={"modelAnimationDebug":"1"}` or the clip
-columns are empty. Tool drills (`net`, `hammer`, `gunTap`, `gunAim`) equip
+columns are empty. Tool drills (`net`, `netSweep`, `hammer`, `gunTap`, `gunAim`) equip
 the tool first and record when Darwin answers the stick after a swing or shot,
 and whether he is aiming. When a gait clip changes, re-measure its stride speed with
 `node scripts/measure-gait-strides.mjs` and update `STRIDE_SPEED` in
@@ -149,5 +155,10 @@ props), so read them or hand them to a reviewer.
   calm before returning; a raw `api.teleport` does not.
 - **Syms follows you.** Walking into him or pressing E near him opens his
   conversation, which blocks other input. `api.getOverlays()` shows it.
+- **`close` with nothing open opens the pause menu.** A swing after that does
+  nothing and reads as a miss.
+- **Insects move between `near` and the swing.** Re-run `near` until
+  `toolTarget.perched` is true; the net catches whatever is marked, which may
+  be a nearer animal than the one you walked to.
 - **Frame rate here is not a perf measurement.** Use `npm run perf:lab` for
   that; `fps` is for spotting a freeze.
