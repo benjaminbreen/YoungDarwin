@@ -99,6 +99,7 @@ const SEA_STATES = Object.freeze({
   EASTERN_CLIFFS: { swell: 1.7, chop: 1.4, clarity: 15 },
   N_OUTCROP: { swell: 1.7, chop: 1.45, clarity: 17 },
   PUNTA_SUR: { swell: 1.8, chop: 1.45, clarity: 14 },
+  SE_PROMONTORY: { swell: 1.75, chop: 1.45, clarity: 15 },
 });
 
 const resolved = new Map();

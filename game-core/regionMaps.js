@@ -85,6 +85,8 @@ const AUTHORED_REGION_TERRAIN = {
   // The spatter cone and tumuli are broad forms; packed relief and the
   // render-only ropes carry the close pāhoehoe texture.
   S_VOLCANIC: { preset: 'southern-basalt-plains', segments: 248 },
+  // Sheer east and south faces and the sea stacks need the finer grid.
+  SE_PROMONTORY: { preset: 'windy-promontory-sea-cliffs', segments: 288 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 192 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },

@@ -2007,7 +2007,7 @@ export const locations = [
   {
     id: 'SE_PROMONTORY',
     name: 'Windy Promontory',
-    description: 'A high, rocky outcrop.',
+    description: 'A high crown of wind-combed grass and bare lava ledges, ending in sea cliffs above the surf.',
     x: 3,
     y: 3,
     color: 'gray',
@@ -2040,12 +2040,15 @@ export const locations = [
     npcs: [],
     boundaries: { east: 'cliff' },
     discoveries: [
-      'The vantage reveals glimpses of the vast southern seas.'
+      'The vantage reveals glimpses of the vast southern seas.',
+      'Every bush on the crown leans the same way, shorn flat on the side the trade wind comes from.'
     ],
     notableFeatures: [
       'Rugged stone ledges battered by unrelenting winds.',
-      'A precipitous drop leads to a beach far below.',
-      'A majestic sense of isolation among swirling gusts.'
+      'A precipitous drop leads to a small beach far below, out of reach from the top.',
+      'Stacks of lava stand offshore in the surf, streaked white by seabirds.',
+      'Frigatebirds hang almost motionless on the updraft off the east cliff.',
+      'Out of the wind, in the western fold, palo santo and prickly pear take hold.'
     ]
   },
 

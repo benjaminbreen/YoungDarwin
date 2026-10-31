@@ -118,6 +118,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `WATKINS_CREEK` | `highland-creek-fork` | 248 |
 | `LAVA_FLATS` | `authored-lava-flats` | 248 |
 | `S_VOLCANIC` | `southern-basalt-plains` | 248 |
+| `SE_PROMONTORY` | `windy-promontory-sea-cliffs` | 288 |
 | `N_SHORE` | `floreana-north-shore` | 192 |
 | `N_OUTCROP` | `desolate-basalt-outcrop` | 300 |
 | `DEVILS_CROWN` | `devils-crown-crater-islet` | 320 |
@@ -178,6 +179,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `easternCliffs` | `EASTERN_CLIFFS` | `eastern-cliffs` |
 | `lavaFlats` | `LAVA_FLATS` | _none_ |
 | `southernVolcanic` | `S_VOLCANIC` | _none_ |
+| `windyPromontory` | `SE_PROMONTORY` | _none_ |
 | `northernHighlands` | `NORTHERN_HIGHLANDS` | `northern-highlands` |
 | `watkinsCreek` | `WATKINS_CREEK` | `watkins-creek`, `highland-creek-fork` |
 | `puntaSur` | `PUNTA_SUR` | `punta-sur` |
@@ -217,6 +219,7 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `EASTERN_CLIFFS` | `buildEasternCliffsEcology` |
 | `LAVA_FLATS` | `buildLavaFlatsEcology` |
 | `S_VOLCANIC` | `buildSouthernVolcanicEcology` |
+| `SE_PROMONTORY` | `buildWindyPromontoryEcology` |
 | `NORTHERN_HIGHLANDS` | `buildNorthernHighlandsEcology` |
 | `WATKINS_CREEK` | `buildWatkinsCreekEcology` |
 | `PUNTA_SUR` | `buildPuntaSurEcology` |

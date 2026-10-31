@@ -35,6 +35,8 @@ import { LAVA_FLATS_PATH_POINTS } from '../three-game/world/regions/lavaFlats/pa
 import { LAVA_FLATS_SPLAT_BOUNDS } from '../three-game/world/regions/lavaFlats/material.js';
 import { SOUTHERN_VOLCANIC_PATH_POINTS } from '../three-game/world/regions/southernVolcanic/path.js';
 import { SOUTHERN_VOLCANIC_SPLAT_BOUNDS } from '../three-game/world/regions/southernVolcanic/material.js';
+import { WINDY_PROMONTORY_PATH_POINTS } from '../three-game/world/regions/windyPromontory/path.js';
+import { WINDY_PROMONTORY_SPLAT_BOUNDS } from '../three-game/world/regions/windyPromontory/material.js';
 import { PENAL_COLONY_PATHS } from '../three-game/world/regions/penalColony/path.js';
 import { PENAL_COLONY_SPLAT_BOUNDS } from '../three-game/world/regions/penalColony/material.js';
 import { WATKINS_CREEK_PATH_POINTS } from '../three-game/world/regions/watkinsCreek/path.js';
@@ -78,6 +80,11 @@ const RECIPES = {
     pathPoints: SOUTHERN_VOLCANIC_PATH_POINTS,
     bounds: SOUTHERN_VOLCANIC_SPLAT_BOUNDS,
     minimumWidth: 1.2,
+  },
+  'windy-promontory': {
+    pathPoints: WINDY_PROMONTORY_PATH_POINTS,
+    bounds: WINDY_PROMONTORY_SPLAT_BOUNDS,
+    minimumWidth: 1.16,
   },
   'penal-colony': {
     pathPoints: PENAL_COLONY_PATHS,

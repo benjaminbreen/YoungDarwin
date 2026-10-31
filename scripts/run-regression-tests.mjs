@@ -3966,6 +3966,38 @@ test('Beach with Hut south land route stays above water and walkable', () => {
   assert.equal(isWalkableTerrain(spawn.x, spawn.z, 'S_HUT'), true);
 });
 
+test('Basalt Plains and Windy Promontory gateways are dry, walkable and joined by their trails', () => {
+  const gateways = {
+    S_VOLCANIC: ['north', 'east', 'south', 'west'],
+    SE_PROMONTORY: ['north', 'west'],
+  };
+  for (const [regionId, edges] of Object.entries(gateways)) {
+    const spawns = edges.map(edge => regionSpawnPoint(regionId, edge));
+    for (const [index, spawn] of spawns.entries()) {
+      assert.ok(terrainHeight(spawn.x, spawn.z, regionId) > WATER_LEVEL + 0.4, `${regionId} ${edges[index]} gateway is dry`);
+      assert.equal(isWalkableTerrain(spawn.x, spawn.z, regionId), true, `${regionId} ${edges[index]} gateway is walkable`);
+    }
+    // Every gateway is reachable on foot from the first one.
+    const key = (x, z) => `${x},${z}`;
+    const start = [Math.round(spawns[0].x), Math.round(spawns[0].z)];
+    const seen = new Set([key(...start)]);
+    const queue = [start];
+    while (queue.length) {
+      const [x, z] = queue.pop();
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const nz = z + dz;
+        if (seen.has(key(nx, nz)) || !isWalkableTerrain(nx, nz, regionId)) continue;
+        seen.add(key(nx, nz));
+        queue.push([nx, nz]);
+      }
+    }
+    for (const [index, spawn] of spawns.entries()) {
+      assert.ok(seen.has(key(Math.round(spawn.x), Math.round(spawn.z))), `${regionId} ${edges[index]} gateway is reachable`);
+    }
+  }
+});
+
 test('Southeastern Shallow Surf previews its real coastal neighbor only', () => {
   assert.deepEqual(
     getBorderVistas('SE_SHALLOW_SURF').map(vista => [vista.edge, vista.toRegionId]),

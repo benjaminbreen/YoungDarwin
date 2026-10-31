@@ -17,6 +17,11 @@ import {
 import { BLACK_BEACH_SURF } from './regions/blackBeachSurf/terrain';
 import { southeasternCoastShoreX } from './regions/southeasternCoast/path';
 import { SHALLOW_SURF } from './regions/shallowSurf/terrain';
+import {
+  WINDY_PROMONTORY,
+  windyPromontoryEastCoastX,
+  windyPromontorySouthCoastZ,
+} from './regions/windyPromontory/path';
 
 // Region-owned open-coast surf. The shared ocean stays calm unless a zone is
 // present here. Impact anchors sit just seaward of the analytic cliff face;
@@ -465,6 +470,41 @@ const SHALLOW_SURF_PROFILE = Object.freeze({
   })),
 });
 
+// The trade-wind swell runs straight onto the promontory's east face and
+// wraps into the south; the cove is in the lee and stays gentle.
+const WINDY_PROMONTORY_PROFILE = Object.freeze({
+  id: 'windy-promontory-windward-surf',
+  swell: 0.96,
+  period: 11.7647058824,
+  approachDistance: 10,
+  sprayMultiplier: 1.5,
+  sprayCount: 120,
+  mistCount: 38,
+  buffetStrength: 0.92,
+  anchors: Object.freeze([
+    ...eastFaceAnchors({
+      idPrefix: 'windy-promontory-east-impact',
+      zMin: -42,
+      zMax: 26,
+      spacing: 5.2,
+      coastX: windyPromontoryEastCoastX,
+      phaseOffset: 0.14,
+      salt: 41.3,
+      height: 6.2,
+    }),
+    ...southFaceAnchors({
+      idPrefix: 'windy-promontory-south-impact',
+      xMin: -2,
+      xMax: 26,
+      spacing: 5.4,
+      coastZ: windyPromontorySouthCoastZ,
+      phaseOffset: 0.31,
+      salt: 43.9,
+      height: 4.6,
+    }),
+  ]),
+});
+
 const PROFILES = Object.freeze({
   EASTERN_CLIFFS: EASTERN_CLIFFS_PROFILE,
   EL_MIRADOR: EL_MIRADOR_PROFILE,
@@ -476,6 +516,7 @@ const PROFILES = Object.freeze({
   [BLACK_BEACH_SURF]: BLACK_BEACH_SURF_PROFILE,
   SE_COAST: SOUTHEASTERN_COAST_PROFILE,
   [SHALLOW_SURF]: SHALLOW_SURF_PROFILE,
+  [WINDY_PROMONTORY]: WINDY_PROMONTORY_PROFILE,
 });
 
 export function getCliffSurfProfile(zoneId) {

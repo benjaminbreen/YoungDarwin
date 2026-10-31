@@ -32,6 +32,7 @@ import { buildEasternCliffsEcology } from './easternCliffs';
 import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
 import { buildSouthernVolcanicEcology } from './southernVolcanic';
+import { buildWindyPromontoryEcology } from './windyPromontory';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
 import { buildWatkinsCreekEcology } from './watkinsCreek';
 import { buildPuntaSurEcology } from './puntaSur';
@@ -74,6 +75,7 @@ const builders = {
   EASTERN_CLIFFS: buildEasternCliffsEcology,
   LAVA_FLATS: buildLavaFlatsEcology,
   S_VOLCANIC: buildSouthernVolcanicEcology,
+  SE_PROMONTORY: buildWindyPromontoryEcology,
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
   WATKINS_CREEK: buildWatkinsCreekEcology,
   PUNTA_SUR: buildPuntaSurEcology,

@@ -71,6 +71,15 @@ function rockContactShadow(rock) {
   };
 }
 
+// The rock material reads vertex colours (carved, damaged rocks paint their
+// fresh fracture into them), so every base geometry needs a colour attribute.
+// Without one WebGL supplies black and the per-instance tint never shows.
+function withWhiteVertexColors(geo) {
+  const colors = new Float32Array(geo.attributes.position.count * 3).fill(1);
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geo;
+}
+
 function makeCraggyRockGeometry(seed) {
   const geo = new THREE.IcosahedronGeometry(1, 3);
   const position = geo.attributes.position;
@@ -83,7 +92,7 @@ function makeCraggyRockGeometry(seed) {
     position.setXYZ(i, v.x, v.y, v.z);
   }
   geo.computeVertexNormals();
-  return geo;
+  return withWhiteVertexColors(geo);
 }
 
 // Boulder-scale rocks get their own denser geometry: the unit-scale crag noise
@@ -104,7 +113,7 @@ function makeHeroCraggyRockGeometry(seed) {
     position.setXYZ(i, v.x, v.y, v.z);
   }
   geo.computeVertexNormals();
-  return geo;
+  return withWhiteVertexColors(geo);
 }
 
 // Geometry pool indices: 0-2 standard crag variants, 3-4 hero variants.
