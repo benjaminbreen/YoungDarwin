@@ -767,7 +767,7 @@ export function SpecimenActor({ specimen }) {
     const behaviorMode = behaviorDebug.mode || '';
     const behaviorPaused = isCarried || isUnderExamination || Boolean(downedInfo);
     const proceduralMoving = !behaviorPaused && behaviorDebug.moving === true;
-    const proceduralRunning = proceduralMoving && (behaviorDebug.panic || 0) > 0.18;
+    const proceduralRunning = proceduralMoving && ((behaviorDebug.panic || 0) > 0.18 || behaviorDebug.running === true);
     const proceduralFlying = !behaviorPaused && faunaBehavior.airborneRef?.current === true;
     const owlBehavior = behaviorProfile?.controller === 'owl';
     const racerBehavior = behaviorProfile?.controller === 'racer';
@@ -793,7 +793,9 @@ export function SpecimenActor({ specimen }) {
           ? (isCarried
             ? 'carried'
             : (isUnderExamination ? 'tongueTaste' : racerActions[behaviorMode] || animationClip || 'baskCoil'))
-          : (!behaviorPaused && /doze|sleep/i.test(animationClip)
+          : (!behaviorPaused && /^animal/.test(behaviorDebug.behaviorAction || '')
+            ? behaviorDebug.behaviorAction
+            : !behaviorPaused && /doze|sleep/i.test(animationClip)
             ? 'animalSleep'
             : (!behaviorPaused && /feed|eat|peck|browse/i.test(animationClip) ? 'animalEat' : null))),
       flying: proceduralFlying,

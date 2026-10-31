@@ -81,6 +81,8 @@ import { restFlavor } from './restFlavor';
 import { sameFieldAction } from './fieldActions';
 import { createShotgunActions } from './storeSlices/shotgunSlice';
 import { createWarinessActions } from './storeSlices/warinessSlice';
+import { createObservationActions } from './storeSlices/observationSlice';
+import { sanitizeFieldObservations } from './fauna/behavior/fieldObservations';
 import { sanitizeWildlifeWariness } from './wildlife/wariness';
 import { createNpcActions } from './storeSlices/npcSlice';
 import { createLibraryActions } from './storeSlices/librarySlice';
@@ -181,6 +183,7 @@ export const useThreeGameStore = create((set, get) => ({
       : initial.journal;
     patch.bookLastPages = snapshot.bookLastPages || initial.bookLastPages;
     patch.fieldMeasurements = sanitizeFieldMeasurements(snapshot.fieldMeasurements);
+    patch.fieldObservations = sanitizeFieldObservations(snapshot.fieldObservations);
     patch.assessmentPlayerTranscript = sanitizeAssessmentTranscript(snapshot.assessmentPlayerTranscript);
     patch.npcEncounterState = {
       ...initial.npcEncounterState,
@@ -481,6 +484,7 @@ export const useThreeGameStore = create((set, get) => ({
   shotgunReloadUntil: 0,
   ...createShotgunActions(set, get),
   ...createWarinessActions(set, get),
+  ...createObservationActions(set, get),
 
   setToolbarSlot: (slotIndex, toolId) => set(state => {
     if (state.playableModeId !== 'darwin') return {};

@@ -220,6 +220,9 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
     const playerDist = Number.isFinite(input.playerDist) ? input.playerDist : Infinity;
     const downed = Boolean(input.downed);
     const held = Boolean(input.held);
+    // Behaviour requests from the fauna brain: 'pushup', 'bask', 'shelter',
+    // 'snap'. They override the rig's own idle scheduling.
+    const request = input.behavior || null;
 
     // --- downed: everything drains into a slack carcass pose -----------------
     state.slack = damp(state.slack, downed ? 1 : 0, downed ? 9 : 4, dt);
@@ -256,11 +259,11 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
 
     // --- basking ------------------------------------------------------------------
     state.idleTime = moving || downed || held ? 0 : state.idleTime + dt;
-    const wantsBask = !downed && !held
-      && state.idleTime > config.bask.after
+    const wantsBask = !downed && !held && request !== 'shelter' && (request === 'bask' || (
+      state.idleTime > config.bask.after
       && playerDist > config.bask.playerRange
       && (input.daylight ?? 1) > config.bask.minDaylight
-      && (input.rain ?? 0) < config.bask.maxRain;
+      && (input.rain ?? 0) < config.bask.maxRain));
     state.baskBlend = damp(state.baskBlend, wantsBask ? 1 : 0, wantsBask ? config.bask.blendRate : 4, dt);
     const bask = state.baskBlend;
 
@@ -268,7 +271,14 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
     let pump = 0;
     let pushupBlend = 0;
     if (!downed && !held) {
-      if (!state.pushup && !moving && bask < 0.4 && playerDist < config.pushup.range) {
+      if (!state.pushup && !moving && request === 'pushup') {
+        // A display aimed at a rival (or at Darwin) starts at once and runs
+        // a full set.
+        const pumps = Math.round(range(config.pushup.pumpsMax, config.pushup.pumpsMax + 3));
+        state.pushup = { t: 0, duration: pumps / config.pushup.rate };
+        state.nextPushupAt = range(config.pushup.minGap, config.pushup.maxGap);
+      }
+      if (!state.pushup && !moving && bask < 0.4 && playerDist < config.pushup.range && !request) {
         state.nextPushupAt -= dt;
         if (state.nextPushupAt <= 0) {
           const pumps = Math.round(range(config.pushup.pumpsMin, config.pushup.pumpsMax));
@@ -339,6 +349,12 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
       if (state.tongueT < 0) {
         const nearScale = playerDist < config.tongueNearRange ? config.tongueNearScale : 1;
         state.nextTongueAt -= dt / nearScale;
+        if (request === 'snap' && state.cockT < 0) {
+          // A snap at a fly: the head jerks aside and the tongue flicks.
+          state.cockT = 0;
+          state.cockDir = rng() < 0.5 ? -1 : 1;
+          state.nextTongueAt = 0;
+        }
         if (state.nextTongueAt <= 0 && !state.pushup) {
           state.tongueT = 0;
           state.nextTongueAt = range(config.tongueMin, config.tongueMax);
@@ -353,8 +369,8 @@ export function createReptileAnimator({ nodes, config: overrides = {}, seed = 'r
     // --- head look-at ------------------------------------------------------------------------------
     let lookYawTarget = 0;
     let lookPitchTarget = 0;
-    const local = input.playerLocal;
-    if (!downed && local && playerDist < config.look.range && move < 0.55) {
+    const local = input.focusLocal || input.playerLocal;
+    if (!downed && local && (input.focusLocal || playerDist < config.look.range) && move < 0.55) {
       const horiz = Math.hypot(local.x, local.z);
       if (horiz > 0.05) {
         // Rig forward is -z; positive yaw turns the nose toward +x targets.

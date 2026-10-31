@@ -7513,6 +7513,202 @@ test('the net decides an insect catch where hands mostly fail', () => {
   assert.equal(evaluateCollectionAttempt({ specimen: sulphur, method: 'insect_net', assured: true, gameTime: 600 }).success, true);
 });
 
+const behaviorBrainModule = loadModule('three-game/fauna/behavior/behaviorBrain.js');
+const socialFieldModule = loadModule('three-game/fauna/behavior/socialField.js');
+const repertoireModule = loadModule('three-game/fauna/behavior/repertoires.js');
+const witnessModule = loadModule('three-game/fauna/behavior/observationWitness.js');
+const fieldObservationsModule = loadModule('three-game/fauna/behavior/fieldObservations.js');
+const specimenRuntimeModule = loadModule('three-game/world/specimenRuntime.js');
+
+function brainContext(zoneId, position, t, overrides = {}) {
+  return {
+    zoneId,
+    t,
+    dt: 0.1,
+    hour: 10,
+    self: { x: position.x, y: 0, z: position.z },
+    base: { x: position.x, z: position.z },
+    habitatRadius: 4,
+    bodyRadius: 0.2,
+    panic: 0,
+    busy: false,
+    player: null,
+    playerSpeed: 0,
+    playerDistance: Infinity,
+    tame: true,
+    ...overrides,
+  };
+}
+
+test('a finch presenting itself raises a tortoise, and the raised tortoise draws other finches to glean', () => {
+  const zone = 'TEST_TORTOISE_CLEANING';
+  const make = (speciesId, actorId) => behaviorBrainModule.createBehaviorBrain({
+    speciesId, actorId, seed: 0.37, profile: { walkSpeed: 0.3, fleeSpeed: 2 }, zoneId: zone,
+  });
+  const tortoise = make('floreanagianttortoise', 'tortoise-1');
+  const finch = make('mediumgroundfinch', 'finch-1');
+  const gleaner = make('mediumgroundfinch', 'finch-2');
+  const at = { tortoise: { x: 0, z: 0 }, finch: { x: 0.8, z: 0 }, gleaner: { x: 1.8, z: 0.4 } };
+  let t = 100;
+  tortoise.step(brainContext(zone, at.tortoise, t));
+  finch.force('presentToTortoise');
+  finch.step(brainContext(zone, at.finch, (t += 0.1)));
+  assert.equal(finch.current()?.def.id, 'presentToTortoise');
+  assert.equal(finch.current()?.phase, 'act', 'already within reach: the finch hops about in front of it');
+  tortoise.step(brainContext(zone, at.tortoise, (t += 0.1)));
+  assert.equal(tortoise.current()?.def.id, 'riseForCleaning', 'the tortoise answers by rising');
+  tortoise.step(brainContext(zone, at.tortoise, (t += 0.1)));
+  assert.equal(socialFieldModule.getSocialEntry(zone, 'tortoise-1').solicit, true, 'its raised posture is visible to others');
+  gleaner.force('gleanTortoise');
+  const intent = gleaner.step(brainContext(zone, at.gleaner, (t += 0.1)));
+  assert.equal(gleaner.current()?.def.id, 'gleanTortoise');
+  assert.equal(gleaner.current()?.partnerId, 'tortoise-1');
+  assert.equal(intent.moving, true, 'it goes to the tortoise');
+});
+
+test('a hunting predator sets off one alarm call that the whole flock hears', () => {
+  const zone = 'TEST_ALARM';
+  const make = actorId => behaviorBrainModule.createBehaviorBrain({
+    speciesId: 'mediumgroundfinch', actorId, seed: 0.61, profile: { walkSpeed: 0.3, fleeSpeed: 2 }, zoneId: zone,
+  });
+  const caller = make('alarm-finch-1');
+  const neighbour = make('alarm-finch-2');
+  const t = 200;
+  neighbour.step(brainContext(zone, { x: 2, z: 0 }, t));
+  // A coiled, basking racer is watched, not fled.
+  socialFieldModule.publishSocial(zone, 'racer-1', { speciesId: 'galapagosracer', x: 1, z: 1, activity: 'bask' }, t);
+  caller.step(brainContext(zone, { x: 0, z: 0 }, t + 0.5));
+  assert.notEqual(caller.current()?.def.id, 'alarmCall');
+  socialFieldModule.publishSocial(zone, 'racer-1', { speciesId: 'galapagosracer', x: 1, z: 1, activity: 'hunt' }, t + 1);
+  caller.step(brainContext(zone, { x: 0, z: 0 }, t + 1.1));
+  assert.equal(caller.current()?.def.id, 'alarmCall');
+  assert.equal(caller.current()?.partnerSpeciesId, 'galapagosracer');
+  const heard = specimenRuntimeModule.consumeSpecimenStimuli(zone, 'alarm-finch-2');
+  assert.equal(heard.length, 1, 'the neighbour is frightened by the call');
+  assert.equal(heard[0].source, 'alarm');
+  // The neighbour sees the same snake but does not call again over the first.
+  neighbour.step(brainContext(zone, { x: 2, z: 0 }, t + 1.6));
+  assert.notEqual(neighbour.current()?.def.id, 'alarmCall');
+});
+
+test('mockingbirds mob a hunting snake together, then leave it be', () => {
+  const zone = 'TEST_MOB';
+  const make = actorId => behaviorBrainModule.createBehaviorBrain({
+    speciesId: 'floreanamockingbird', actorId, seed: 0.44, profile: { walkSpeed: 0.4, fleeSpeed: 2 }, zoneId: zone,
+  });
+  const birds = [make('mob-1'), make('mob-2'), make('mob-3')];
+  const at = [{ x: 0, z: 0 }, { x: 3, z: 0 }, { x: 0, z: 3 }];
+  let t = 400;
+  birds.forEach((bird, index) => bird.step(brainContext(zone, at[index], t, { hour: 3 })));
+  const tick = () => {
+    t += 0.1;
+    socialFieldModule.publishSocial(zone, 'mob-racer', { speciesId: 'galapagosracer', x: 1, z: 1, activity: 'hunt' }, t);
+    birds.forEach((bird, index) => bird.step(brainContext(zone, at[index], t, { hour: 3 })));
+  };
+  for (let i = 0; i < 12; i += 1) tick();
+  const mobbing = () => birds.filter(bird => bird.current()?.def.id === 'mobPredator').length;
+  assert.equal(mobbing(), 3, `the first to see it calls the others in: ${birds.map(bird => `${bird.current()?.def.id}/${bird.current()?.kind}`)}`);
+  for (let i = 0; i < 150; i += 1) tick();
+  assert.equal(mobbing(), 0, `and they do not keep calling one another back: ${birds.map(bird => `${bird.current()?.def.id}/${bird.current()?.kind}/${bird.current()?.phase}`)}`);
+});
+
+test('keeping still near an animal lowers its alarm distances', () => {
+  const brain = behaviorBrainModule.createBehaviorBrain({
+    speciesId: 'floreanamockingbird', actorId: 'habituate-1', seed: 0.2, profile: { walkSpeed: 0.4, fleeSpeed: 2 }, zoneId: 'TEST_HABITUATE',
+  });
+  assert.equal(brain.tolerance(), 1);
+  for (let i = 0; i < 200; i += 1) {
+    brain.step(brainContext('TEST_HABITUATE', { x: 0, z: 0 }, 300 + i * 0.1, {
+      player: { x: 4, z: 0 }, playerDistance: 4, playerSpeed: 0, hour: 3,
+    }));
+  }
+  assert.ok(brain.tolerance() < 0.7, `tolerance ${brain.tolerance()}`);
+  // A few seconds of running about undoes it.
+  for (let i = 0; i < 30; i += 1) {
+    brain.step(brainContext('TEST_HABITUATE', { x: 0, z: 0 }, 330 + i * 0.1, { player: { x: 4, z: 0 }, playerDistance: 4, playerSpeed: 4, hour: 3 }));
+  }
+  assert.ok(brain.tolerance() > 0.9, `running about undoes it (${brain.tolerance()})`);
+});
+
+test('a behaviour counts as observed only when watched in view, in range and keeping still', () => {
+  const witness = witnessModule.createObservationWitness();
+  const episode = { id: 'ep-a', speciesId: 'mediumgroundfinch', behaviorId: 'preen', x: 0, z: 6 };
+  const player = { x: 0, y: 0, z: 0 };
+  const run = (view, playerSpeed, seconds) => {
+    let done = [];
+    for (let elapsed = 0; elapsed < seconds; elapsed += 0.2) {
+      done = done.concat(witness.tick({ episodes: [episode], player, view, playerSpeed, dt: 0.2 }).done);
+    }
+    return done;
+  };
+  assert.equal(run({ x: 1, z: 0 }, 0, 5).length, 0, 'looking away');
+  assert.equal(run({ x: 0, z: 1 }, 1.5, 5).length, 0, 'walking');
+  const moving = witness.tick({ episodes: [episode], player, view: { x: 0, z: 1 }, playerSpeed: 1.5, dt: 0.2 });
+  assert.equal(moving.focus?.still, false, 'the HUD can say to keep still');
+  assert.equal(run({ x: 0, z: 1 }, 0, 3).length, 1, 'watched through');
+  assert.equal(run({ x: 0, z: 1 }, 0, 3).length, 0, 'once per episode');
+  const far = { ...episode, id: 'ep-b', z: 30 };
+  assert.equal(witness.tick({ episodes: [far], player, view: { x: 0, z: 1 }, dt: 5 }).done.length, 0, 'too far to make out');
+  assert.ok(witnessModule.watchRangeFor('floreanagianttortoise') > witnessModule.watchRangeFor('lavalizard'));
+  assert.ok(witnessModule.watchRangeFor('mediumgroundfinch', 0) < witnessModule.watchRangeFor('mediumgroundfinch', 1));
+});
+
+test('watched behaviour becomes notebook evidence, the directive and assessment credit', () => {
+  const episode = {
+    actorId: 'NORTHERN_HIGHLANDS:finch-1', speciesId: 'mediumgroundfinch', behaviorId: 'gleanTortoise',
+    partnerSpeciesId: 'floreanagianttortoise', zoneId: 'NORTHERN_HIGHLANDS',
+  };
+  const record = fieldObservationsModule.buildObservationRecord(episode, { location: 'Northern Highlands', day: 1, hour: 9.5, minutes: 570 });
+  assert.equal(record.habitat, 'highland');
+  const note = fieldObservationsModule.observationNote(record);
+  assert.match(note, /medium ground finch/);
+  assert.doesNotMatch(note, /\{/);
+  assert.equal(fieldObservationsModule.isRepeatObservation([record], { ...record, minutes: 600 }), true);
+  assert.equal(fieldObservationsModule.isRepeatObservation([record], { ...record, minutes: 700 }), false);
+  const lizardDisplay = fieldObservationsModule.observationNote({ speciesId: 'lavalizard', behaviorId: 'pushupDisplay', partnerSpeciesId: 'darwin' });
+  assert.match(lizardDisplay, /facing me/);
+  const records = [
+    record,
+    { ...record, actorId: 'finch-2', minutes: 900, hour: 15, zoneId: 'C_HIGH', location: 'Central Highlands' },
+    fieldObservationsModule.buildObservationRecord({ actorId: 'lizard-1', speciesId: 'lavalizard', behaviorId: 'bask', zoneId: 'LAVA_FLATS' }, { hour: 8, minutes: 480 }),
+  ];
+  const [finchSummary] = fieldObservationsModule.summarizeObservations(records);
+  assert.equal(finchSummary.seen[0].count, 2);
+  assert.equal(finchSummary.seen[0].individuals, 2);
+  assert.ok(finchSummary.knownCount >= 8);
+  const stats = fieldObservationsModule.observationStats(records);
+  assert.deepEqual([stats.behaviors, stats.interactions, stats.patterned], [2, 1, 1]);
+  assert.equal(fieldObservationsModule.sanitizeFieldObservations([...records, { junk: true }]).length, 3);
+
+  const watchHabits = DIRECTIVES.find(entry => entry.id === 'watch-habits');
+  assert.equal(watchHabits.isDone({ fieldObservations: [records[2]] }), false, 'a lizard basking alone is not an interaction');
+  assert.equal(watchHabits.isDone({ fieldObservations: records }), true);
+
+  const base = { currentZoneId: 'POST_OFFICE_BAY', visitedZoneIds: ['POST_OFFICE_BAY'], examinedTypeIds: ['mediumgroundfinch'], journal: [], inventory: [] };
+  const score = state => evaluateFinalAssessment(state).categories.find(category => category.id === 'observation').score;
+  assert.ok(score({ ...base, fieldObservations: records }) > score(base));
+});
+
+test('every repertoire behaviour is well formed and every response has a reaction', () => {
+  const moves = new Set(['stay', 'toPlant', 'approach', 'chase', 'retreat', 'follow', 'shade', 'stalk']);
+  for (const [speciesId, repertoire] of Object.entries(repertoireModule.REPERTOIRES)) {
+    for (const def of [...repertoire.behaviors, ...repertoire.reactions]) {
+      const where = `${speciesId}.${def.id}`;
+      assert.ok(moves.has(def.move), `${where} move ${def.move}`);
+      assert.ok(Array.isArray(def.duration) && def.duration[0] <= def.duration[1], `${where} duration`);
+      if (def.note) {
+        const rendered = fieldObservationsModule.observationNote({ speciesId, behaviorId: def.id, partnerSpeciesId: 'mediumgroundfinch' });
+        assert.doesNotMatch(rendered, /\{/, `${where} note placeholders`);
+      }
+      if (def.record !== false) assert.ok(def.note, `${where} recordable without a note`);
+    }
+    for (const def of repertoire.behaviors) assert.ok(Array.isArray(def.hours), `${speciesId}.${def.id} hours`);
+    for (const reactionId of Object.values(repertoire.responses || {})) {
+      assert.ok(repertoireModule.findBehavior(speciesId, reactionId), `${speciesId} response ${reactionId}`);
+    }
+  }
+});
+
 let failed = false;
 
 for (const { name, fn } of tests) {

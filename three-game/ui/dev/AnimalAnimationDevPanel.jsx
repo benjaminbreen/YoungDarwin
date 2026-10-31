@@ -77,7 +77,24 @@ const PROCEDURAL_BIRD_MODES = [
   'walk',
   'run',
   'flight',
+  // Behaviour-brain poses (fauna/behavior/repertoires.js).
+  'crack seed',
+  'preen',
+  'sing',
+  'dust bathe',
+  'inspect',
+  'wing display',
 ];
+
+const BEHAVIOR_ACTIONS = {
+  'crack seed': 'animalCrack',
+  preen: 'animalPreen',
+  sing: 'animalSing',
+  'dust bathe': 'animalBathe',
+  inspect: 'animalAlert',
+  'wing display': 'animalDisplay',
+  rise: 'animalRise',
+};
 
 const PROCEDURAL_DOVE_MODES = [
   'head tilt',
@@ -583,9 +600,9 @@ function ProceduralBirdPreview({ animal, mode, paused, timeScale }) {
       flightBank: mode === 'soar' ? Math.sin(clock.elapsedTime * 0.7) * 0.18 : 0,
       owlHover: hover,
       owlPounce: mode === 'prey pounce',
-      action: mode === 'day roost'
+      action: BEHAVIOR_ACTIONS[mode] || (mode === 'day roost'
         ? 'animalSleep'
-        : mode === 'forage' || mode === 'ground forage' ? 'animalEat' : null,
+        : mode === 'forage' || mode === 'ground forage' ? 'animalEat' : null),
       timeScale: paused ? 0 : timeScale,
     };
   });

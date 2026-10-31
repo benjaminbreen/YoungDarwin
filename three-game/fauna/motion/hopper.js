@@ -85,7 +85,11 @@ export function createHopperMotion(ctx) {
     const radiusZ = Math.max(1.0, habitat.radiusZ || profile.habitatRadiusZ || 2.6);
     const hopMin = profile.hopMinDistance || 0.55;
     const hopMax = (profile.hopMaxDistance || 1.45) * (threatened ? (profile.escapeHopMultiplier || 1.55) : 1);
-    const away = vectors.away.set(state.position.x - player.x, state.position.z - player.z);
+    // Leap away from whatever frightened it: a lizard's rush or a bird's
+    // dash as much as Darwin's boots.
+    const away = threatened
+      ? ctx.threats.dominantFleeDirection(vectors.away)
+      : vectors.away.set(state.position.x - player.x, state.position.z - player.z);
     if (away.lengthSq() < 0.0001) away.set(Math.cos(seed * 19.1), Math.sin(seed * 23.7));
     away.normalize();
 

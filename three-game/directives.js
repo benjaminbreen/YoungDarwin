@@ -134,6 +134,13 @@ export const DIRECTIVES = [
     isDone: state => playerNotes(state).some(entry => entry.specimenId),
   },
   {
+    id: 'watch-habits',
+    text: 'Watch two animals deal with one another',
+    hint: 'Keep still near animals and watch: a display, a chase, finches at a tortoise. The journal\'s Behaviour tab keeps what you saw.',
+    detail: 'A specimen in the case tells you what an animal is; watching it tells you how it lives. Stand still where animals are about, keep them in view, and let them get on with it. What they do to each other is the part a skin cannot show.',
+    isDone: state => (state.fieldObservations || []).some(record => record.partnerSpeciesId && record.partnerSpeciesId !== 'darwin'),
+  },
+  {
     id: 'two-landings',
     text: 'Record the same creature at two different landings',
     hint: 'Measure it in the examine view at each place; the journal\'s Measures tab sets the landings side by side.',

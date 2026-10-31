@@ -89,6 +89,18 @@ kind or name, or `{ "x": .., "z": .. }` through `eval`.
   upload (`version 0`), in-view textures not yet on the GPU, and failed shader
   programs. The gameplay smoke test asserts it after boot.
 - `api.waitForSettled(ms)`, `api.setCameraYaw(rad)`, `api.setTimeOfDay(h)`.
+- `api.animals()`: every animal in the zone's social field (actorId, species,
+  activity, x/z, size, `alarmed`, `solicit`).
+- `api.behaviorBrain(actorId)`: that animal's current behaviour and phase,
+  partner, drives, and how long Darwin has kept still near it (`tolerance`
+  below 1 means it has settled to him). Brains live in
+  `three-game/fauna/behavior/`; repertoires per species are in `repertoires.js`.
+- `api.forceBehavior(actorId, behaviorId)`: start a behaviour on the next step,
+  ignoring hours and cooldowns (a partner must still be present).
+- `api.behaviorEpisodes()`: the open episodes that can be watched. Standing
+  still facing one within range for its `watch` seconds records it in
+  `fieldObservations` (Notebook, Behaviour tab); `api.store('watchFocus')` is
+  what the HUD indicator shows.
 
 ## Scenarios
 

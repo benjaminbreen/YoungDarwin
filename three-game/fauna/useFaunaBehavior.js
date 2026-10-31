@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useThreeGameStore } from '../store';
+import { getRuntimePlayerMotion, useThreeGameStore } from '../store';
 import { getFaunaBehaviorProfile } from './faunaBehaviorProfiles';
 import { createFaunaMotionController, habitatFor, seedFromKey, specimenSeedKey } from './faunaMotionController';
 import { specimenCollisionRadius } from './specimenCollision';
@@ -12,6 +12,7 @@ import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 import { faunaDebugEnabled } from '../runtimeDebug';
 import { gameClockMinutes } from '../narrator/narratorEvents';
 import { WARINESS, warinessFor, warinessRadiusScale } from '../wildlife/wariness';
+import { removeSocial } from './behavior/socialField';
 
 const MAX_FAUNA_SIMULATION_STEP = 0.2;
 const MAX_FAUNA_CATCHUP = 0.6;
@@ -74,8 +75,16 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       actorScale: sceneScale,
       actorId: actorKey,
       bodyRadius,
+      speciesId: normalizeWildlifeId(specimenId),
     });
-  }, [actorKey, basePosition, basePositionRef, bodyRadius, currentZoneId, habitat, profile, sceneScale, seed]);
+  }, [actorKey, basePosition, basePositionRef, bodyRadius, currentZoneId, habitat, profile, sceneScale, seed, specimenId]);
+
+  // A brain mid-behaviour holds an open episode and a social entry; close
+  // both when the animal goes (collected, zone left, controller rebuilt).
+  useEffect(() => () => {
+    controller?.dispose?.();
+    if (actorKey) removeSocial(currentZoneId, actorKey);
+  }, [actorKey, controller, currentZoneId]);
   const positionRef = useRef(basePosition?.clone?.() || null);
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
@@ -130,6 +139,8 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
       warinessFor(gameState.wildlifeWariness, currentZoneId, speciesId, gameClockMinutes(gameState)),
     );
     const flushesBefore = controller.state.flushCount || 0;
+    const playerVelocity = getRuntimePlayerMotion()?.intendedPlanarVelocity;
+    const playerSpeed = playerVelocity ? Math.hypot(playerVelocity.x || 0, playerVelocity.z || 0) : 0;
     const base = basePositionRef?.current || basePosition;
     const actorId = actorKey;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
@@ -166,6 +177,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         paused,
         playerIsKin,
         radiusScale,
+        playerSpeed,
       });
     } else {
       while (remaining > 0.000001) {
@@ -181,6 +193,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           paused,
           playerIsKin,
           radiusScale,
+          playerSpeed,
         });
         remaining -= step;
       }

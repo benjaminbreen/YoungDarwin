@@ -1,4 +1,5 @@
 import { comparableLandingCount } from './examine/populationTraits';
+import { observationStats } from './fauna/behavior/fieldObservations';
 
 const SCORE_MAX = 10;
 
@@ -99,10 +100,11 @@ function scoreLabel(score) {
 }
 
 function categoryNote(categoryId, context) {
-  const { evidenceCount, examinedCount, collectedCount, documentedCount, noteCount, locationCount, averageNoteRigor, trivialNoteCount } = context;
+  const { evidenceCount, examinedCount, collectedCount, documentedCount, noteCount, locationCount, averageNoteRigor, trivialNoteCount, watchedBehaviors = 0 } = context;
   if (categoryId === 'observation') {
-    if (!evidenceCount) return 'No examined or documented natural object accompanied the return.';
-    return `${examinedCount} examined type${examinedCount === 1 ? '' : 's'} produced ${evidenceCount} distinct line${evidenceCount === 1 ? '' : 's'} of evidence; written rigor averaged ${averageNoteRigor.toFixed(1)}/10.`;
+    const habits = watchedBehaviors ? ` ${watchedBehaviors} kind${watchedBehaviors === 1 ? '' : 's'} of behaviour watched through.` : '';
+    if (!evidenceCount) return watchedBehaviors ? `No natural object was examined, though ${watchedBehaviors} kind${watchedBehaviors === 1 ? ' of behaviour was' : 's of behaviour were'} watched through.` : 'No examined or documented natural object accompanied the return.';
+    return `${examinedCount} examined type${examinedCount === 1 ? '' : 's'} produced ${evidenceCount} distinct line${evidenceCount === 1 ? '' : 's'} of evidence; written rigor averaged ${averageNoteRigor.toFixed(1)}/10.${habits}`;
   }
   if (categoryId === 'specimenCare') {
     if (!evidenceCount) return 'The case and field record contain no assessable specimen evidence.';
@@ -258,9 +260,16 @@ export function evaluateFinalAssessment(state = {}) {
   const comparableSeries = uniqueValues(measurements.map(record => record.specimenId))
     .filter(specimenId => comparableLandingCount(measurements, specimenId, 2) >= 2).length;
 
-  const observation = evidenceIds.length === 0
+  // Watched behaviour: habits seen through, above all animals dealing with
+  // one another, and the same habit seen at two hours or two landings.
+  const watched = observationStats(Array.isArray(state.fieldObservations) ? state.fieldObservations : []);
+
+  const observation = evidenceIds.length === 0 && watched.records === 0
     ? 0
-    : Math.min(1.2, comparableSeries * 0.8)
+    : Math.min(1, watched.behaviors * 0.12)
+      + Math.min(0.8, watched.interactions * 0.2)
+      + Math.min(0.4, watched.patterned * 0.2)
+      + Math.min(1.2, comparableSeries * 0.8)
       + Math.min(0.4, measuredAnimals * 0.05)
       + Math.min(2.2, evidenceIds.length * 0.65)
       + averageNoteRigor * 0.55
@@ -293,6 +302,7 @@ export function evaluateFinalAssessment(state = {}) {
     + averageNoteRigor * 0.2;
 
   const context = {
+    watchedBehaviors: watched.behaviors,
     evidenceCount: evidenceIds.length,
     examinedCount: examinedIds.length,
     collectedCount: collectedIds.length,
@@ -324,6 +334,8 @@ export function evaluateFinalAssessment(state = {}) {
   if (detailedNotes) strengths.push('Several entries preserve enough detail to be compared after the voyage.');
   if (methods.length >= 3 && averageNoteRigor >= 4) strengths.push('The record distinguishes multiple methods of observation or collection.');
   if (visitedIds.length >= 5 && evidenceIds.length >= 3) strengths.push('The route provides useful comparison across distinct island stations.');
+  if (watched.interactions >= 2) strengths.push('Animals were watched dealing with one another, not only singly, which is where habits show.');
+  if (watched.patterned) strengths.push('The same habit was seen at different hours or stations, which begins to say when and where an animal does it.');
   if (comparableSeries) strengths.push('Repeated measurements set the same creature side by side at different stations.');
   if (!strengths.length && overall >= 4 && evidenceIds.length) strengths.push('The packet contains the beginnings of a usable comparative record.');
 
@@ -335,6 +347,7 @@ export function evaluateFinalAssessment(state = {}) {
   if (locatedNotes < playerNotes.length) gaps.push('Some player-authored observations lack an explicit locality.');
   if (!playerMethods.length && playerNotes.length) gaps.push('Methods are not named consistently in the player’s field record.');
   if (visitedIds.length < 3) gaps.push('The island comparison rests on very limited geographic coverage.');
+  if (!watched.records && evidenceIds.length >= 3) gaps.push('No animal was watched at its business: the record is of bodies, not of habits.');
   if (measuredAnimals && !comparableSeries) gaps.push('Measurements were taken, but no species on enough animals at two stations to say whether they differ.');
   if (!gaps.length) gaps.push('The strongest claims should still distinguish direct observation from inference.');
 

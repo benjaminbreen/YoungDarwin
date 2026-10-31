@@ -9,6 +9,7 @@
 // have written) rather than physics state, prop damage, or fauna poses. Those
 // rebuild deterministically from the region seed when the zone mounts.
 
+import { sanitizeFieldObservations } from './fauna/behavior/fieldObservations';
 import { sanitizeWildlifeWariness } from './wildlife/wariness';
 
 export const SESSION_SAVE_KEY = 'darwin-expedition-session-v1';
@@ -165,6 +166,7 @@ export function buildSessionSnapshot(state) {
     items: Array.isArray(state.items) ? state.items : [],
     journal: Array.isArray(state.journal) ? state.journal : [],
     fieldMeasurements: sanitizeFieldMeasurements(state.fieldMeasurements),
+    fieldObservations: sanitizeFieldObservations(state.fieldObservations),
     bookLastPages: state.bookLastPages && typeof state.bookLastPages === 'object'
       ? { ...state.bookLastPages }
       : {},

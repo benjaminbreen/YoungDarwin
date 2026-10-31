@@ -1417,6 +1417,13 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     stepPhase: 0,
     walkAmp: 0,
     visualTime: NaN,
+    // Behaviour poses (behaviour brain actions), each eased in and out.
+    crack: 0,
+    preen: 0,
+    sing: 0,
+    bathe: 0,
+    alert: 0,
+    display: 0,
   });
 
   useFrame(({ clock }, rawDelta) => {
@@ -1444,6 +1451,31 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     const sleep = action === 'animalSleep' ? 1 : 0;
     const defecate = action === 'animalDefecate' ? Math.sin(Math.min(1, (t * 3.2) % 1) * Math.PI) : 0;
     const groundedMoving = !flying && speed > 0.08 && !sleep;
+
+    // Behaviour poses. Each blend eases so a bird settles into preening or
+    // song rather than snapping to it, and only applies on the ground.
+    const still = !flying && !groundedMoving;
+    a.crack = THREE.MathUtils.damp(a.crack, still && action === 'animalCrack' ? 1 : 0, 6, delta);
+    a.preen = THREE.MathUtils.damp(a.preen, still && action === 'animalPreen' ? 1 : 0, 4, delta);
+    a.sing = THREE.MathUtils.damp(a.sing, still && action === 'animalSing' ? 1 : 0, 5, delta);
+    a.bathe = THREE.MathUtils.damp(a.bathe, still && action === 'animalBathe' ? 1 : 0, 6, delta);
+    a.alert = THREE.MathUtils.damp(a.alert, !flying && action === 'animalAlert' ? 1 : 0, 7, delta);
+    a.display = THREE.MathUtils.damp(a.display, !flying && action === 'animalDisplay' ? 1 : 0, 8, delta);
+    // Seed cracking: a slow, braced bite with a sideways work of the bill,
+    // twice a second, not the quick dab of a peck.
+    const crackBite = Math.pow(Math.max(0, Math.sin(t * 4.4)), 3) * a.crack;
+    const crackTwist = Math.sin(t * 2.2) * 0.32 * a.crack;
+    // Preening: the head turned back along one flank, nibbling, switching
+    // sides every few seconds.
+    const preenSide = Math.sin(t * 0.55) >= 0 ? 1 : -1;
+    const preenNibble = Math.sin(t * 15) * 0.07 * a.preen;
+    // Song: phrases with pauses; the throat and bill work through a phrase.
+    const singPhrase = Math.max(0, Math.sin(t * 1.25)) > 0.25 ? 1 : 0;
+    const singTremble = Math.sin(t * 31) * 0.035 * singPhrase * a.sing;
+    // Inspecting: the head cocked to bring one eye to bear, then the other.
+    const cockSide = Math.sin(t * 0.9) >= 0 ? 1 : -1;
+    // Dust bath and wing display: quick shivers of half-opened wings.
+    const flutter = Math.sin(t * 23) * (a.bathe * 0.16 + a.display * 0.1);
 
     // Flap-bounce: fast straight cruising without held flap alternates short
     // wing bursts with brief glides — the undulating flight of a small finch.
@@ -1521,7 +1553,12 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     const displayFlash = visual.plumage === 'floreanaMockingbird' && !flying && !groundedMoving
       ? Math.pow(Math.max(0, Math.sin(t * 0.88 + 0.65)), 22)
       : 0;
-    a.wingSpread = THREE.MathUtils.damp(a.wingSpread, flying ? 1 : displayFlash * 0.22, 7, delta);
+    a.wingSpread = THREE.MathUtils.damp(
+      a.wingSpread,
+      flying ? 1 : Math.max(displayFlash * 0.22, a.bathe * 0.34, a.display * 0.46),
+      7,
+      delta,
+    );
     const spread = a.wingSpread;
     const fold = 1 - spread;
 
@@ -1539,7 +1576,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
         : Math.sin(t * 3.1) * 0.004;
 
     if (root.current) {
-      root.current.position.y = rootBob * (visual.rootScale / 0.82);
+      root.current.position.y = (rootBob - a.bathe * 0.065 + Math.abs(flutter) * 0.012) * (visual.rootScale / 0.82);
     }
     // Grounded stance carries the body closer to horizontal (chest gently
     // lifted, weight over the feet); walking leans a touch forward. Flight
@@ -1555,10 +1592,12 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
           + (takeoff ? -0.2 : 0)
           + (landing ? -0.16 : 0)
           - flap * 0.035
-        : groundPitch - peck * 0.16 + sleep * 0.14;
+        : groundPitch - peck * 0.16 + sleep * 0.14 - crackBite * 0.08 + a.crack * 0.06
+          - a.sing * 0.12 - a.alert * 0.14 + a.display * 0.12 + a.bathe * 0.1 + flutter * 0.4;
       body.current.rotation.x = THREE.MathUtils.damp(body.current.rotation.x, bodyPitch, 9, delta);
       // Grounded walking adds a small side-to-side waddle onto the bank.
-      const rollTarget = (motion.flightBank || 0) * 0.28 + (!flying ? stride * 0.045 : 0);
+      const rollTarget = (motion.flightBank || 0) * 0.28 + (!flying ? stride * 0.045 : 0)
+        + preenSide * 0.1 * a.preen + Math.sin(t * 9) * 0.12 * a.bathe;
       body.current.rotation.z = THREE.MathUtils.damp(body.current.rotation.z, rollTarget, 7, delta);
       // Breathing: a barely-there swell, slower on the ground.
       const breathe = 1 + Math.sin(t * (flying ? 9 : 5.2)) * 0.005;
@@ -1599,7 +1638,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     // down — from behind the wing is a shallow arched M, not a bat V.
     const handZ = THREE.MathUtils.lerp(flapOuter * 0.55 - glideBlend * 0.14 - a.descend * 0.1, 0.06, fold);
     for (const shoulder of [leftShoulder.current, rightShoulder.current]) {
-      if (shoulder) shoulder.rotation.set(shoulderX, shoulderY, shoulderZ);
+      if (shoulder) shoulder.rotation.set(shoulderX, shoulderY, shoulderZ + flutter);
     }
     for (const hand of [leftHand.current, rightHand.current]) {
       if (hand) hand.rotation.set(handX, handY, handZ);
@@ -1642,7 +1681,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
       tail.current.rotation.z = THREE.MathUtils.damp(tail.current.rotation.z, (motion.flightBank || 0) * -0.32, 8, delta);
       const tailSpread = flying
         ? (landing ? 1.45 : 1.1 + a.climb * 0.4 - a.descend * 0.42)
-        : 0.95 + displayFlash * 0.28;
+        : 0.95 + displayFlash * 0.28 + a.display * 0.4 + a.bathe * 0.25;
       tail.current.scale.x = THREE.MathUtils.damp(
         tail.current.scale.x,
         tailSpread * visual.tailScale[0],
@@ -1666,8 +1705,14 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
       const owlPounceLook = motion.owlPounce ? 0.74 : motion.owlHover ? 0.3 : 0;
       const sleepPitch = sleep * (visual.owlFace ? 0.18 : 0.72);
       const sleepYaw = sleep * (visual.owlFace ? 0.08 : 0.45);
-      head.current.rotation.x = THREE.MathUtils.damp(head.current.rotation.x, -peck * 0.95 + sleepPitch + stepNod + headLevel + owlPounceLook, visual.owlFace ? 6 : 10, delta);
-      head.current.rotation.y = THREE.MathUtils.damp(head.current.rotation.y, scan + sleepYaw, visual.owlFace ? 4.2 : 8, delta);
+      const behaviorPitch = -crackBite * 0.75 - a.crack * 0.35 - a.preen * 0.5 + preenNibble
+        + a.sing * 0.55 + singTremble + a.alert * 0.18;
+      // Scanning settles while the bird is busy with its own business.
+      const busyStill = 1 - Math.min(1, a.crack + a.preen + a.sing + a.bathe);
+      const behaviorYaw = crackTwist + preenSide * 2.05 * a.preen + Math.sin(t * 2.4) * 0.25 * a.alert;
+      head.current.rotation.x = THREE.MathUtils.damp(head.current.rotation.x, -peck * 0.95 + sleepPitch + stepNod + headLevel + owlPounceLook - behaviorPitch, visual.owlFace ? 6 : 10, delta);
+      head.current.rotation.y = THREE.MathUtils.damp(head.current.rotation.y, scan * busyStill + sleepYaw + behaviorYaw, visual.owlFace ? 4.2 : 8, delta);
+      head.current.rotation.z = THREE.MathUtils.damp(head.current.rotation.z, cockSide * 0.42 * a.alert + crackTwist * 0.5, 7, delta);
       head.current.position.y = THREE.MathUtils.damp(head.current.position.y, visual.headPosition[1] - sleep * (visual.owlFace ? 0.035 : 0.12) - peck * 0.05, 10, delta);
       head.current.position.z = THREE.MathUtils.damp(head.current.position.z, visual.headPosition[2] - sleep * (visual.owlFace ? 0.025 : 0.14) + peck * 0.05 + stepNod * 0.2, 10, delta);
     }

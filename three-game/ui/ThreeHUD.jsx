@@ -3797,6 +3797,27 @@ function CompactPrompt({ children, visible = true, testId = null }) {
   );
 }
 
+// Names the behaviour Darwin is watching and how far through it he is, so
+// keeping still reads as doing something. A watch that is paused because he
+// is moving says so.
+function WatchIndicator() {
+  const focus = useThreeGameStore(state => state.watchFocus);
+  if (!focus) return null;
+  return (
+    <div className="pointer-events-none absolute bottom-[8.5rem] left-1/2 z-10 -translate-x-1/2 font-expedition" aria-live="polite" data-testid="watch-indicator">
+      <div className="rounded-sm border border-expedition-brass/40 bg-[rgba(12,20,28,0.62)] px-3 py-1.5 text-center shadow-lg backdrop-blur-md">
+        <div className="text-[10px] uppercase tracking-[0.14em] text-expedition-faded">
+          {focus.still ? 'Watching' : 'Keep still to watch'}
+        </div>
+        <div className="max-w-[18rem] truncate text-[12px] text-expedition-parchment/90">{focus.label}</div>
+        <div className="mt-1 h-[2px] w-full overflow-hidden rounded bg-expedition-brass/20">
+          <div className="h-full bg-expedition-goldbright/80 transition-[width] duration-200" style={{ width: `${Math.round(focus.progress * 100)}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ObservationModeGuide() {
   const active = useThreeGameStore(state => state.observationMode);
   const setObservationMode = useThreeGameStore(state => state.setObservationMode);
@@ -5432,6 +5453,7 @@ export function ThreeHUD({
 
       <InteractionPrompt />
       <ObservationModeGuide />
+      <WatchIndicator />
       <MajorEventToast />
       <SpecimenSightingToast />
       <DayTitleCard />

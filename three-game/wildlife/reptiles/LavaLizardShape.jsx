@@ -14,6 +14,7 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { skyState } from '../../world/celestial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { createReptileAnimator } from './reptileGaitRuntime';
+import { getBehaviorPresentation } from '../../fauna/behavior/behaviorPresentation';
 import { mergeRigidParts } from '../../components/assets/mergeMeshParts';
 import {
   createLavaLizardRig,
@@ -37,6 +38,7 @@ const TELEPORT_SPEED = 6;
 
 const _world = new THREE.Vector3();
 const _player = new THREE.Vector3();
+const _focus = new THREE.Vector3();
 
 export function LavaLizardShape({ specimen }) {
   const actorId = specimen.instanceId || specimen.id;
@@ -95,6 +97,13 @@ export function LavaLizardShape({ specimen }) {
     const stepDt = t.accum;
     t.accum = 0;
 
+    // What the behaviour brain has it doing: a display, basking, a snap,
+    // and who it is looking at.
+    const presentation = getBehaviorPresentation(actorId);
+    let focusLocal = null;
+    if (presentation && Number.isFinite(presentation.focusX) && !held && !downed) {
+      focusLocal = rig.group.worldToLocal(_focus.set(presentation.focusX, _world.y + 0.05, presentation.focusZ));
+    }
     const store = useThreeGameStore.getState();
     const sky = skyState(store.timeOfDay ?? 12, store.day || 1);
     animator.update({
@@ -102,6 +111,8 @@ export function LavaLizardShape({ specimen }) {
       time: state.clock.elapsedTime,
       speed: t.speed,
       playerLocal,
+      focusLocal,
+      behavior: held || downed ? null : presentation?.action || null,
       playerDist,
       daylight: sky.daylight,
       rain: weatherEnv.rainIntensity,

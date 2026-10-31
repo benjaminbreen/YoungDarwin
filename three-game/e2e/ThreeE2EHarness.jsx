@@ -37,6 +37,9 @@ import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
 import { getPlayerHarnessBridge } from './playerHarnessBridge';
 import { auditRenderIntegrity } from './renderIntegrity';
 import { recordMotion } from './motionRecorder';
+import { socialEntries } from '../fauna/behavior/socialField';
+import { activeBehaviorEpisodes } from '../fauna/behavior/behaviorEpisodes';
+import { getBehaviorBrain } from '../fauna/behavior/behaviorBrain';
 
 const RECORDED_PROP_EVENTS = ['tool-swing', 'net-contact', 'net-brush', 'field-action-attempt', 'prop-struck'];
 const PROP_EVENT_LOG_MAX = 80;
@@ -749,6 +752,42 @@ function createHarnessApi() {
       propEventLog.length = 0;
       return true;
     },
+    // Every animal in the landing as the behaviour brains see it: species,
+    // what it is doing, whether it is alarmed, and where.
+    animals: () => [...(socialEntries(useThreeGameStore.getState().currentZoneId)?.values() || [])]
+      .map(entry => ({
+        actorId: entry.actorId,
+        speciesId: entry.speciesId,
+        activity: entry.activity,
+        alarmed: Boolean(entry.alarmed),
+        solicit: Boolean(entry.solicit),
+        x: Number(entry.x.toFixed(2)),
+        z: Number(entry.z.toFixed(2)),
+        size: Number((entry.size || 1).toFixed(2)),
+      })),
+    // Start a repertoire behaviour on one animal at once (hours and cooldowns
+    // ignored; a partner must be present), e.g. forceBehavior(id, 'sing').
+    forceBehavior: (actorId, behaviorId) => getBehaviorBrain(actorId)?.force(behaviorId) || false,
+    // One animal's behaviour brain: current behaviour and phase, drives, and
+    // how long Darwin has kept still near it.
+    behaviorBrain: actorId => {
+      const brain = getBehaviorBrain(actorId);
+      if (!brain) return null;
+      const current = brain.current();
+      return {
+        speciesId: brain.speciesId,
+        size: brain.size,
+        behavior: current?.def.id || null,
+        phase: current?.phase || null,
+        partnerId: current?.partnerId || null,
+        drives: { ...brain.drives },
+        playerStillTime: brain.playerStillTime(),
+        tolerance: brain.tolerance(),
+      };
+    },
+    // Behaviour episodes open right now (what could be watched this moment).
+    behaviorEpisodes: () => [...(activeBehaviorEpisodes(useThreeGameStore.getState().currentZoneId)?.values() || [])]
+      .map(episode => ({ ...episode })),
     setMode: modeId => {
       useThreeGameStore.getState().setPlayableMode(modeId);
       return makeSnapshot();

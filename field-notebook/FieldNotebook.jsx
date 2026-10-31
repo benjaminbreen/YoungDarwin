@@ -12,6 +12,8 @@ import { SketchPortrait } from '../three-game/ui/expedition/SketchPortrait';
 import { expeditionDateForDay } from '../three-game/expeditionOutcomes';
 import { summarizeMeasurements } from '../three-game/examine/populationTraits';
 import { MeasurementPage } from './MeasurementPage';
+import { ObservationPage } from './ObservationPage';
+import { summarizeObservations } from '../three-game/fauna/behavior/fieldObservations';
 
 function formatJournalDate(day, short = false) {
   return new Intl.DateTimeFormat('en-US', {
@@ -112,10 +114,13 @@ function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, o
         { id: 'location', label: 'Locations', count: counts.location },
         { id: 'note', label: 'Notes', count: counts.note },
         { id: 'measures', label: 'Measures', count: counts.measures },
+        { id: 'behaviour', label: 'Behaviour', count: counts.behaviour },
       ];
   const visible = entries.filter(entry => filter === 'all' || entry.type === filter);
   const emptyCopy = filter === 'measures'
     ? 'Nothing measured yet. Examine a finch, tortoise, lava lizard, locust, mockingbird or prickly pear and take its measurements.'
+    : filter === 'behaviour'
+    ? 'Nothing watched yet. Keep still near an animal and watch it at its business: feeding, displaying, dealing with its neighbours.'
     : entries.length === 0
       ? 'The pages await your observations.'
       : 'No entries in this section yet.';
@@ -450,6 +455,7 @@ function JournalPanel({ onClose, onOpenMap }) {
   const [mobileView, setMobileView] = useState('list');
 
   const fieldMeasurements = useThreeGameStore(state => state.fieldMeasurements);
+  const fieldObservations = useThreeGameStore(state => state.fieldObservations);
   const journalEntries = useMemo(() => journal.map(normalizeEntry).reverse(), [journal]);
   // One page per measured species, comparing its landings. Kept out of "All":
   // these are a view over the readings, not journal pages.
@@ -469,6 +475,25 @@ function JournalPanel({ onClose, onOpenMap }) {
       summary,
     };
   }), [fieldMeasurements]);
+  // One page per species watched: the behaviours seen, when and where.
+  const behaviourEntries = useMemo(() => summarizeObservations(fieldObservations || []).map(summary => {
+    const specimen = findSpecimen(summary.speciesId);
+    return {
+      key: `behaviour:${summary.speciesId}`,
+      type: 'behaviour',
+      title: specimen?.name || summary.name,
+      subtitle: `${summary.seen.length} of ${summary.knownCount} kinds of behaviour · ${summary.records} ${summary.records === 1 ? 'sighting' : 'sightings'}`,
+      date: 'Behaviour',
+      specimen,
+      summary,
+    };
+  }), [fieldObservations]);
+  const viewEntries = { measures: measureEntries, behaviour: behaviourEntries };
+  const viewEntryFor = key => {
+    const prefix = key.split(':')[0];
+    return viewEntries[prefix]?.find(entry => entry.key === key) || null;
+  };
+  const isViewKey = key => key.startsWith('measures:') || key.startsWith('behaviour:');
   const devCatalogueEntries = useMemo(makeDevCatalogueEntries, []);
   const entries = devCatalogue ? devCatalogueEntries : journalEntries;
   const counts = useMemo(
@@ -478,11 +503,11 @@ function JournalPanel({ onClose, onOpenMap }) {
         acc[entry.type] = (acc[entry.type] || 0) + 1;
         return acc;
       },
-      { all: 0, specimen: 0, location: 0, note: 0, measures: measureEntries.length },
+      { all: 0, specimen: 0, location: 0, note: 0, measures: measureEntries.length, behaviour: behaviourEntries.length },
     ),
-    [entries, measureEntries.length],
+    [behaviourEntries.length, entries, measureEntries.length],
   );
-  const listEntries = !devCatalogue && filter === 'measures' ? measureEntries : entries;
+  const listEntries = !devCatalogue && viewEntries[filter] ? viewEntries[filter] : entries;
   const currentLocation = getThreeIslandLocation(currentZoneId);
   const selectedEntry = devCatalogue
     ? entries.find(entry => entry.key === selectedKey) || entries[0] || null
@@ -497,8 +522,8 @@ function JournalPanel({ onClose, onOpenMap }) {
         page: journal.length + 1,
         content: '',
       }
-      : selectedKey.startsWith('measures:')
-        ? measureEntries.find(entry => entry.key === selectedKey) || null
+      : isViewKey(selectedKey)
+        ? viewEntryFor(selectedKey)
         : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
   const isDraft = selectedEntry?.type === 'draft';
 
@@ -529,10 +554,14 @@ function JournalPanel({ onClose, onOpenMap }) {
       if (!measureEntries.some(entry => entry.key === selectedKey)) setSelectedKey(entries[0]?.key || 'draft');
       return;
     }
+    if (selectedKey.startsWith('behaviour:')) {
+      if (!behaviourEntries.some(entry => entry.key === selectedKey)) setSelectedKey(entries[0]?.key || 'draft');
+      return;
+    }
     if (selectedKey !== 'draft' && !entries.some(entry => entry.key === selectedKey)) {
       setSelectedKey(entries[0]?.key || 'draft');
     }
-  }, [devCatalogue, devCatalogueEntries, entries, measureEntries, selectedKey]);
+  }, [behaviourEntries, devCatalogue, devCatalogueEntries, entries, measureEntries, selectedKey]);
 
   const toggleDevCatalogue = () => {
     if (!JOURNAL_DEV_CATALOGUE_AVAILABLE) return;
@@ -598,8 +627,8 @@ function JournalPanel({ onClose, onOpenMap }) {
           filter={filter}
           onFilter={next => {
             setFilter(next);
-            if (next === 'measures' && measureEntries[0]) setSelectedKey(measureEntries[0].key);
-            else if (next !== 'measures' && selectedKey.startsWith('measures:')) setSelectedKey(entries[0]?.key || 'draft');
+            if (viewEntries[next]?.[0]) setSelectedKey(viewEntries[next][0].key);
+            else if (!viewEntries[next] && isViewKey(selectedKey)) setSelectedKey(entries[0]?.key || 'draft');
           }}
           onSelect={key => {
             setSelectedKey(key);
@@ -618,6 +647,8 @@ function JournalPanel({ onClose, onOpenMap }) {
                 ? <DevSpecimenCataloguePage entry={selectedEntry} />
                 : selectedEntry.type === 'measures'
                   ? <MeasurementPage entry={selectedEntry} />
+                  : selectedEntry.type === 'behaviour'
+                  ? <ObservationPage entry={selectedEntry} />
                   : <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
             )}
           </div>
