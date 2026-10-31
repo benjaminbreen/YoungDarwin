@@ -27,6 +27,8 @@ const ZONE_BUDGETS = {
   BEAGLE: 6,
   BEAGLE_CABIN: 6,
   LAWSON_HOUSE: 5,
+  WHALERS_HUT_INTERIOR: 4,
+  COLONIST_RANCHO: 5,
 };
 
 export function pointLightBudgetForZone(zoneId) {

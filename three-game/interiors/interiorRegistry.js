@@ -1,6 +1,7 @@
 import beagleCabinBlueprint from './blueprints/beagleCabin.json';
 import lawsonHouseBlueprint from './blueprints/lawsonHouse.json';
 import { GABRIEL_CAVE_INTERIORS } from './gabrielCaveInteriors';
+import { HUT_INTERIORS } from './hutInteriors';
 
 export const BEAGLE_CABIN_ZONE_ID = 'BEAGLE_CABIN';
 export const LAWSON_HOUSE_ZONE_ID = 'LAWSON_HOUSE';
@@ -632,6 +633,7 @@ const INTERIORS = {
     }
   },
   ...GABRIEL_CAVE_INTERIORS,
+  ...HUT_INTERIORS,
 };
 
 export function getInteriorDefinition(zoneId) {

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FARM_PLOT, WETLANDS_GARDENS, WETLANDS_RANCHO_PAD } from './terrain';
 import {
   disposePackedPbrTerrainSet,
   FLOREANA_PBR_TEXTURES,
@@ -36,6 +37,19 @@ const ROUGHNESS = {
 
 function f(value) {
   return Number(value).toFixed(3);
+}
+
+function gardenTerms() {
+  return WETLANDS_GARDENS.map(plot => `
+          {
+            vec2 l = p - vec2(${f(plot.x)}, ${f(plot.z)});
+            float wob = (swNoise(p * 0.5 + vec2(${f(plot.x)}, ${f(-plot.z)})) - 0.5) * 0.48;
+            float outside = max(abs(l.x) - ${f(plot.halfX)} + wob, abs(l.y) - ${f(plot.halfZ)} + wob);
+            float maskValue = 1.0 - smoothstep(-0.6, 0.45, outside);
+            if (maskValue > garden.x) {
+              garden = vec2(maskValue, ${plot.rowAxis === 'x' ? 'l.y' : 'l.x'} * ${f((Math.PI * 2) / plot.rowSpacing)});
+            }
+          }`).join('');
 }
 
 function fragmentCommon() {
@@ -114,8 +128,18 @@ function fragmentCommon() {
           return clamp(v, 0.0, 1.0);
         }
         float swFarmMask(vec2 p) {
-          vec2 uv = abs(p - vec2(-18.0, -2.0)) / vec2(7.5, 6.5);
+          vec2 uv = abs(p - vec2(${f(FARM_PLOT.x)}, ${f(FARM_PLOT.z)})) / vec2(${f(FARM_PLOT.halfX)}, ${f(FARM_PLOT.halfZ)});
           return 1.0 - smoothstep(0.82, 1.12, max(uv.x, uv.y));
+        }
+        float swRanchoPad(vec2 p) {
+          vec2 d = abs(p - vec2(${f(WETLANDS_RANCHO_PAD.x)}, ${f(WETLANDS_RANCHO_PAD.z)})) - vec2(${f(WETLANDS_RANCHO_PAD.halfX)}, ${f(WETLANDS_RANCHO_PAD.halfZ)});
+          return 1.0 - smoothstep(-0.6, 1.4, max(d.x, d.y));
+        }
+        // x: hoed-ground mask, y: phase across the ridges (terrain.js
+        // wetlandsGardenInfo).
+        vec2 swGardenInfo(vec2 p) {
+          vec2 garden = vec2(0.0);${gardenTerms()}
+          return garden;
         }
         float swFallLine(vec2 p) {
           return clamp((p.x / 56.0) * 0.55 + (p.y / 49.0), -1.55, 1.55);
@@ -145,7 +169,9 @@ function fragmentCommon() {
           float mudWeight = clamp(apron * 1.1 + max(poolCore, bed), 0.0, 1.0);
 
           float farm = swFarmMask(p);
-          float cinderWeight = clamp(trailCore + farm * 0.5, 0.0, 1.0) * (1.0 - mudWeight * 0.92);
+          float garden = swGardenInfo(p).x;
+          float yard = swRanchoPad(p);
+          float cinderWeight = clamp(trailCore + farm * 0.28 + yard * 0.32, 0.0, 1.0) * (1.0 - mudWeight * 0.92) * (1.0 - garden);
 
           float wall = swForestWall(p, trailBlend);
           float fern = max(trailBlend * 0.5, apron * 0.7);
@@ -153,8 +179,9 @@ function fragmentCommon() {
           float loamWeight = clamp(wall * 0.68 + fern * 0.3 + canopyTone * 0.14, 0.0, 1.0)
             * (1.0 - mudWeight * 0.9)
             * (1.0 - cinderWeight * 0.85);
+          loamWeight = max(loamWeight, garden);
 
-          float grassWeight = max(0.0, 1.0 - mudWeight - cinderWeight - loamWeight);
+          float grassWeight = max(0.0, 1.0 - mudWeight - cinderWeight - loamWeight) * (1.0 - garden) * (1.0 - yard * 0.6);
           vec4 weights = vec4(grassWeight, loamWeight, mudWeight, cinderWeight);
           return weights / max(dot(weights, vec4(1.0)), 0.0001);
         }
@@ -205,6 +232,12 @@ function colorFragment() {
         float swCanopyShade = swForestWall(swPosition, 1.0 - smoothstep(1.4, 7.4, swTrailDistance(swPosition)));
         swColor *= mix(1.0, 0.86, swCanopyShade * 0.55);
         swColor *= mix(0.94, 1.06, swMacro);
+
+        // Hoed ridges: dark turned earth, the furrow bottoms darker and
+        // damper than the crests.
+        vec2 swGarden = swGardenInfo(swPosition);
+        float swRidge = sin(swGarden.y) * 0.5 + 0.5;
+        swColor = mix(swColor, swColor * vec3(0.72, 0.64, 0.56) * mix(0.72, 1.12, swRidge), swGarden.x * 0.85);
 
         // Wetness: lagoon apron + bed, wet pools, and a damp trail margin
         // where the path crosses the lowland.
@@ -320,7 +353,7 @@ ${normalFragment()}`,
       );
   };
 
-  material.customProgramCacheKey = () => 'southern-wetlands-layered-pbr-v1';
+  material.customProgramCacheKey = () => 'southern-wetlands-layered-pbr-v2';
   material.needsUpdate = true;
   return material;
 }

@@ -260,6 +260,9 @@ export function StaticBatch({ children, name = 'CaveFurnishings', castShadow = t
         const count = source.attributes.position.count;
         geometry.setAttribute('color', source.attributes.color || new THREE.BufferAttribute(new Float32Array(count * 3).fill(0.4), 3));
         geometry.setAttribute('caveData', source.attributes.caveData || new THREE.BufferAttribute(Float32Array.from({ length: count * 4 }, (_, i) => (i % 4 === 0 ? 0.8 : 0)), 4));
+      } else if (object.material.vertexColors) {
+        const count = source.attributes.position.count;
+        geometry.setAttribute('color', source.attributes.color || new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
       }
       geometry.applyMatrix4(matrix);
       const key = object.material.uuid;

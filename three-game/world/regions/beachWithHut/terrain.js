@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { elevationNoise, oceanEdgeFalloff, surfaceNoise, terrainFineDetail, terrainSurfaceNoise } from '../../terrainShared';
 import { MARINE_IGUANA_COLONY_BEACH_HUT_SEAM } from '../../routeSeams';
+import { WHALERS_HUT_EXTERIOR_DOOR } from '../../../interiors/blueprints/whalersHut';
 
 // ---------------------------------------------------------------------------
 // Beach with Hut (S_HUT) — a small southwest Floreana beach.
@@ -23,13 +24,15 @@ export const BEACH_HUT_PATHS = [
   [
     [38, -25, 3.4],
     [27, -21, 3.1],
-    [16, -17, 3.3],
+    // Swings past the door of the whalers' hut rather than through it.
+    [21, -12.6, 3.0],
+    [14.6, -11.9, 3.1],
     [8, -10, 3.1],
     [1, 1, 2.9],
     [-4, 12, 2.7],
   ],
   [
-    [16, -17, 2.4],
+    [20.6, -13, 2.4],
     [23, -18, 2.1],
     [30, -16, 2.0],
   ],
@@ -41,7 +44,9 @@ export const BEACH_HUT_PATHS = [
 ];
 
 export const BEACH_HUT_PADS = [
-  { id: 'main-hut', x: 15, z: -17, radius: 6.0 },
+  // The whalers' hut (interiors/blueprints/whalersHut.js) needs a near-level
+  // bench for its stone base.
+  { id: 'main-hut', x: 15, z: -17.6, radius: 6.4, flatten: 0.94 },
   { id: 'lean-to', x: 6.5, z: -14, radius: 4.3 },
 ];
 
@@ -160,11 +165,12 @@ export function beachHutPathInfo(x, z) {
   };
 }
 
-export function beachHutPadMask(x, z) {
+export function beachHutPadMask(x, z, { weighted = false } = {}) {
   let mask = 0;
   for (const pad of BEACH_HUT_PADS) {
     const d = Math.hypot(x - pad.x, z - pad.z);
-    mask = Math.max(mask, 1 - smoothstep01(d, pad.radius * 0.45, pad.radius * 1.05));
+    const value = 1 - smoothstep01(d, pad.radius * 0.45, pad.radius * 1.05);
+    mask = Math.max(mask, weighted ? value * (pad.flatten ?? 0.55) : value);
   }
   return clamp01(mask);
 }
@@ -190,7 +196,7 @@ export function beachWithHutHeight(x, z, { movementSurface = false } = {}) {
 
   if (pad > 0) {
     const padTarget = 0.82 + neRise * 1.45 + smoothstep01(d, 18, 34) * 0.24;
-    y = THREE.MathUtils.lerp(y, padTarget, pad * 0.55);
+    y = THREE.MathUtils.lerp(y, padTarget, beachHutPadMask(x, z, { weighted: true }));
   }
 
   const rock = beachHutRockMask(x, z);
@@ -281,9 +287,11 @@ export const beachWithHutRegion = {
         0,
         29.5,
       ],
+      'from-whalers-hut': [WHALERS_HUT_EXTERIOR_DOOR.spawn.x, 0, WHALERS_HUT_EXTERIOR_DOOR.spawn.z],
     },
     entryFacings: {
       south: [0, 0, -1],
+      'from-whalers-hut': [WHALERS_HUT_EXTERIOR_DOOR.spawnFacing.x, 0, WHALERS_HUT_EXTERIOR_DOOR.spawnFacing.z],
     },
     entryCameraFacings: {
       south: [-0.2, 0, -0.98],

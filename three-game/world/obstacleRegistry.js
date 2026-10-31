@@ -14,6 +14,7 @@ import { getBeagleDeckObstacles } from './beagleDeckLayout';
 import { getBeagleCabinObstacles } from './beagleCabinLayout';
 import { getLawsonHouseObstacles } from './lawsonHouseLayout';
 import { getGabrielCaveObstacles } from './gabrielCaveLayout';
+import { getHutInteriorObstacles } from './hutInteriorLayout';
 import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
 import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
@@ -26,6 +27,7 @@ import { getPuntaSurRockObstacles } from './puntaSurLayout';
 import { getSouthernIntertidalRockObstacles } from './southernIntertidalLayout';
 import { getMarineIguanaColonyRockObstacles } from './marineIguanaColonyLayout';
 import { getWesternLowlandsObstacles } from './westernLowlandsLayout';
+import { getSouthernWetlandsObstacles } from './southernWetlandsLayout';
 
 /** @typedef {Record<string, unknown>} AuthoredObstacle */
 /** @typedef {() => AuthoredObstacle[]} ObstacleSource */
@@ -55,6 +57,8 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   GABRIEL_QUARTERS: [() => getGabrielCaveObstacles('GABRIEL_QUARTERS')],
   GABRIEL_PRESS: [() => getGabrielCaveObstacles('GABRIEL_PRESS')],
   GABRIEL_SPRING: [() => getGabrielCaveObstacles('GABRIEL_SPRING')],
+  WHALERS_HUT_INTERIOR: [() => getHutInteriorObstacles('WHALERS_HUT_INTERIOR')],
+  COLONIST_RANCHO: [() => getHutInteriorObstacles('COLONIST_RANCHO')],
   WATKINS: [getWatkinsCampObstacles],
   POST_SCRUB_RISE: [getPostScrubRiseRockObstacles],
   LAVA_FLATS: [getLavaFlatsRockObstacles],
@@ -66,4 +70,5 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   PUNTA_SUR: [getPuntaSurRockObstacles],
   S_INTERTIDAL: [getSouthernIntertidalRockObstacles],
   SW_BEACH: [getMarineIguanaColonyRockObstacles],
+  S_WETLANDS: [getSouthernWetlandsObstacles],
 });

@@ -59,6 +59,16 @@ export const inspectableCatalog = {
   watkins_diary: { id: 'watkins_diary', kind: 'artifact', englishName: 'Weather-stained diary', latinName: 'manuscript, hand of P. Watkins', category: 'Historical artifact', rarity: 'rare' },
   charred_tortoise_shell: { id: 'charred_tortoise_shell', kind: 'artifact', englishName: 'Charred tortoise shell', latinName: 'Chelonoidis niger, burnt carapace fragment', category: 'Historical artifact', rarity: 'uncommon' },
   earthenware_jug: { id: 'earthenware_jug', kind: 'artifact', englishName: 'Earthenware rum jug', latinName: 'stoneware, whaler trade goods', category: 'Historical artifact', rarity: 'uncommon' },
+  // The whalers' shore hut on the southwest beach and its yard.
+  whalers_hut: { id: 'whalers_hut', kind: 'artifact', englishName: "Whalers' hut", latinName: 'dry-stone base, salvaged ship planking; builders unrecorded', category: 'Historical structure', rarity: 'unique' },
+  try_pot: { id: 'try_pot', kind: 'artifact', englishName: 'Cracked try-pot', latinName: 'cast-iron cauldron for rendering blubber to oil', category: 'Historical artifact', rarity: 'rare' },
+  tortoise_carapace: { id: 'tortoise_carapace', kind: 'artifact', englishName: 'Tortoise carapaces', latinName: 'Chelonoidis niger, shells of animals eaten ashore', category: 'Historical artifact', rarity: 'uncommon' },
+  galapagos_tomato: { id: 'galapagos_tomato', kind: 'plant', englishName: 'Galápagos tomato in a seedbed', latinName: 'Solanum cheesmaniae — native, or sown?', category: 'Plant', rarity: 'endemic' },
+  // The colonist's rancho and garden in the wetlands.
+  colonist_rancho: { id: 'colonist_rancho', kind: 'artifact', englishName: "A colonist's rancho", latinName: 'bajareque walls under grass thatch', category: 'Historical structure', rarity: 'unique' },
+  plantain: { id: 'plantain', kind: 'plant', englishName: 'Plantain', latinName: 'Musa × paradisiaca, introduced from the mainland', category: 'Plant', rarity: 'uncommon' },
+  maize_crib: { id: 'maize_crib', kind: 'artifact', englishName: 'Maize drying on a rack', latinName: 'Zea mays, hung by the husk', category: 'Historical artifact', rarity: 'common' },
+  colony_fence: { id: 'colony_fence', kind: 'artifact', englishName: 'Stake fence', latinName: 'built against wild pigs and goats', category: 'Historical structure', rarity: 'common' },
 };
 
 function normalizeRarity(rarity) {

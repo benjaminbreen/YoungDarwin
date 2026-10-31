@@ -2,6 +2,7 @@ import { getModelAsset } from '../modelAssets';
 import { beachHutCoastDistance, beachHutRockMask, BEACH_WITH_HUT } from './regions/beachWithHut/terrain';
 import { buildRockObstacles, rockVisualBounds } from './proceduralRocks';
 import { makeZoneScatter } from './scatter';
+import { WHALERS_HUT, WHALERS_HUT_SITE } from '../interiors/blueprints/whalersHut';
 
 const makeBeachScatter = (layer, count, seed, opts) => makeZoneScatter(BEACH_WITH_HUT, layer, count, seed, opts);
 
@@ -56,14 +57,8 @@ function structureObstacle({
 
 const STRUCTURES = [
   {
-    id: 'main-hut',
-    asset: 'penalShack',
-    x: 15,
-    z: -17,
-    yaw: 0.58,
-    collider: { type: 'box', size: [0.96, 0.81, 0.64], offset: [0, 0.405, 0] },
-  },
-  {
+    // The old shelter is now a tortoise pen: a lean-to where crews penned the
+    // animals they carried down to the boats.
     id: 'lean-to',
     asset: 'animalLeanto',
     x: 6.5,
@@ -73,6 +68,43 @@ const STRUCTURES = [
     contactShadow: 2.6,
   },
 ];
+
+// The whalers' hut is drawn in code (interiors/huts/WhalersHutBuilding.jsx)
+// from the same blueprint that shapes its interior zone. One box covers the
+// stone base and plank walls; the door is a local transition, not a gap.
+function whalersHutObstacle() {
+  const width = WHALERS_HUT.halfX * 2;
+  const depth = WHALERS_HUT.halfZ * 2;
+  const shape = { type: 'box', size: [width, 2.3, depth], offset: [0, 1.15, 0] };
+  return {
+    id: 'beach-hut-whalers-hut',
+    kind: 'structure',
+    procedural: 'whalers-hut',
+    path: null,
+    x: WHALERS_HUT_SITE.x,
+    z: WHALERS_HUT_SITE.z,
+    baseX: WHALERS_HUT_SITE.x,
+    baseZ: WHALERS_HUT_SITE.z,
+    radius: Math.hypot(width, depth) / 2,
+    height: WHALERS_HUT.ridge,
+    colliderTop: 2.3,
+    colliderBottom: 0,
+    scale: 1,
+    yaw: WHALERS_HUT_SITE.yaw,
+    jumpable: false,
+    climbable: false,
+    edgeRisk: false,
+    pushable: false,
+    pushMass: 1,
+    castShadow: true,
+    receiveShadow: true,
+    maxVisibleDistance: 160,
+    contactShadow: 0,
+    definition: { collider: shape },
+    zoneId: BEACH_WITH_HUT,
+    shapes: [shape],
+  };
+}
 
 let rockCache = null;
 
@@ -108,6 +140,7 @@ let obstacleCache = null;
 export function getBeachWithHutObstacles() {
   if (obstacleCache) return obstacleCache;
   obstacleCache = [
+    whalersHutObstacle(),
     ...STRUCTURES.map(structureObstacle),
     ...buildRockObstacles(getBeachWithHutRocks(), {
       zoneId: BEACH_WITH_HUT,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { COLONIST_RANCHO_EXTERIOR_DOOR } from '../../../interiors/blueprints/colonistRancho';
 import {
   WATER_LEVEL,
   crackNoise,
@@ -61,9 +62,45 @@ const LAGOON_LOBES = [
   { x: -26, z: 36, rx: 8, rz: 5.5, strength: 0.7 },
 ];
 
-// Abandoned farm plot: a levelled terrace beside the trail fork, with the
-// crumbled stone wall discovery along its northeast side.
-export const FARM_PLOT = { x: -18, z: -2, halfX: 7.5, halfZ: 6.5 };
+// Farm plot: a levelled terrace beside the trail fork, with the crumbled
+// stone wall discovery along its north side. One of the colonists' outlying
+// gardens: a rancho at its head and two fenced, ridged plots of sweet potato
+// and maize (the crops Darwin saw the settlement living on).
+export const FARM_PLOT = { x: -17.5, z: -2, halfX: 9, halfZ: 7 };
+
+// Pad levelled under the rancho (interiors/blueprints/colonistRancho.js
+// stands at -21, -5) and its veranda.
+export const WETLANDS_RANCHO_PAD = { x: -21, z: -4.4, halfX: 4.3, halfZ: 4.4 };
+
+// Ridged garden plots. Same shape as the Penal Colony gardens so the shared
+// row planter in crops/penalColonyCrops.js lands plants on the ridges.
+export const WETLANDS_GARDENS = [
+  {
+    id: 'rancho-sweet-potato',
+    crop: 'sweetPotato',
+    x: -13.4,
+    z: -4.6,
+    halfX: 2.8,
+    halfZ: 2.1,
+    yaw: 0,
+    rowAxis: 'x',
+    rowSpacing: 1.1,
+  },
+  {
+    id: 'rancho-maize',
+    crop: 'maize',
+    x: -13.4,
+    z: 1.05,
+    halfX: 2.8,
+    halfZ: 1.75,
+    yaw: 0,
+    rowAxis: 'z',
+    rowSpacing: 1.0,
+  },
+];
+
+// The fence around both plots, gate on the west side facing the rancho.
+export const WETLANDS_GARDEN_FENCE = { minX: -16.9, maxX: -9.9, minZ: -7.4, maxZ: 3.4, gateZ: -1.6, gateHalf: 0.65 };
 
 function gaussianField(x, z, blobs) {
   let value = 0;
@@ -146,6 +183,30 @@ export function wetlandsFarmMask(x, z) {
   return 1 - THREE.MathUtils.smoothstep(box, 0.82, 1.12);
 }
 
+export function wetlandsRanchoPadMask(x, z) {
+  const pad = WETLANDS_RANCHO_PAD;
+  const outside = Math.max(Math.abs(x - pad.x) - pad.halfX, Math.abs(z - pad.z) - pad.halfZ);
+  return 1 - THREE.MathUtils.smoothstep(outside, -0.6, 1.4);
+}
+
+// Strongest garden influence at (x, z): { mask, rowPhase, plot }. The plots
+// are axis-aligned; rowPhase runs across the rows.
+export function wetlandsGardenInfo(x, z) {
+  let best = { mask: 0, rowPhase: 0, plot: null };
+  for (const plot of WETLANDS_GARDENS) {
+    const lx = x - plot.x;
+    const lz = z - plot.z;
+    const wobble = terrainSurfaceNoise(x * 0.5 + plot.x, z * 0.5 - plot.z) * 0.24;
+    const outside = Math.max(Math.abs(lx) - plot.halfX + wobble, Math.abs(lz) - plot.halfZ + wobble);
+    const mask = THREE.MathUtils.clamp(1 - THREE.MathUtils.smoothstep(outside, -0.6, 0.45), 0, 1);
+    if (mask > best.mask) {
+      const along = plot.rowAxis === 'x' ? lz : lx;
+      best = { mask, rowPhase: (along / plot.rowSpacing) * Math.PI * 2, plot };
+    }
+  }
+  return best;
+}
+
 export function wetlandsFernBenchMask(x, z) {
   const trailEdge = wetlandsTrailInfluence(x, z, 2.2, 9.2);
   const poolEdge = wetlandsPoolMask(x, z);
@@ -181,8 +242,13 @@ export function wetlandsHeight(x, z, { movementSurface = false } = {}) {
   y -= trail * 0.2;
   y -= pool * 0.55;
 
-  // Farm terrace: levelled bench cut into the lower slope.
-  y = THREE.MathUtils.lerp(y, 2.0, farm * 0.85);
+  // Farm terrace: levelled bench cut into the lower slope, flatter still
+  // under the rancho and the garden plots, which are hoed into ridges.
+  y = THREE.MathUtils.lerp(y, 2.0, farm * 0.9);
+  y = THREE.MathUtils.lerp(y, 2.02, wetlandsRanchoPadMask(x, z) * 0.96);
+  const garden = wetlandsGardenInfo(x, z);
+  y = THREE.MathUtils.lerp(y, 2.0, garden.mask * 0.9);
+  y -= garden.mask * (0.06 + (movementSurface ? 0 : Math.sin(garden.rowPhase) * 0.05));
 
   // Lagoon bed: lerp toward a flat floor below WATER_LEVEL (Punta Cormorant
   // pattern) instead of subtracting, so the bed stays calm under the surface.
@@ -214,6 +280,7 @@ export function wetlandsBiomeAt(x, z, y = wetlandsHeight(x, z)) {
   if (wetlandsLagoonApron(x, z) > 0.42 || wetlandsPoolMask(x, z) > 0.5) return 'wet-mud';
   const trail = wetlandsTrailInfluence(x, z);
   if (trail > 0.55) return 'mud-trail';
+  if (wetlandsGardenInfo(x, z).mask > 0.42) return 'farm-garden';
   if (wetlandsFarmMask(x, z) > 0.55) return 'farm-clearing';
   if (wetlandsFernBenchMask(x, z) > 0.5) return 'fern-bank';
   if (wetlandsForestWallMask(x, z) > 0.55) return 'forest-floor';
@@ -228,6 +295,7 @@ export function wetlandsColor(x, z, y) {
   if (biome === 'wetland-lagoon') color.set('#2c443c');
   else if (biome === 'wet-mud') color.set('#463b2b');
   else if (biome === 'mud-trail') color.set('#54492f');
+  else if (biome === 'farm-garden') color.set('#4a3a2a');
   else if (biome === 'farm-clearing') color.set('#5d6b3d');
   else if (biome === 'fern-bank') color.set('#47603c');
   else if (biome === 'forest-floor') color.set('#3d5233');
@@ -282,11 +350,13 @@ export const southernWetlandsRegion = {
       north: [18, 0, -46.5],
       west: [-53, 0, 0.5],
       east: [53, 0, 12.5],
+      'from-colonist-rancho': [COLONIST_RANCHO_EXTERIOR_DOOR.spawn.x, 0, COLONIST_RANCHO_EXTERIOR_DOOR.spawn.z],
     },
     entryFacings: {
       north: [-0.15, 0, 1],
       west: [1, 0, 0],
       east: [-1, 0, 0],
+      'from-colonist-rancho': [COLONIST_RANCHO_EXTERIOR_DOOR.spawnFacing.x, 0, COLONIST_RANCHO_EXTERIOR_DOOR.spawnFacing.z],
     },
   },
 };

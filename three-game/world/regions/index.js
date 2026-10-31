@@ -63,6 +63,8 @@ import {
   gabrielCaveSpringRegion,
 } from './gabrielCave/terrain';
 import { createGabrielCaveTerrainMaterial } from './gabrielCave/material';
+import { colonistRanchoRegion, whalersHutRegion } from './hutInteriors/terrain';
+import { createHutInteriorTerrainMaterial } from './hutInteriors/material';
 import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 import { postScrubRiseRegion } from './postScrubRise/terrain';
@@ -118,6 +120,8 @@ const authoredRegions = [
   { ...gabrielCaveQuartersRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...gabrielCavePressRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...gabrielCaveSpringRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
+  { ...whalersHutRegion, createTerrainMaterial: createHutInteriorTerrainMaterial },
+  { ...colonistRanchoRegion, createTerrainMaterial: createHutInteriorTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
   { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
   { ...coastalScrublandRegion, createTerrainMaterial: createCoastalScrublandTerrainMaterial },

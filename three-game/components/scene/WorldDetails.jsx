@@ -12,6 +12,7 @@ import { EcologyRenderer } from './ecology/EcologyRenderer';
 import { FacetedBoulderField } from './ecology/FacetedBoulderField';
 import { usesFacetedBoulderSurface } from '../../world/facetedBoulders';
 import { BeachedWhaleboatField } from '../world/BeachedWhaleboat';
+import { ProceduralBuildingField } from '../world/ProceduralBuildingField';
 import { onPropEvent } from '../../physics/props/propEvents';
 
 const TREE_MOTION = { wind: 0.62, bend: 0.28, bendRadius: 2.15 };
@@ -136,6 +137,10 @@ function ObstacleProps() {
     () => obstacles.filter(obstacle => obstacle.kind === 'boat' && !obstacle.path),
     [obstacles],
   );
+  const buildings = useMemo(
+    () => obstacles.filter(obstacle => obstacle.procedural && !obstacle.path),
+    [obstacles],
+  );
   const otherObstacles = useMemo(() => obstacles.filter(obstacle => (
     obstacle.path && !usesFacetedBoulderSurface(obstacle)
   )), [obstacles]);
@@ -174,6 +179,9 @@ function ObstacleProps() {
       ) : null}
       {boats.length ? (
         <BeachedWhaleboatField obstacles={boats} currentZoneId={currentZoneId} />
+      ) : null}
+      {buildings.length ? (
+        <ProceduralBuildingField obstacles={buildings} currentZoneId={currentZoneId} />
       ) : null}
     </group>
   );

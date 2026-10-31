@@ -1,3 +1,4 @@
+import { buildSouthernWetlandsCropFields } from '../crops/southernWetlandsCrops';
 import { makeZoneScatter, nearAnyCluster, seededRandom } from '../scatter';
 import { terrainHeight, terrainSlopeAt } from '../terrain';
 import { WATER_LEVEL } from '../terrainShared';
@@ -384,7 +385,8 @@ export function buildSouthernWetlandsEcology() {
     flora: buildFlora(),
     dryGrassPatches: [buildGrass()],
     props: buildProps(),
-    footprintBiomes: ['mud-trail', 'wet-mud', 'fern-bank', 'farm-clearing'],
+    crops: buildSouthernWetlandsCropFields(),
+    footprintBiomes: ['mud-trail', 'wet-mud', 'fern-bank', 'farm-clearing', 'farm-garden'],
     lagoonSurfaces: [
       {
         id: 'wetlands-heron-lagoon',

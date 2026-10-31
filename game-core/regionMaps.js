@@ -64,6 +64,10 @@ const AUTHORED_REGION_TERRAIN = {
   GABRIEL_QUARTERS: { preset: 'gabriel-cave-living-chamber-interior', segments: 144, width: 36, depth: 36 },
   GABRIEL_PRESS: { preset: 'gabriel-cave-press-gallery-interior', segments: 152, width: 38, depth: 30 },
   GABRIEL_SPRING: { preset: 'gabriel-cave-fern-spring-interior', segments: 144, width: 34, depth: 34 },
+  // Hut rooms: the terrain covers only the floor; the exterior apron runs
+  // from the walls outward.
+  WHALERS_HUT_INTERIOR: { preset: 'whalers-hut-interior', segments: 24, width: 6.8, depth: 4.4 },
+  COLONIST_RANCHO: { preset: 'colonist-rancho-interior', segments: 24, width: 5.8, depth: 4.4 },
   // The cove's broad analytic forms and shoreline remain stable at 288; the
   // former 360 grid spent ~36% more terrain triangles on sub-texel detail.
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 288 },

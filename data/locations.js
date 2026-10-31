@@ -2250,12 +2250,13 @@ export const locations = [
     npcs: [],
     boundaries: {},
     discoveries: [
-      'A scrap of red cloth is tied to a branch, near what looks like a crumbled low stone wall—evidence of past habitation.'
+      'A scrap of red cloth is tied to a branch, near what looks like a crumbled low stone wall—evidence of past habitation.',
+      'Beyond the wall, a cleared terrace has been planted in ridged rows of sweet potato and maize, with plantains along the fence.'
     ],
     notableFeatures: [
       'Thick mud and tangled roots hamper progress.',
       'Egrets and flamingos feed among shallow pools (when in season).',
-      'A square of land seems to have been cleared for some attempt at farming.'
+      'A square of land has been cleared and fenced: one of the colonists\' outlying gardens, with a thatched rancho at its head.'
     ]
   },
 
@@ -2337,12 +2338,13 @@ export const locations = [
     color: '#5f9ea0',
     type: 'hut',
     validMoves: ['N','E'],
-    playerStart: [16, 0, -18],
+    playerStart: [21, 0, -12.6],
     specimens: ['crab','sallyLightfoot','greenTurtle'],
     npcs: [],
     boundaries: { south: 'ocean', west: 'ocean' },
     discoveries: [
-      'Stunted tomato plants and empty seedbeds remain from an earlier attempt at cultivation.'
+      'Stunted tomato plants and empty seedbeds remain from an earlier attempt at cultivation.',
+      'The hut is a whalers\' shelter: a dry-stone base under walls of ship\'s planking, a try-pot and tortoise shells in the yard.'
     ],
     notableFeatures: [
       'A crumbling wooden hut stands near the treeline, half-buried in sand drifts.',
@@ -2682,13 +2684,14 @@ export const locations = [
 // === Whaler’s Hut (1x1 interior) ===
 {
   id: 'WHALERS_HUT_INTERIOR',
-  name: 'HUT INTERIOR',
+  name: "Whalers' Hut",
   description: "A stone structure with a battered wooden roof. Broken barrel staves and scattered harpoon parts hint at its whaling history.",
   x: 920,
   y: 100,
   color: '#6b6b6b',
-  type: 'interior',
+  type: 'houseInterior',
   validMoves: [],
+  playerStart: null,
   npcs: [],
   specimens: [],
   boundaries: {},
@@ -2697,8 +2700,45 @@ export const locations = [
   ],
   notableFeatures: [
     'A bitter draft seeps through gaps, carrying the scent of old brine.',
-    'Scratched tally marks on a plank—perhaps a crewman’s lonely record of days.'
-  ]
+    'Scratched tally marks on a plank—perhaps a crewman’s lonely record of days.',
+    'The back corner of the roof has fallen in across the bunk; daylight and sand come through together.'
+  ],
+  narration: {
+    weather: 'clear',
+    sounds: ['surf on the beach outside', 'wind fingering the loose roof boards', 'sand hissing through a gap in the planks'],
+    loadingNote: "You duck under the lintel into the whalers' hut. It is cooler in here, and it smells of tar and old smoke.",
+    educationalNote: 'American and British whalers worked the Galápagos grounds for sperm whale in the 1820s and 1830s, and put in at Floreana for water, wood and tortoises, which they stacked alive in their holds as fresh meat.'
+  }
+},
+
+// === Colonist's rancho (S_WETLANDS garden) ===
+{
+  id: 'COLONIST_RANCHO',
+  name: "Colonist's Rancho",
+  description: 'A one-room house of cane and mud under a grass roof, at the head of a garden plot cut out of the wetland forest.',
+  x: 930,
+  y: 100,
+  color: '#8a7448',
+  type: 'houseInterior',
+  validMoves: [],
+  playerStart: null,
+  npcs: [],
+  specimens: [],
+  boundaries: {},
+  discoveries: [
+    'Maize hangs from the tie beams in its husks, out of reach of the rats.',
+    'A cheap woodcut saint watches the door from a shelf, a candle stub in front of her.'
+  ],
+  notableFeatures: [
+    'A three-stone hearth with no chimney; the smoke leaves through the thatch.',
+    'A cane bed on forked posts, a grinding stone, sacks of sweet potatoes, a tinaja of water.'
+  ],
+  narration: {
+    weather: 'cloudy',
+    sounds: ['the fire ticking in the hearth', 'rain dripping off the thatch', 'a hen complaining somewhere outside'],
+    loadingNote: 'You step through the cane door into smoke and firelight. Someone was here a moment ago.',
+    educationalNote: 'The colony\'s two or three hundred people lived mostly on sweet potatoes and plantains grown on the damp upper ground. Darwin noted that the island could feed them, but that they had nothing to sell.'
+  }
 },
 
 {

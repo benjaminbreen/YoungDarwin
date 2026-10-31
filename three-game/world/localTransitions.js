@@ -6,6 +6,9 @@ import {
   getInteriorTransitions,
 } from '../interiors/interiorRegistry';
 import { GABRIEL_CAVE_ZONE_IDS } from '../interiors/blueprints/gabrielCave';
+import { HUT_INTERIOR_ZONE_IDS } from '../interiors/hutInteriors';
+import { WHALERS_HUT_EXTERIOR_DOOR, WHALERS_HUT_ZONE_ID } from '../interiors/blueprints/whalersHut';
+import { COLONIST_RANCHO_EXTERIOR_DOOR, COLONIST_RANCHO_ZONE_ID } from '../interiors/blueprints/colonistRancho';
 import { getGovernorHouseFrontEntry } from './penalColonyLayout';
 
 const governorHouseEntry = getGovernorHouseFrontEntry();
@@ -56,9 +59,40 @@ const LOCAL_TRANSITIONS = {
       routeLabel: "Lawson's front door",
     },
   ],
+  S_HUT: [
+    {
+      id: 'beach-to-whalers-hut',
+      zoneId: 'S_HUT',
+      toRegionId: WHALERS_HUT_ZONE_ID,
+      label: "Duck into the whalers' hut",
+      description: 'The door hangs open on one leather hinge. Inside, it smells of old smoke and tar.',
+      entryEdge: 'from-beach',
+      position: WHALERS_HUT_EXTERIOR_DOOR.position,
+      radius: 1.6,
+      closeRadius: 1.0,
+      facing: WHALERS_HUT_EXTERIOR_DOOR.facing,
+      routeLabel: "Whalers' hut door",
+    },
+  ],
+  S_WETLANDS: [
+    {
+      id: 'garden-to-colonist-rancho',
+      zoneId: 'S_WETLANDS',
+      toRegionId: COLONIST_RANCHO_ZONE_ID,
+      label: 'Step into the rancho',
+      description: 'The cane door is propped open. There is a fire inside, and no one in sight.',
+      entryEdge: 'from-garden',
+      position: COLONIST_RANCHO_EXTERIOR_DOOR.position,
+      radius: 1.6,
+      closeRadius: 1.0,
+      facing: COLONIST_RANCHO_EXTERIOR_DOOR.facing,
+      routeLabel: 'Rancho door',
+    },
+  ],
   [BEAGLE_CABIN_ZONE_ID]: getInteriorTransitions(BEAGLE_CABIN_ZONE_ID),
   [LAWSON_HOUSE_ZONE_ID]: getInteriorTransitions(LAWSON_HOUSE_ZONE_ID),
   ...Object.fromEntries(GABRIEL_CAVE_ZONE_IDS.map(zoneId => [zoneId, getInteriorTransitions(zoneId)])),
+  ...Object.fromEntries(HUT_INTERIOR_ZONE_IDS.map(zoneId => [zoneId, getInteriorTransitions(zoneId)])),
 };
 
 export function getLocalTransitions(zoneId) {

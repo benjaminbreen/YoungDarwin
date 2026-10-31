@@ -608,6 +608,7 @@ const {
 } = loadModule('three-game/world/regions/watkinsCamp/terrain.js');
 const {
   getInteriorDefinition,
+  getInteriorInteractions,
   getInteriorPropSpawns,
   getInteriorTransitions,
 } = loadModule('three-game/interiors/interiorRegistry.js');
@@ -7125,6 +7126,66 @@ test('Gabriel cave chambers form a connected loop whose doors never catch an arr
       assert.ok(edges.has(`${a}>${b}`), `${a} connects to ${b}`);
     }
   }
+});
+
+test('hut interiors connect to their buildings without catching arrivals or standing in walls', () => {
+  const { HUT_INTERIOR_ZONE_IDS } = loadModule('three-game/interiors/hutInteriors.js');
+  const { whalersHutRegion, colonistRanchoRegion } = loadModule('three-game/world/regions/hutInteriors/terrain.js');
+  const { beachWithHutRegion } = loadModule('three-game/world/regions/beachWithHut/terrain.js');
+  const { southernWetlandsRegion } = loadModule('three-game/world/regions/southernWetlands/terrain.js');
+  const { getBeachWithHutObstacles } = loadModule('three-game/world/beachWithHutLayout.js');
+  const { getSouthernWetlandsObstacles } = loadModule('three-game/world/southernWetlandsLayout.js');
+  const interiorRegions = { WHALERS_HUT_INTERIOR: whalersHutRegion, COLONIST_RANCHO: colonistRanchoRegion };
+  const outdoor = {
+    WHALERS_HUT_INTERIOR: { zoneId: 'S_HUT', region: beachWithHutRegion, obstacles: getBeachWithHutObstacles() },
+    COLONIST_RANCHO: { zoneId: 'S_WETLANDS', region: southernWetlandsRegion, obstacles: getSouthernWetlandsObstacles() },
+  };
+  const insideObstacle = (obstacle, x, z) => obstacle.shapes.some(shape => {
+    const cos = Math.cos(obstacle.yaw || 0);
+    const sin = Math.sin(obstacle.yaw || 0);
+    const dx = x - obstacle.x;
+    const dz = z - obstacle.z;
+    const lx = dx * cos - dz * sin - (shape.offset?.[0] || 0);
+    const lz = dx * sin + dz * cos - (shape.offset?.[2] || 0);
+    if (!shape.size) return Math.hypot(lx, lz) < (shape.radius || 0) * (obstacle.scale || 1) + 0.3;
+    return Math.abs(lx) < shape.size[0] / 2 + 0.3 && Math.abs(lz) < shape.size[2] / 2 + 0.3;
+  });
+  assert.deepEqual([...HUT_INTERIOR_ZONE_IDS].sort(), ['COLONIST_RANCHO', 'WHALERS_HUT_INTERIOR']);
+  for (const zoneId of HUT_INTERIOR_ZONE_IDS) {
+    const definition = getInteriorDefinition(zoneId);
+    const blueprint = definition.blueprint;
+    assert.equal(definition.procedural, 'hut');
+    assert.equal(regionMaps[zoneId].type, 'houseInterior');
+    const region = interiorRegions[zoneId];
+    const [innerX, innerZ] = blueprint.outline[2];
+    for (const collider of blueprint.fixedColliders.filter(item => item.kind === 'furniture')) {
+      const [x, , z] = collider.position;
+      assert.ok(Math.abs(x) + collider.size[0] / 2 <= innerX + 0.05, `${zoneId} ${collider.id} fits between the side walls`);
+      assert.ok(Math.abs(z) + collider.size[2] / 2 <= innerZ + 0.05, `${zoneId} ${collider.id} fits between the end walls`);
+    }
+    // Inside: the arrival is walkable, clear of furniture, and not on the door.
+    const exit = getLocalTransitions(zoneId)[0];
+    const outside = outdoor[zoneId];
+    const entry = getLocalTransitions(outside.zoneId).find(item => item.toRegionId === zoneId);
+    assert.ok(entry, `${outside.zoneId} has a door into ${zoneId}`);
+    const [ax, , az] = region.terrain.entrySpawns[entry.entryEdge];
+    assert.ok(region.terrain.isWalkable(ax, az), `${zoneId} arrival is on the floor`);
+    assert.ok(Math.hypot(exit.position.x - ax, exit.position.z - az) > exit.radius, `${zoneId} door does not catch the arrival`);
+    for (const collider of blueprint.fixedColliders) {
+      const [x, , z] = collider.position;
+      const clear = Math.abs(ax - x) > collider.size[0] / 2 + 0.25 || Math.abs(az - z) > collider.size[2] / 2 + 0.25;
+      assert.ok(clear, `${zoneId} arrival is clear of ${collider.id}`);
+    }
+    // Outside: the arrival from the hut is clear of the building and its door.
+    assert.equal(exit.toRegionId, outside.zoneId);
+    const [ox, , oz] = outside.region.terrain.entrySpawns[exit.entryEdge];
+    assert.ok(Math.hypot(entry.position.x - ox, entry.position.z - oz) > entry.radius, `${outside.zoneId} door does not catch the arrival from ${zoneId}`);
+    for (const obstacle of outside.obstacles.filter(item => item.shapes?.length)) {
+      assert.ok(!insideObstacle(obstacle, ox, oz), `${outside.zoneId} arrival from ${zoneId} is clear of ${obstacle.id}`);
+    }
+  }
+  assert.ok(getInteriorPropSpawns('WHALERS_HUT_INTERIOR').length >= 3);
+  assert.ok(getInteriorInteractions('COLONIST_RANCHO').length >= 7);
 });
 
 test('Gabriel cave rock is a closed shell that keeps the camera inside', () => {
