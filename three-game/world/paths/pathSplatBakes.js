@@ -23,6 +23,7 @@ export const PATH_SPLAT_BAKES = Object.freeze({
   'n-shore': `${GENERATED}/n-shore-path-splat.png`,
   'post-office-bay': `${GENERATED}/post-office-bay-path-splat.png`,
   'lava-flats': `${GENERATED}/lava-flats-path-splat.png`,
+  'southern-volcanic': `${GENERATED}/southern-volcanic-path-splat.png`,
   'penal-colony': `${GENERATED}/penal-colony-path-splat.png`,
   'watkins-creek': `${GENERATED}/watkins-creek-path-splat.png`,
   'coastal-scrubland': `${GENERATED}/coastal-scrubland-path-splat.png`,

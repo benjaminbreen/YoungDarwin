@@ -69,6 +69,10 @@ export const inspectableCatalog = {
   plantain: { id: 'plantain', kind: 'plant', englishName: 'Plantain', latinName: 'Musa × paradisiaca, introduced from the mainland', category: 'Plant', rarity: 'uncommon' },
   maize_crib: { id: 'maize_crib', kind: 'artifact', englishName: 'Maize drying on a rack', latinName: 'Zea mays, hung by the husk', category: 'Historical artifact', rarity: 'common' },
   colony_fence: { id: 'colony_fence', kind: 'artifact', englishName: 'Stake fence', latinName: 'built against wild pigs and goats', category: 'Historical structure', rarity: 'common' },
+  // The Basalt Plains: the spatter cone, its vents, and the inflated flows.
+  fumarole: { id: 'fumarole', kind: 'rock', englishName: 'Sulphur fumarole', latinName: 'warm vapour through yellow-crusted cracks', category: 'Geology', rarity: 'rare' },
+  spatter_cone: { id: 'spatter_cone', kind: 'rock', englishName: 'Spatter cone', latinName: 'welded clots of lava thrown from a small vent', category: 'Geology', rarity: 'uncommon' },
+  tumulus: { id: 'tumulus', kind: 'rock', englishName: 'Lava tumulus', latinName: 'pāhoehoe crust lifted and split along its crest', category: 'Geology', rarity: 'uncommon' },
 };
 
 function normalizeRarity(rarity) {

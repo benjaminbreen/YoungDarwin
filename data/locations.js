@@ -1931,7 +1931,7 @@ export const locations = [
   {
     id: 'S_VOLCANIC',
     name: 'Basalt Plains',
-    description: 'A stark, black volcanic plain.',
+    description: 'A plain of black, ropy lava below the settlement, broken by lifted domes of crust and a small cone still breathing sulphur.',
     x: 2,
     y: 3,
     color: '#696969',
@@ -1991,12 +1991,15 @@ export const locations = [
     npcs: [],
     boundaries: {},
     discoveries: [
-      'Geological investigations would be warranted here—layers of basalt stretch across the horizon.'
+      'Geological investigations would be warranted here—layers of basalt stretch across the horizon.',
+      'The yellow crust round the vents is sulphur, deposited from the steam itself.'
     ],
     notableFeatures: [
-      'Flat, cracked basalt stretches under a pitiless sun.',
-      'Occasional fumaroles vent faint sulfuric steam.',
-      'Minimal shade, save for a few rugged boulders.'
+      'Ropy black lava, folded like a coil of cable, stretches under a pitiless sun.',
+      'A low spatter cone vents faint sulphurous steam from its flank and crater.',
+      'Domes of crust stand split along their crests where the lava swelled beneath them.',
+      'A hollow of green olivine sand lies east of the cone.',
+      'One island of older ground carries prickly pear and leafless palo santo.'
     ]
   },
 

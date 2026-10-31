@@ -82,6 +82,9 @@ const AUTHORED_REGION_TERRAIN = {
   // the creek detail, so the authored valley does not need Watkins' 320-grid.
   WATKINS_CREEK: { preset: 'highland-creek-fork', segments: 248 },
   LAVA_FLATS: { preset: 'authored-lava-flats', segments: 248 },
+  // The spatter cone and tumuli are broad forms; packed relief and the
+  // render-only ropes carry the close pāhoehoe texture.
+  S_VOLCANIC: { preset: 'southern-basalt-plains', segments: 248 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 192 },
   N_OUTCROP: { preset: 'desolate-basalt-outcrop', segments: 300 },
   DEVILS_CROWN: { preset: 'devils-crown-crater-islet', segments: 320 },

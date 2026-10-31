@@ -34,6 +34,7 @@ import { SurfaceLitterField } from './SurfaceLitterField';
 import { CollectibleBeachFindsLayer } from './CollectibleBeachFindsLayer';
 import { AmbientWildlifeLayer } from './AmbientWildlifeLayer';
 import { CropFieldLayer } from './CropFieldLayer';
+import { FumaroleField } from './FumaroleField';
 import { StandingWaterSurface } from './StandingWaterSurface';
 import { CaveEntrance } from './CaveEntrance';
 import { VolcanicFormationField } from './VolcanicFormationField';
@@ -136,6 +137,7 @@ const EMPTY_LAYER_PLAN = {
   caveEntrances: [],
   canopySilhouettes: [],
   crops: [],
+  fumaroles: [],
 };
 const EMPTY_PROP_PLAN = { instancedGroups: [], staticProps: [] };
 
@@ -383,6 +385,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       caveEntrances: (ecology.caveEntrances || []).filter(item => tierVisible(item) && preparationVisible(3)),
       canopySilhouettes: (ecology.canopySilhouettes || []).filter(item => tierVisible(item) && preparationVisible(3)),
       crops: (ecology.crops || []).filter(item => tierVisible(item) && preparationVisible(5)),
+      fumaroles: (ecology.fumaroles || []).filter(item => tierVisible(item) && preparationVisible(5)),
     };
   }, [ecology, preparationPhase, streamTier]);
   const propPlan = useMemo(() => (
@@ -419,6 +422,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
     caveEntrances,
     canopySilhouettes,
     crops,
+    fumaroles,
   } = visibleLayers;
   const { instancedGroups: instancedProps, staticProps } = propPlan;
   return (
@@ -481,6 +485,9 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       ))}
       {ambientWildlife.map(layer => (
         <AmbientWildlifeLayer key={layer.id} layer={{ ...layer, zoneId: layer.zoneId || ecology.zoneId }} />
+      ))}
+      {fumaroles.map(layer => (
+        <FumaroleField key={layer.id} layer={layer} />
       ))}
       {crops.map(layer => (
         <CropFieldLayer key={layer.id} layer={layer} zoneId={layer.zoneId || ecology.zoneId} />

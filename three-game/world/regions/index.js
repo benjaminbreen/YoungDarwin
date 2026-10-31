@@ -75,6 +75,8 @@ import { easternCliffsRegion } from './easternCliffs/terrain';
 import { createEasternCliffsTerrainMaterial } from './easternCliffs/material';
 import { lavaFlatsRegion } from './lavaFlats/terrain';
 import { createLavaFlatsTerrainMaterial } from './lavaFlats/material';
+import { southernVolcanicRegion } from './southernVolcanic/terrain';
+import { createSouthernVolcanicTerrainMaterial } from './southernVolcanic/material';
 import { northernHighlandsRegion } from './northernHighlands/terrain';
 import { createNorthernHighlandsTerrainMaterial } from './northernHighlands/material';
 import { watkinsCreekRegion } from './watkinsCreek/terrain';
@@ -127,6 +129,7 @@ const authoredRegions = [
   { ...coastalScrublandRegion, createTerrainMaterial: createCoastalScrublandTerrainMaterial },
   { ...easternCliffsRegion, createTerrainMaterial: createEasternCliffsTerrainMaterial },
   { ...lavaFlatsRegion, createTerrainMaterial: createLavaFlatsTerrainMaterial },
+  { ...southernVolcanicRegion, createTerrainMaterial: createSouthernVolcanicTerrainMaterial },
   { ...northernHighlandsRegion, createTerrainMaterial: createNorthernHighlandsTerrainMaterial },
   { ...watkinsCreekRegion, createTerrainMaterial: createWatkinsCreekTerrainMaterial },
   { ...puntaSurRegion, createTerrainMaterial: createPuntaSurTerrainMaterial },

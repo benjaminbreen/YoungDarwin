@@ -25,6 +25,10 @@ import {
   buildProceduralFloraLayer,
   buildProceduralInteractiveFloraLayer,
 } from './proceduralFlora';
+import {
+  buildStandardDryGrassPatchItems,
+  createStandardDryGrassPatchLayer,
+} from './standardGrass';
 
 const NATURE = '/assets/models/nature/';
 
@@ -424,6 +428,62 @@ function trailMarkerProps() {
   return props;
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+// Garua-fed ground cover: deep green tussock in the fern clearings and along
+// the trail, thinning to sparse shade-tolerant tufts under the scalesia.
+function highlandGrassTint(tone, dryness) {
+  const shade = clamp01(tone * 0.5 + dryness * 0.3);
+  if (dryness > 0.55) return shade > 0.55 ? '#93a05c' : '#7b8a4c';
+  if (dryness > 0.3) return shade > 0.5 ? '#7c9a56' : '#62804a';
+  return shade > 0.48 ? '#628a4c' : '#4c703e';
+}
+
+function buildGroundCover() {
+  const items = buildStandardDryGrassPatchItems({
+    zoneId: W_HIGH,
+    idPrefix: 'western-highlands-garua-grass',
+    count: 520,
+    seed: 9157,
+    bounds: { minX: -46, maxX: 46, minZ: -42, maxZ: 44 },
+    rejectBiomes: ['mud-trail'],
+    maxGrade: 0.72,
+    scale: [0.7, 1.32],
+    drynessAt: ({ x, z, tone }) => clamp01(
+      0.2
+      + tone * 0.18
+      - westernHighlandsWetHollowMask(x, z) * 0.22
+      - westernHighlandsCanopyMask(x, z) * 0.08,
+    ),
+    tintAt: highlandGrassTint,
+    accept: ({ x, z }) => {
+      if (westernHighlandsTrailInfluence(x, z, 1.1, 3.2) > 0.5) return false;
+      const clearing = westernHighlandsClearingMask(x, z);
+      const canopy = westernHighlandsCanopyMask(x, z);
+      const edge = westernHighlandsTrailInfluence(x, z, 1.2, 7.5);
+      // Dense in the open, sparse under full canopy.
+      const density = Math.max(clearing * 1.2, edge * 0.8, 0.22 + (1 - canopy) * 0.5);
+      return seededRandom(Math.floor(x * 31 + z * 17), 11) < density;
+    },
+  });
+  return createStandardDryGrassPatchLayer({
+    id: 'western-highlands-garua-grass-patches',
+    items,
+    materialColor: '#d4e2ae',
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    roughness: 1,
+    castShadow: false,
+    widthScale: 1.0,
+    heightScale: 1.12,
+    maxVisibleDistance: 92,
+    bladeTextureStrength: 0.24,
+    motion: { wind: 0.85, bend: 0.22, bendRadius: 1.1 },
+  });
+}
+
 export function buildWesternHighlandsEcology() {
   const rocks = getWesternHighlandsRocks();
   const interactiveFlora = buildInteractiveFlora();
@@ -433,6 +493,7 @@ export function buildWesternHighlandsEcology() {
     proceduralFlora: buildProceduralFlora(),
     interactiveFlora,
     generatedTrees: buildGeneratedTrees(),
+    dryGrassPatches: [buildGroundCover()],
     rocks,
     props: trailMarkerProps(),
     footprintBiomes: ['mud-trail', 'wet-hollow', 'fern-clearing'],

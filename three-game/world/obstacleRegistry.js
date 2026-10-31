@@ -18,6 +18,7 @@ import { getHutInteriorObstacles } from './hutInteriorLayout';
 import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
 import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
+import { getSouthernVolcanicObstacles } from './southernVolcanicLayout';
 import { getNorthernHighlandsRockObstacles } from './northernHighlandsLayout';
 import { getWatkinsCreekRockObstacles } from './watkinsCreekLayout';
 import { getCerroPajasRockObstacles } from './cerroPajasLayout';
@@ -62,6 +63,7 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   WATKINS: [getWatkinsCampObstacles],
   POST_SCRUB_RISE: [getPostScrubRiseRockObstacles],
   LAVA_FLATS: [getLavaFlatsRockObstacles],
+  S_VOLCANIC: [getSouthernVolcanicObstacles],
   NORTHERN_HIGHLANDS: [getNorthernHighlandsRockObstacles],
   WATKINS_CREEK: [getWatkinsCreekRockObstacles],
   C_HIGH: [getCerroPajasRockObstacles],

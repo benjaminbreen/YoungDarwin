@@ -31,6 +31,7 @@ import { buildCoastalScrublandEcology } from './coastalScrubland';
 import { buildEasternCliffsEcology } from './easternCliffs';
 import { buildPostOfficeBayEcology } from './postOfficeBay';
 import { buildLavaFlatsEcology } from './lavaFlats';
+import { buildSouthernVolcanicEcology } from './southernVolcanic';
 import { buildNorthernHighlandsEcology } from './northernHighlands';
 import { buildWatkinsCreekEcology } from './watkinsCreek';
 import { buildPuntaSurEcology } from './puntaSur';
@@ -72,6 +73,7 @@ const builders = {
   COASTAL_SCRUBLAND: buildCoastalScrublandEcology,
   EASTERN_CLIFFS: buildEasternCliffsEcology,
   LAVA_FLATS: buildLavaFlatsEcology,
+  S_VOLCANIC: buildSouthernVolcanicEcology,
   NORTHERN_HIGHLANDS: buildNorthernHighlandsEcology,
   WATKINS_CREEK: buildWatkinsCreekEcology,
   PUNTA_SUR: buildPuntaSurEcology,
