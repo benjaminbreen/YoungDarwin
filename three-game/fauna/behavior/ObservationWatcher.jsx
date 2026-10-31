@@ -3,7 +3,8 @@
 // Watches what Darwin watches. Five times a second it checks the open
 // behaviour episodes against where he stands, where the camera looks and
 // whether he is keeping still, records the ones he sees through, and tells
-// the HUD which one he is watching.
+// the HUD (or the examine view, during a close look) which one he is
+// watching.
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -27,8 +28,9 @@ export function ObservationWatcher() {
     const dt = clock.current.accum;
     clock.current.accum = 0;
     const state = useThreeGameStore.getState();
-    // No watching from inside the examine view or with an animal in hand.
-    if (state.examineSession || state.carriedObjectId) {
+    // No watching with an animal in hand. The examine view is a close look
+    // at a live animal, so watching carries on through it.
+    if (state.carriedObjectId) {
       if (state.watchFocus) state.setWatchFocus(null);
       return;
     }
@@ -44,6 +46,7 @@ export function ObservationWatcher() {
       episodes,
       player: pose?.position,
       view,
+      eye: camera.position,
       playerSpeed: velocity ? Math.hypot(velocity.x || 0, velocity.z || 0) : 0,
       daylight: skyState(state.timeOfDay ?? 12, state.day || 1).daylight,
       dt,
@@ -51,8 +54,11 @@ export function ObservationWatcher() {
     for (const episode of done) state.recordFieldObservation(episode);
     state.setWatchFocus(focus ? {
       episodeId: focus.episode.id,
+      actorId: focus.episode.actorId,
+      partnerActorId: focus.episode.partnerActorId || null,
       speciesId: focus.episode.speciesId,
       behaviorId: focus.episode.behaviorId,
+      behaviorLabel: observationLabel(focus.episode),
       label: `${speciesName(focus.episode.speciesId)}, ${observationLabel(focus.episode)}`,
       progress: Math.round(focus.progress * 20) / 20,
       still: focus.still,

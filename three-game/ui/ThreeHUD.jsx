@@ -98,6 +98,7 @@ import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
 import { normalizeWeatherState } from '../world/weatherStates';
 import { fieldConditionFor } from '../world/fieldConditions';
+import { getTargetBracket, subscribeTargetBracket } from './targetBracket';
 import {
   getAnimalAction,
   getAnimalActionImage,
@@ -1793,7 +1794,8 @@ function SymsMinimapMarker({ zone }) {
 function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = false }) {
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const [activeMarkerId, setActiveMarkerId] = useState(null);
-  const specimens = getThreeSpecimens(zone.id);
+  // Resident populations are not charted; the authored animal marks the place.
+  const specimens = useMemo(() => getThreeSpecimens(zone.id).filter(specimen => !specimen.population), [zone.id]);
   const playerPose = useLiveMinimapPose();
   const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
   const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
@@ -3372,8 +3374,7 @@ const MOVEMENT_HINT_MOVE_KEYS = new Set([
   'ArrowDown',
   'ArrowRight',
 ]);
-const COLLECTION_METHOD_IDS = ['hands', 'hammer', 'insect_net', 'shotgun'];
-const COLLECTION_METHOD_SET = new Set(COLLECTION_METHOD_IDS);
+const COLLECTION_METHOD_SET = new Set(['hands', 'hammer', 'insect_net', 'shotgun']);
 const PROMPT_EXIT_MS = 220;
 const RESULT_TOAST_EXIT_MS = 280;
 
@@ -3784,7 +3785,7 @@ function CompactPrompt({ children, visible = true, testId = null }) {
     <div
       data-testid={testId || undefined}
       aria-live="polite"
-      className={`absolute left-1/2 top-[52%] max-w-[min(30rem,calc(100vw-1.25rem))] -translate-x-1/2 -translate-y-1/2 font-expedition transition-[opacity,filter] duration-[220ms] ease-out sm:left-[calc(50%+7rem)] sm:top-[64%] ${
+      className={`absolute max-w-[min(30rem,calc(100vw-1.25rem))] font-expedition transition-[opacity,filter] duration-[220ms] ease-out ${ACTION_PROMPT_ANCHOR} ${
         visible
           ? 'pointer-events-auto opacity-100 blur-0'
           : 'pointer-events-none opacity-0 blur-[1px]'
@@ -3802,7 +3803,9 @@ function CompactPrompt({ children, visible = true, testId = null }) {
 // is moving says so.
 function WatchIndicator() {
   const focus = useThreeGameStore(state => state.watchFocus);
-  if (!focus) return null;
+  // The examine view shows its own watch line during a close look.
+  const examining = useThreeGameStore(state => Boolean(state.examineSession));
+  if (!focus || examining) return null;
   return (
     <div className="pointer-events-none absolute bottom-[8.5rem] left-1/2 z-10 -translate-x-1/2 font-expedition" aria-live="polite" data-testid="watch-indicator">
       <div className="rounded-sm border border-expedition-brass/40 bg-[rgba(12,20,28,0.62)] px-3 py-1.5 text-center shadow-lg backdrop-blur-md">
@@ -3920,67 +3923,6 @@ function useContextPromptCandidate(source, candidate) {
       clearContextPrompt(source);
     };
   }, [candidate, clearContextPrompt, publishContextPrompt, source]);
-}
-
-function currentCollectionMethodId(activeToolId) {
-  return COLLECTION_METHOD_SET.has(activeToolId) ? activeToolId : 'hands';
-}
-
-function nextCollectionMethodId(activeToolId, direction = 1) {
-  const current = currentCollectionMethodId(activeToolId);
-  const index = COLLECTION_METHOD_IDS.indexOf(current);
-  const nextIndex = (index + direction + COLLECTION_METHOD_IDS.length) % COLLECTION_METHOD_IDS.length;
-  return COLLECTION_METHOD_IDS[nextIndex];
-}
-
-function collectionMethodName(toolId) {
-  return getInventoryItem(toolId)?.name || threeTools.find(tool => tool.id === toolId)?.name || 'Bare Hands';
-}
-
-function CollectionMethodIcon({ toolId, active = false, compact = false, onSelect = null }) {
-  const item = getInventoryItem(toolId);
-  const Icon = TOOL_ICONS[toolId];
-  const label = item?.name || collectionMethodName(toolId);
-  const sizeClass = compact ? 'h-6 w-6' : 'h-7 w-7';
-  const iconClass = compact ? 'h-4 w-4' : 'h-[18px] w-[18px]';
-  const className = `${sizeClass} inline-flex shrink-0 items-center justify-center rounded-[5px] border transition ${
-    active
-      ? 'border-expedition-goldbright/80 bg-expedition-gold/18 text-expedition-goldbright shadow-[0_0_14px_rgba(227,197,133,0.18),inset_0_0_0_1px_rgba(227,197,133,0.12)]'
-      : 'border-expedition-brass/40 bg-black/18 text-expedition-parchment/78 hover:border-expedition-gold/70 hover:bg-expedition-gold/10 hover:text-expedition-goldbright'
-  }`;
-  const content = item?.image ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={item.image}
-      alt=""
-      draggable={false}
-      className={`${compact ? 'h-5 w-5' : 'h-[22px] w-[22px]'} object-contain drop-shadow-[0_2px_2px_rgba(0,0,0,0.55)]`}
-    />
-  ) : Icon ? (
-    <Icon className={iconClass} />
-  ) : (
-    <span className="text-[13px]">{item?.icon || '?'}</span>
-  );
-
-  if (onSelect) {
-    return (
-      <button
-        type="button"
-        title={label}
-        aria-label={`Use ${label}`}
-        onClick={() => onSelect(toolId)}
-        className={className}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return (
-    <span title={label} aria-label={label} className={className}>
-      {content}
-    </span>
-  );
 }
 
 // Case buttons glow and shake in the newest specimen's rarity color. Derived
@@ -4157,45 +4099,37 @@ function MajorEventToast() {
   );
 }
 
+// Where the action prompts sit: a fixed spot just above the toolbar, never
+// over the subject. Close up, a prompt in mid-screen covered the very animal
+// it named.
+const ACTION_PROMPT_ANCHOR = 'left-1/2 top-[56%] -translate-x-1/2 -translate-y-1/2 md:top-auto md:bottom-[10rem] md:translate-y-0 lg:bottom-[5rem]';
+
 function SpecimenInteractionCard({
   specimen,
   examined,
   fieldAction,
   activeToolId,
-  setActiveTool,
   collectNearby,
   openExamine,
   visible,
   hint = null,
 }) {
-  const methodId = currentCollectionMethodId(activeToolId);
-  const methodName = collectionMethodName(methodId);
-  const otherMethods = COLLECTION_METHOD_IDS.filter(id => id !== methodId);
   // Mirrors resolveFieldAction: an equipped tool collects an unstudied
   // species outright, so the card must offer Collect in that state too.
   const canCollect = examined || (COLLECTION_METHOD_SET.has(activeToolId) && activeToolId !== 'hands');
+  // The catch rules name the act (Grab, Net, Shoot) or the tool it needs.
+  const actionLabel = fieldAction?.shortLabel === 'Wrong tool'
+    ? fieldAction.label
+    : fieldAction?.shortLabel || (canCollect ? 'Collect' : 'Examine');
 
-  const selectMethod = useCallback(toolId => {
-    if (COLLECTION_METHOD_SET.has(toolId)) setActiveTool(toolId);
-  }, [setActiveTool]);
-
-  const cycleMethod = useCallback((direction = 1) => {
-    setActiveTool(nextCollectionMethodId(activeToolId, direction));
-  }, [activeToolId, setActiveTool]);
-
-  const collectWithCurrentMethod = useCallback(() => {
-    if (!COLLECTION_METHOD_SET.has(activeToolId)) setActiveTool(methodId);
-    collectNearby();
-  }, [activeToolId, collectNearby, methodId, setActiveTool]);
-
-  useEffect(() => {
-    if (visible && examined && !COLLECTION_METHOD_SET.has(activeToolId)) {
-      setActiveTool('hands');
-    }
-  }, [activeToolId, examined, setActiveTool, visible]);
+  const onAction = useCallback(() => {
+    if (canCollect) collectNearby();
+    else if (fieldAction?.kind === 'observe') openExamine(specimen.instanceId || specimen.id);
+    else pulseTouchControl('fieldAction');
+  }, [canCollect, collectNearby, fieldAction?.kind, openExamine, specimen.id, specimen.instanceId]);
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-[56%] w-[23rem] max-w-[calc(100vw-1.25rem)] -translate-x-1/2 -translate-y-1/2 font-expedition sm:left-[calc(50%+6rem)] sm:top-[64%]">
+    <div data-testid="specimen-action-card" className={`pointer-events-none absolute w-[23rem] max-w-[calc(100vw-1.25rem)] font-expedition ${ACTION_PROMPT_ANCHOR}`}>
       <section
         className={`pointer-events-auto overflow-hidden rounded-[7px] border border-expedition-gold/30 bg-[rgba(12,20,38,0.86)] text-expedition-parchment shadow-[0_16px_40px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(227,197,133,0.12)] backdrop-blur-md transition-[opacity,transform,filter] duration-[220ms] ease-out ${
           visible ? 'translate-y-0 scale-100 opacity-100 blur-0' : 'pointer-events-none translate-y-2 scale-[0.975] opacity-0 blur-[1px]'
@@ -4210,59 +4144,51 @@ function SpecimenInteractionCard({
               </div>
               <RarityBadge specimen={specimen} />
             </div>
-            {canCollect ? (
-              <button
-                type="button"
-                onClick={collectWithCurrentMethod}
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
-              >
-                <PromptKey active>E</PromptKey>
-                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">Collect</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => fieldAction?.kind === 'observe'
-                  ? openExamine(specimen.instanceId || specimen.id)
-                  : pulseTouchControl('fieldAction')}
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
-              >
-                <PromptKey active>E</PromptKey>
-                <span className="text-[14px] font-semibold leading-none text-expedition-parchment">
-                  {fieldAction?.shortLabel || 'Examine'}
-                </span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onAction}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+            >
+              <PromptKey active>E</PromptKey>
+              <span className="text-[14px] font-semibold leading-none text-expedition-parchment">{actionLabel}</span>
+            </button>
           </div>
-
-          {canCollect && (
-            <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-expedition-brass/25 pt-2">
-              <button
-                type="button"
-                onClick={() => cycleMethod(1)}
-                className="flex min-w-0 items-center gap-1.5 rounded-[6px] border border-expedition-brass/35 bg-black/20 p-0.5 pr-1.5 text-left transition hover:border-expedition-gold/65 hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/60"
-              >
-                <CollectionMethodIcon toolId={methodId} active />
-                <span className="min-w-0 truncate text-[12.5px] font-semibold leading-none text-expedition-parchment">{methodName}</span>
-              </button>
-
-              <div className="flex min-w-0 items-center gap-1 opacity-60 transition hover:opacity-100">
-                {otherMethods.map(toolId => (
-                  <CollectionMethodIcon
-                    key={toolId}
-                    toolId={toolId}
-                    compact
-                    onSelect={selectMethod}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
           {hint && (
             <div className="mt-1.5 text-center text-[10px] leading-snug text-expedition-faded/85">{hint}</div>
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+// Four corner marks around the animal the action key will act on. Position is
+// written straight to the element from the projector's per-frame rectangle.
+function TargetBracket() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const apply = rect => {
+      const el = ref.current;
+      if (!el) return;
+      if (!rect) {
+        el.style.opacity = '0';
+        return;
+      }
+      el.style.opacity = '1';
+      el.style.transform = `translate3d(${rect.x}px, ${rect.y}px, 0)`;
+      el.style.width = `${rect.w}px`;
+      el.style.height = `${rect.h}px`;
+    };
+    apply(getTargetBracket());
+    return subscribeTargetBracket(apply);
+  }, []);
+  const mark = 'absolute h-3 w-3 border-expedition-goldbright/90 drop-shadow-[0_0_2px_rgba(0,0,0,0.85)]';
+  return (
+    <div ref={ref} data-testid="target-bracket" aria-hidden className="pointer-events-none absolute left-0 top-0 opacity-0 transition-opacity duration-150">
+      <span className={`${mark} left-0 top-0 border-l-2 border-t-2`} />
+      <span className={`${mark} right-0 top-0 border-r-2 border-t-2`} />
+      <span className={`${mark} bottom-0 left-0 border-b-2 border-l-2`} />
+      <span className={`${mark} bottom-0 right-0 border-b-2 border-r-2`} />
     </div>
   );
 }
@@ -4277,7 +4203,6 @@ function InteractionPrompt() {
   const carryPrompt = useThreeGameStore(state => state.carryPrompt);
   const interiorPrompt = useThreeGameStore(state => state.interiorPrompt);
   const activeToolId = useThreeGameStore(state => state.activeToolId);
-  const setActiveTool = useThreeGameStore(state => state.setActiveTool);
   const collectNearby = useThreeGameStore(state => state.collectNearby);
   const openExamine = useThreeGameStore(state => state.openExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
@@ -4565,7 +4490,6 @@ function InteractionPrompt() {
       examined={examined}
       fieldAction={fieldAction?.target?.kind === 'specimen' ? fieldAction : null}
       activeToolId={activeToolId}
-      setActiveTool={setActiveTool}
       collectNearby={collectNearby}
       openExamine={openExamine}
       visible={specimenPromptVisible}
@@ -5451,6 +5375,7 @@ export function ThreeHUD({
         </div>
       )}
 
+      <TargetBracket />
       <InteractionPrompt />
       <ObservationModeGuide />
       <WatchIndicator />

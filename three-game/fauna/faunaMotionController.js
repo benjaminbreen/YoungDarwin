@@ -16,6 +16,9 @@ import { publishSocial } from './behavior/socialField';
 // ./motion/<archetype>.js; this module owns the stable public API, the shared
 // threat evaluation step, and dispatch on `profile.controller`.
 
+// Alert-distance scale while Darwin is settled down watching an animal.
+export const OBSERVED_TOLERANCE = 0.4;
+
 const ARCHETYPES = {
   basker: createBaskerMotion,
   deckMonkey: createDeckMonkeyMotion,
@@ -91,6 +94,7 @@ export function createFaunaMotionController({
     playerSpeed: 0,
     playerDistance: Infinity,
     tame: true,
+    observed: false,
   };
 
   function reset(next = {}) {
@@ -143,6 +147,8 @@ export function createFaunaMotionController({
       radiusScale = 1,
       // Darwin's planar speed, for habituation and curiosity.
       playerSpeed = 0,
+      // Darwin has settled down to watch this animal (the examine view).
+      observed = false,
     }) {
       if (!profile || !habitat || !motion) return { ok: false, reason: 'inactive' };
       if (paused) return { ok: true, reason: 'paused', state };
@@ -165,7 +171,10 @@ export function createFaunaMotionController({
       ctx.clock = t;
       const dt = Math.min(0.2, Math.max(0.001, delta));
       const tolerance = brain ? brain.tolerance() : 1;
-      const threat = threats.evaluate({ player, t, dt, playerIsKin, radiusScale: radiusScale * tolerance });
+      // Crouched and quiet, a watcher is less of a threat; how much less still
+      // depends on how wary island persecution has made the species.
+      const watched = observed ? OBSERVED_TOLERANCE : 1;
+      const threat = threats.evaluate({ player, t, dt, playerIsKin, radiusScale: radiusScale * tolerance * watched });
 
       if (brain) {
         const b = brainContext;
@@ -183,6 +192,7 @@ export function createFaunaMotionController({
         b.playerSpeed = playerSpeed;
         b.playerDistance = threat.distanceToPlayer;
         b.tame = radiusScale <= 1.05;
+        b.observed = observed;
         const intent = brain.step(b);
         if (intent?.active) {
           return applyBehaviorIntent(ctx, intent, { base, currentZoneId, t, dt, panic: threat.panic });

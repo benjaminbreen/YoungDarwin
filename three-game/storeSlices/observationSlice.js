@@ -59,6 +59,16 @@ export const createObservationActions = set => ({
       };
       const label = observationLabel(record);
       const name = speciesName(record.speciesId);
+      // Seen during a close look at one of the animals involved: it goes in
+      // the examination notes as well.
+      const session = state.examineSession;
+      if (session && (session.actorId === episode.actorId || session.actorId === episode.partnerActorId)) {
+        const note = observationNote(record) || `${capitalize(name)} seen ${label}.`;
+        patch.examineSession = {
+          ...session,
+          chat: [...session.chat, { id: `watched-${record.id}`, role: 'assistant', text: `${note} (Entered under its habits.)` }],
+        };
+      }
       if (firstOfKind) {
         const note = observationNote(record);
         patch.message = `Observed: ${name}, ${label}. Entered in the notebook.`;

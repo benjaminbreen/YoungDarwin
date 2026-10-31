@@ -2,13 +2,15 @@ import { currentRegionId as currentZoneId } from '../game-core/regionMaps';
 import { getInitialNarration, getIslandLocation, getZoneSpecimens } from '../game-core/specimens';
 import { expeditionTools } from '../game-core/tools';
 import { isRecordedFieldEntry } from './directives';
+import { buildFaunaPopulationSpecimens } from './world/ecology/faunaPopulations';
 
 const zoneSpecimenCache = new Map();
 const zoneSpecimenTypeCache = new Map();
 
 export function getThreeSpecimens(zoneId = currentZoneId) {
   if (!zoneSpecimenCache.has(zoneId)) {
-    zoneSpecimenCache.set(zoneId, getZoneSpecimens(zoneId));
+    // Authored spawns, then the resident populations around them.
+    zoneSpecimenCache.set(zoneId, [...getZoneSpecimens(zoneId), ...buildFaunaPopulationSpecimens(zoneId)]);
   }
   return zoneSpecimenCache.get(zoneId);
 }

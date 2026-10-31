@@ -169,6 +169,7 @@ import {
   setHorizonIslands,
   subscribeHorizonIslands,
 } from './world/vistas/horizonIslandsRuntime';
+import { getBehaviorBrain } from './fauna/behavior/behaviorBrain';
 
 const DEV_TOOLS_ENABLED = process.env.NODE_ENV !== 'production';
 // Resolved once at module load: the deployed build only offers the readout
@@ -215,6 +216,8 @@ const AudioDebugPanel = dynamic(
 );
 
 const GAME_MINUTES_PER_REAL_SECOND = 10 / 60;
+// Share of the normal clock rate while Darwin watches a live animal close up.
+const EXAMINE_WATCH_CLOCK_RATE = 0.25;
 
 // SMAAPreset.ULTRA from the 'postprocessing' package. That package is only a
 // transitive dep (not re-exported by @react-three/postprocessing), so we inline
@@ -1448,14 +1451,17 @@ function ExpeditionClock() {
   }, []);
 
   useFrame((_, delta) => {
-    if (statusViewOpen || examineOpen || readableBookOpen || isExpeditionPaused() || document.hidden) {
+    // A close look at a live animal is time spent watching it: the clock runs
+    // slowly rather than stopping. Rocks, plants and objects still stop it.
+    const watchingAnimal = examineOpen && Boolean(getBehaviorBrain(useThreeGameStore.getState().examineSession?.actorId));
+    if (statusViewOpen || (examineOpen && !watchingAnimal) || readableBookOpen || isExpeditionPaused() || document.hidden) {
       // Status/examine views and the pause menu freeze expedition time; drop
       // accumulated real time so the clock doesn't lurch forward on close.
       elapsed.current = 0;
       return;
     }
     // Clamped: a long stall must cost at most one frame of expedition time.
-    elapsed.current += clampFrameDelta(delta);
+    elapsed.current += clampFrameDelta(delta) * (watchingAnimal ? EXAMINE_WATCH_CLOCK_RATE : 1);
     if (elapsed.current < 1) return;
     const wholeSeconds = Math.floor(elapsed.current);
     elapsed.current -= wholeSeconds;

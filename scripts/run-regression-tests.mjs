@@ -1078,7 +1078,8 @@ test('Post Office Bay opens with only the mail barrel, one crate, and Syms’s c
 });
 
 test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barnacle at its edges', () => {
-  const specimens = getThreeSpecimens('POST_OFFICE_BAY');
+  const everyone = getThreeSpecimens('POST_OFFICE_BAY');
+  const specimens = everyone.filter(specimen => !specimen.population);
   const counts = specimens.reduce((result, specimen) => {
     result[specimen.id] = (result[specimen.id] || 0) + 1;
     return result;
@@ -1110,7 +1111,10 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
     specimen.id === 'lavalizard' || specimen.id === 'barnacle'
   ));
   assert.equal(edgeSpecimens.length, 3);
-  for (const specimen of edgeSpecimens) {
+  // The resident lizards around them keep to the edges as well.
+  const residents = everyone.filter(specimen => specimen.population);
+  assert.ok(residents.length > 0);
+  for (const specimen of [...edgeSpecimens, ...residents]) {
     const [x, , z] = specimen.spawnPoint;
     assert.equal(isWalkableTerrain(x, z, 'POST_OFFICE_BAY'), true);
     assert.ok(
@@ -7703,6 +7707,13 @@ test('a behaviour counts as observed only when watched in view, in range and kee
   assert.equal(moving.focus?.still, false, 'the HUD can say to keep still');
   assert.equal(run({ x: 0, z: 1 }, 0, 3).length, 1, 'watched through');
   assert.equal(run({ x: 0, z: 1 }, 0, 3).length, 0, 'once per episode');
+  // The examine camera orbits the subject: it can look back at Darwin's side
+  // from beyond the animal, and still be watching it.
+  const orbit = { ...episode, id: 'ep-c' };
+  const fromBeyond = () => witness.tick({ episodes: [orbit], player, view: { x: 0, z: -1 }, eye: { x: 0, z: 8 }, dt: 0.5 });
+  let watchedFromBeyond = [];
+  for (let i = 0; i < 6; i += 1) watchedFromBeyond = watchedFromBeyond.concat(fromBeyond().done);
+  assert.equal(watchedFromBeyond.length, 1, 'watched through the examine camera');
   const far = { ...episode, id: 'ep-b', z: 30 };
   assert.equal(witness.tick({ episodes: [far], player, view: { x: 0, z: 1 }, dt: 5 }).done.length, 0, 'too far to make out');
   assert.ok(witnessModule.watchRangeFor('floreanagianttortoise') > witnessModule.watchRangeFor('lavalizard'));
@@ -7743,6 +7754,46 @@ test('watched behaviour becomes notebook evidence, the directive and assessment 
   const base = { currentZoneId: 'POST_OFFICE_BAY', visitedZoneIds: ['POST_OFFICE_BAY'], examinedTypeIds: ['mediumgroundfinch'], journal: [], inventory: [] };
   const score = state => evaluateFinalAssessment(state).categories.find(category => category.id === 'observation').score;
   assert.ok(score({ ...base, fieldObservations: records }) > score(base));
+});
+
+test('resident populations are examinable specimens of species already authored in their region', () => {
+  const populationsModule = loadModule('three-game/world/ecology/faunaPopulations.js');
+  const { getZoneSpecimens } = loadModule('game-core/specimens.ts');
+  for (const zoneId of Object.keys(populationsModule.FAUNA_POPULATIONS)) {
+    const authoredTypes = new Set(getZoneSpecimens(zoneId).map(specimen => specimen.id));
+    const all = getThreeSpecimens(zoneId);
+    const population = all.filter(specimen => specimen.population);
+    assert.ok(population.length > 0, `${zoneId} populations`);
+    for (const specimen of population) {
+      assert.ok(authoredTypes.has(specimen.id), `${zoneId}: ${specimen.id} is not authored there, so it would change the region's species count`);
+      assert.match(specimen.instanceId, new RegExp(`^${zoneId}:population-`));
+      assert.ok(specimen.name && specimen.spawnPoint?.length === 3, `${specimen.instanceId} shape`);
+    }
+    assert.equal(new Set(all.map(specimen => specimen.instanceId)).size, all.length, `${zoneId} actor ids are unique`);
+  }
+});
+
+test('what Darwin watches during a close look goes into that examination as well', () => {
+  const state = {
+    examineSession: { actorId: 'Z:finch', name: 'Medium Ground Finch', chat: [], collectable: true },
+    fieldObservations: [],
+    narratorLog: [],
+    currentZoneId: 'NORTHERN_HIGHLANDS',
+    day: 1,
+    timeOfDay: 9,
+  };
+  const set = update => Object.assign(state, typeof update === 'function' ? update(state) : update);
+  // examineSlice reaches the store through examinables -> playerInteractions,
+  // which this loader cannot evaluate; its departure note is checked in play.
+  const observe = loadModule('three-game/storeSlices/observationSlice.js').createObservationActions(set);
+  observe.recordFieldObservation({ actorId: 'Z:finch', speciesId: 'mediumgroundfinch', behaviorId: 'preen', zoneId: 'NORTHERN_HIGHLANDS' });
+  assert.equal(state.examineSession.chat.length, 1);
+  assert.match(state.examineSession.chat[0].text, /habits/);
+  observe.recordFieldObservation({ actorId: 'Z:other', speciesId: 'mediumgroundfinch', behaviorId: 'sing', zoneId: 'NORTHERN_HIGHLANDS' });
+  assert.equal(state.examineSession.chat.length, 1, 'another animal, not in the close look');
+  observe.recordFieldObservation({ actorId: 'Z:tortoise', partnerActorId: 'Z:finch', speciesId: 'floreanagianttortoise', behaviorId: 'riseForCleaning', zoneId: 'NORTHERN_HIGHLANDS' });
+  assert.equal(state.examineSession.chat.length, 2, 'its partner in an interaction');
+  assert.equal(state.fieldObservations.length, 3);
 });
 
 test('every repertoire behaviour is well formed and every response has a reaction', () => {

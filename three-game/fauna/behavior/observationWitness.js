@@ -34,8 +34,10 @@ export function createObservationWitness() {
   const completed = new Set();
 
   // episodes: iterable of open episodes; player: {x,y,z}; view: unit vector
-  // the camera looks along (horizontal x, z used).
-  function tick({ episodes, player, view, playerSpeed = 0, daylight = 1, dt }) {
+  // the camera looks along (horizontal x, z used); eye: where the camera is,
+  // for the in-view test (range is always from Darwin). The two differ most
+  // in the examine view, whose camera orbits the subject.
+  function tick({ episodes, player, view, eye = null, playerSpeed = 0, daylight = 1, dt }) {
     const done = [];
     let focus = null;
     if (!episodes || !player || !view) return { done, focus };
@@ -54,8 +56,11 @@ export function createObservationWitness() {
       const distance = Math.hypot(dx, dz);
       const range = watchRangeFor(episode.speciesId, daylight);
       if (distance > range) continue;
-      const cos = distance > 0.01 ? (dx * vx + dz * vz) / distance : 1;
-      const inView = cos >= (distance < NEAR_DISTANCE ? VIEW_COS_NEAR : VIEW_COS_FAR);
+      const ex = episode.x - (eye ? eye.x : player.x);
+      const ez = episode.z - (eye ? eye.z : player.z);
+      const eyeDistance = Math.hypot(ex, ez);
+      const cos = eyeDistance > 0.01 ? (ex * vx + ez * vz) / eyeDistance : 1;
+      const inView = cos >= (eyeDistance < NEAR_DISTANCE ? VIEW_COS_NEAR : VIEW_COS_FAR);
       if (!inView) continue;
       const need = def.watch ?? 2;
       let seconds = watched.get(episode.id) || 0;

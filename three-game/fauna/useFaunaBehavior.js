@@ -44,7 +44,7 @@ function isPlayerKin(playableModeId, specimenId) {
   return Boolean(playerGroup && playerGroup === getWildlifeSpecies(actorSpecies)?.kinGroup);
 }
 
-export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false }) {
+export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paused = false, observed = false }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   // Key every derived value on stable primitives, not the specimen object:
   // parents may hand over a fresh but identical record on re-render, and
@@ -175,6 +175,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         delta: 0,
         timeOfDay,
         paused,
+        observed,
         playerIsKin,
         radiusScale,
         playerSpeed,
@@ -191,6 +192,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           delta: step,
           timeOfDay,
           paused,
+          observed,
           playerIsKin,
           radiusScale,
           playerSpeed,
@@ -219,6 +221,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     controller,
     currentZoneId,
     debugEnabled,
+    observed,
     paused,
     profile,
     specimenId,

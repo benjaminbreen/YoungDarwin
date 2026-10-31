@@ -39,7 +39,6 @@ import { buildSoutheasternCoastEcology } from './southeasternCoast';
 import { buildShallowSurfEcology } from './shallowSurf';
 import { buildSouthernWetlandsEcology } from './southernWetlands';
 import { applyUniversalProceduralFlora } from './universalFlora';
-import { applyFaunaPopulations } from './faunaPopulations';
 
 // Registry of authored zone ecologies. Adding a new zone = one definition
 // module (data: flora mix, rock layout, fauna) + one line here.
@@ -116,7 +115,7 @@ export function getEcology(zoneId) {
   if (!regionMaps[zoneId]) return null;
   if (!cache.has(zoneId)) {
     const authored = builders[zoneId]?.() || { zoneId };
-    return touchCachedEcology(zoneId, applyFaunaPopulations(zoneId, applyUniversalProceduralFlora(zoneId, authored)));
+    return touchCachedEcology(zoneId, applyUniversalProceduralFlora(zoneId, authored));
   }
   const cached = cache.get(zoneId);
   return cached ? touchCachedEcology(zoneId, cached) : null;

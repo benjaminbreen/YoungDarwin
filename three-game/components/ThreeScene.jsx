@@ -22,6 +22,7 @@ import { useThreeGameStore } from '../store';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
 import { ObservationWatcher } from '../fauna/behavior/ObservationWatcher';
+import { TargetBracketProjector } from './player/TargetBracketProjector';
 import { RemotePlayerActors } from '../multiplayer/RemotePlayerActors';
 
 export function ThreeScene({
@@ -110,6 +111,7 @@ export function ThreeScene({
       >
         <FaunaFrameScheduler />
         <ObservationWatcher />
+        <TargetBracketProjector />
         {/* World and player stream independently. A late prop/specimen GLB can
             no longer blank Darwin, and a deferred animation bank can no
             longer blank the island. */}

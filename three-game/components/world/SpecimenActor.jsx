@@ -79,6 +79,9 @@ const PLANT_SPECIMEN_CONTACT_RADIUS = Object.freeze({
   manzanillo: 1.25,
 });
 const STANDING_WATER_SURFACE_LIFT = 0.036;
+// How far an examined animal can go from Darwin before the close look is over.
+const EXAMINE_LEAVE_DISTANCE = 7;
+const EXAMINE_LEAVE_FLYING = 5;
 const NO_RAYCAST = () => null;
 
 function publishActorRuntimePosition({
@@ -613,9 +616,11 @@ export function SpecimenActor({ specimen }) {
   // Narrow boolean: only flips when this specimen is picked up / put down, so
   // the terrain-projected marker can hide while the animal is held aloft.
   const isCarried = useThreeGameStore(state => state.carriedObjectId === actorId);
-  // While this actor is under examination the camera is framing it; hold its
-  // wander/patrol in place (idle animation keeps playing) so the shot stays
-  // composed and any behavior the inquiry narrates has a steady subject.
+  // Under examination the camera frames this actor. An animal with a fauna
+  // controller stays alive in the shot: Darwin has settled down to watch it,
+  // and what it does there is what he is watching for (fauna/behavior/). It
+  // can wander off or take fright; the examine camera follows it, and the
+  // view says when it has gone.
   const isUnderExamination = useThreeGameStore(state => state.examineSession?.actorId === actorId);
   const examineOpen = useThreeGameStore(state => Boolean(state.examineSession));
   // Dropped by a clean shotgun hit: the animal falls where it was struck and
@@ -647,10 +652,24 @@ export function SpecimenActor({ specimen }) {
     specimen,
     basePositionRef: behaviorBaseRef,
     basePosition: position,
-    paused: isCarried || isUnderExamination || Boolean(downedInfo),
+    paused: isCarried || Boolean(downedInfo),
+    observed: isUnderExamination,
   });
+  // Subjects without a live controller still hold still for the shot.
+  const examinationHold = isUnderExamination && !faunaBehavior.active;
+  // A watched animal that has gone off beyond a close look ends the watch
+  // (the view keeps its notes and says why).
+  const noteExaminedSubjectDeparture = (playerPosition, subjectPosition, debug) => {
+    if (!playerPosition) return;
+    const distance = Math.hypot(subjectPosition.x - playerPosition.x, subjectPosition.z - playerPosition.z);
+    const airborne = faunaBehavior.airborneRef?.current === true;
+    if (distance < (airborne ? EXAMINE_LEAVE_FLYING : EXAMINE_LEAVE_DISTANCE)) return;
+    const state = useThreeGameStore.getState();
+    if (state.examineSession?.actorId !== actorId || state.examineSession.subjectGone) return;
+    state.examineSubjectLeft(actorId, (debug?.panic || 0) > 0.18 ? 'fled' : airborne ? 'flew' : 'wandered');
+  };
   const selectSpecimenAnimation = () => {
-    if (!isUnderExamination) return faunaBehavior.animationRef?.current || null;
+    if (!examinationHold) return faunaBehavior.animationRef?.current || null;
     const clip = behaviorProfile?.idleClip
       || behaviorProfile?.feedClip
       || faunaBehavior.animationRef?.current?.clip
@@ -749,7 +768,7 @@ export function SpecimenActor({ specimen }) {
     },
     shouldRunEveryFrame: () => {
       const state = useThreeGameStore.getState();
-      return Boolean(downedInfo || state.carriedObjectId === actorId);
+      return Boolean(downedInfo || state.carriedObjectId === actorId || state.examineSession?.actorId === actorId);
     },
     update: ({ realElapsed, worldElapsed, delta, playerPose }) => {
     if (isCollectedActor) return;
@@ -765,7 +784,7 @@ export function SpecimenActor({ specimen }) {
       : animationRequest?.clip || '';
     const behaviorDebug = faunaBehavior.debugRef?.current || {};
     const behaviorMode = behaviorDebug.mode || '';
-    const behaviorPaused = isCarried || isUnderExamination || Boolean(downedInfo);
+    const behaviorPaused = isCarried || examinationHold || Boolean(downedInfo);
     const proceduralMoving = !behaviorPaused && behaviorDebug.moving === true;
     const proceduralRunning = proceduralMoving && ((behaviorDebug.panic || 0) > 0.18 || behaviorDebug.running === true);
     const proceduralFlying = !behaviorPaused && faunaBehavior.airborneRef?.current === true;
@@ -792,7 +811,7 @@ export function SpecimenActor({ specimen }) {
           : racerBehavior
           ? (isCarried
             ? 'carried'
-            : (isUnderExamination ? 'tongueTaste' : racerActions[behaviorMode] || animationClip || 'baskCoil'))
+            : (examinationHold ? 'tongueTaste' : racerActions[behaviorMode] || animationClip || 'baskCoil'))
           : (!behaviorPaused && /^animal/.test(behaviorDebug.behaviorAction || '')
             ? behaviorDebug.behaviorAction
             : !behaviorPaused && /doze|sleep/i.test(animationClip)
@@ -1046,6 +1065,7 @@ export function SpecimenActor({ specimen }) {
           now: realElapsed,
           debug,
         });
+        if (isUnderExamination) noteExaminedSubjectDeparture(playerPose?.position, group.current.position, debug);
       }
       return;
     }

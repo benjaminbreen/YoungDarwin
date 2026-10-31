@@ -13,6 +13,7 @@ import { RarityBadge } from './RarityBadge';
 import { hasPopulationTraits } from '../examine/populationTraits';
 import { casualName, catchPlan, toolDisplayName } from '../catchRules';
 import { specimenInHand } from '../components/player/catchRequest';
+import { getBehaviorBrain } from '../fauna/behavior/behaviorBrain';
 import {
   cameraDirectiveForProcedure,
   requestExamineCameraDirective,
@@ -195,6 +196,44 @@ function SpinnerDots() {
   );
 }
 
+// What the animal under a close look is doing right now, and how far
+// Darwin has watched it through (fauna/behavior/observationWitness.js).
+function LiveBehaviourLine({ session }) {
+  const watchFocus = useThreeGameStore(state => state.watchFocus);
+  const [doing, setDoing] = useState(null);
+  const actorId = session.actorId;
+  useEffect(() => {
+    if (!actorId) return undefined;
+    const read = () => setDoing(getBehaviorBrain(actorId)?.current()?.def.label || null);
+    read();
+    const timer = window.setInterval(read, 400);
+    return () => window.clearInterval(timer);
+  }, [actorId]);
+  if (session.kind !== 'specimen' || !actorId) return null;
+  if (!session.subjectGone && !getBehaviorBrain(actorId)) return null;
+  const watching = watchFocus && (watchFocus.actorId === actorId || watchFocus.partnerActorId === actorId) ? watchFocus : null;
+  const text = session.subjectGone
+    ? 'Gone from view'
+    : watching
+      ? `Watching: ${watching.behaviorLabel}`
+      : doing
+        ? `Now: ${doing}`
+        : 'About its business';
+  return (
+    <div className="mt-2 max-w-[18rem] font-sans text-[11px] font-semibold uppercase tracking-[0.1em] text-expedition-parchment/80 [text-shadow:0_2px_10px_#000]" aria-live="polite" data-testid="examine-live-behaviour">
+      <div className="flex items-center gap-2">
+        <span className={`h-1.5 w-1.5 rounded-full ${session.subjectGone ? 'bg-expedition-faded/60' : 'bg-[#9db485] shadow-[0_0_0_3px_rgba(157,180,133,0.14)]'}`} />
+        <span className="truncate">{text}</span>
+      </div>
+      {watching && (
+        <div className="mt-1.5 h-[2px] w-full overflow-hidden rounded bg-expedition-brass/25">
+          <div className="h-full bg-expedition-goldbright/80 transition-[width] duration-200" style={{ width: `${Math.round(watching.progress * 100)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExamineView() {
   const session = useThreeGameStore(state => state.examineSession);
   const closeExamine = useThreeGameStore(state => state.closeExamine);
@@ -227,7 +266,7 @@ export function ExamineView() {
   const open = Boolean(session);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
   // Collection is one click: no note prerequisite, no confirmation step.
-  const collectReady = Boolean(session?.collectable);
+  const collectReady = Boolean(session?.collectable) && !session?.subjectGone;
   // The button says what the tool in hand will actually do (catchRules.js).
   // A wrong tool turns it into "take up the right one"; a live animal is
   // caught out in the world, so the button hands the attempt back there.
@@ -451,6 +490,7 @@ export function ExamineView() {
             <span className={`h-1.5 w-1.5 rounded-full border ${examined ? 'border-[#9db485] bg-[#9db485]/50' : 'border-expedition-goldbright shadow-[0_0_0_3px_rgba(191,152,81,0.12)]'}`} />
             {identityLabel}
           </div>
+          <LiveBehaviourLine session={session} />
         </header>
 
         <div className={styles.focusFrame} aria-hidden="true">
@@ -678,7 +718,11 @@ export function ExamineView() {
           </div>
 
           <p className={`${styles.noteHint} mb-0 mt-1.5 text-right text-[12px] italic text-expedition-faded/65`}>
-            {collectReady ? collectButton.hint : 'This subject stays where it is; the note is the record.'}
+            {collectReady
+              ? collectButton.hint
+              : session.subjectGone
+                ? 'It has gone; the note is the record.'
+                : 'This subject stays where it is; the note is the record.'}
           </p>
         </section>
       </aside>

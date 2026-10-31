@@ -4,14 +4,16 @@
 // lizards answering each other's push-ups, or several birds gleaning one
 // tortoise, and it made the measurement survey's "several animals at each
 // place" impossible. Each entry here scatters a few more of a species around
-// the authored animal's ground (same habitat radius), as ambient wildlife:
-// they are SpecimenActors like any other, examinable, measurable, and run by
-// the same behaviour brains.
+// the authored animal's ground (same habitat radius). They join the region's
+// specimen list (three-game/data.js getThreeSpecimens), so they are
+// SpecimenActors like any other: examinable, measurable, collectable, and run
+// by the same behaviour brains. The chart leaves them off (`population`).
 //
 // Counts are modest on purpose: every actor is a live rig and a brain.
 
 import { isWalkableTerrain } from '../terrain';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
+import { getSpecimenById, specimenActorId } from '../../../game-core/specimens';
 
 // zoneId -> [{ speciesId, count, center: [x, z], spread: [rx, rz], habitat: [rx, rz] }]
 export const FAUNA_POPULATIONS = {
@@ -93,11 +95,22 @@ export function buildFaunaPopulationLayers(zoneId) {
   })).filter(layer => layer.items.length);
 }
 
-export function applyFaunaPopulations(zoneId, ecology) {
-  const layers = buildFaunaPopulationLayers(zoneId);
-  if (!layers.length || !ecology) return ecology;
-  return {
-    ...ecology,
-    ambientWildlife: [...(ecology.ambientWildlife || []), ...layers],
-  };
+// The populations as specimen records, shaped like the authored spawns in
+// game-core/specimens.ts getZoneSpecimens.
+export function buildFaunaPopulationSpecimens(zoneId) {
+  return buildFaunaPopulationLayers(zoneId).flatMap(layer => layer.items.map(item => {
+    const specimen = getSpecimenById(item.speciesId);
+    if (!specimen) return null;
+    return {
+      ...specimen,
+      instanceId: specimenActorId(zoneId, item.instanceId),
+      localInstanceId: item.instanceId,
+      spawnPoint: item.position,
+      habitatRadiusX: item.habitatRadiusX,
+      habitatRadiusZ: item.habitatRadiusZ,
+      sceneScale: item.sceneScale || 1,
+      behavior: 'ambient',
+      population: true,
+    };
+  })).filter(Boolean);
 }

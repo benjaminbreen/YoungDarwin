@@ -21,9 +21,14 @@ import {
 import { emitPropEvent } from '../../physics/props/propEvents';
 import { cameraFocusPoint } from '../../camera/focusPoint';
 import { CAMERA_DEV_DEFAULTS, cameraDev } from '../../camera/cameraDevRuntime';
+import { getBehaviorBrain } from '../../fauna/behavior/behaviorBrain';
 
 const CAMERA_DEV_INITIAL_HERO_DISTANCE = CAMERA_DEV_DEFAULTS.heroDistance;
 const TWO_PI = Math.PI * 2;
+// Examining a live animal: how fast the camera follows it, and how near a
+// partner has to be for the shot to widen to take both in.
+const EXAMINE_FOLLOW_RATE = 3.2;
+const EXAMINE_PARTNER_FRAME_DISTANCE = 3.5;
 
 // Metre-denominated camera knobs are authored for Darwin. Scaling them by the
 // embodiment's pivot height is what stops a tortoise inheriting a man's dolly
@@ -54,6 +59,20 @@ const UP = new THREE.Vector3(0, 1, 0);
 // from a finch. Large enough to cover the near clip plane plus the gap between
 // the drawn mesh and the smoothed movement surface.
 const CAMERA_GROUND_CLEARANCE = 0.38;
+// Framing the animal the action key will act on. Within a few metres it sat
+// straight behind Darwin from the chase camera, so the eye slides over his
+// shoulder toward the animal's side, a little closer and lower, and the look
+// point leans toward it, putting the two side by side on screen.
+const TARGET_FRAME = Object.freeze({
+  range: 4.2,
+  side: 1.3,
+  distance: 4.4,
+  pitchDrop: 0.05,
+  pivotLead: 0.4,
+  sideHysteresis: 0.3,
+  blendIn: 2.6,
+  blendOut: 1.6,
+});
 
 function dampAngle(current, target, lambda, delta) {
   const wrapped = current + Math.atan2(Math.sin(target - current), Math.cos(target - current));
@@ -106,6 +125,7 @@ export function usePlayerCameraRig() {
     impulse: 0,
   });
   const shoulderPivotRef = useRef(null);
+  const targetFrameRef = useRef({ blend: 0, side: 1, sideValue: 1, x: 0, y: 0, z: 0 });
   const activePointerIdRef = useRef(null);
   const swimCameraRef = useRef(0);
   // Flight chase camera yields to manual orbiting: dragging suspends the
@@ -776,8 +796,15 @@ export function usePlayerCameraRig() {
       // targets and items have no runtime pose or rendered bounds; they fall
       // back to their session focus and authored frame hint and orbit the
       // same way.
-      const liveFocus = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(examineSession.actorId);
+      const runtimePoses = getSpecimenRuntimePoses(rigStoreState.currentZoneId);
+      // Once the animal has gone off, ease back to where it was being watched.
+      const liveFocus = examineSession.subjectGone ? null : runtimePoses?.get(examineSession.actorId);
       const focus = liveFocus || examineSession.focus;
+      // A live subject dealing with another animal close by: frame them both.
+      const partnerId = liveFocus ? getBehaviorBrain(examineSession.actorId)?.current()?.partnerId : null;
+      const partnerPose = partnerId && partnerId !== 'player' ? runtimePoses?.get(partnerId) : null;
+      const partnerGap = partnerPose ? Math.hypot(partnerPose.x - focus.x, partnerPose.z - focus.z) : Infinity;
+      const framePartner = partnerGap <= EXAMINE_PARTNER_FRAME_DISTANCE;
       const focusTerrainY = collisionAdapter.terrainHeight(focus.x, focus.z);
       const focusY = Math.max(
         Number.isFinite(focus.y) ? focus.y : focusTerrainY,
@@ -792,9 +819,9 @@ export function usePlayerCameraRig() {
           ? Math.max(0.015, hint.height * 0.5)
           : Math.max(0.12, hint.height * 0.52);
       const center = scratch.examineFocus.set(
-        focus.x,
+        framePartner ? (focus.x + partnerPose.x) * 0.5 : focus.x,
         focusY + centerOffset,
-        focus.z,
+        framePartner ? (focus.z + partnerPose.z) * 0.5 : focus.z,
       );
       const sessionKey = `${rigStoreState.currentZoneId}:${examineSession.actorId}:${examineSession.openedAt || 0}`;
       const orbit = examineOrbitRef.current;
@@ -820,6 +847,20 @@ export function usePlayerCameraRig() {
         orbit.directive = null;
         orbit.impulse = 0;
       }
+      // A live subject hops, turns and walks; follow it without the frame
+      // twitching on every step. Snap at the start of a session.
+      const spreadTarget = framePartner ? partnerGap * 0.5 + 0.2 : 0;
+      if (orbit.smoothKey !== sessionKey) {
+        orbit.smoothKey = sessionKey;
+        orbit.smoothCenter = (orbit.smoothCenter || new THREE.Vector3()).copy(center);
+        orbit.spread = spreadTarget;
+      } else {
+        orbit.smoothCenter.x = THREE.MathUtils.damp(orbit.smoothCenter.x, center.x, EXAMINE_FOLLOW_RATE, delta);
+        orbit.smoothCenter.y = THREE.MathUtils.damp(orbit.smoothCenter.y, center.y, EXAMINE_FOLLOW_RATE, delta);
+        orbit.smoothCenter.z = THREE.MathUtils.damp(orbit.smoothCenter.z, center.z, EXAMINE_FOLLOW_RATE, delta);
+        orbit.spread = THREE.MathUtils.damp(orbit.spread || 0, spreadTarget, 1.6, delta);
+      }
+      center.copy(orbit.smoothCenter);
       const requestedDirective = consumeExamineCameraDirective();
       if (requestedDirective && !draggingRef.current) {
         let yawTarget = Number.isFinite(requestedDirective.yawDelta)
@@ -872,7 +913,7 @@ export function usePlayerCameraRig() {
 
       const verticalFov = THREE.MathUtils.degToRad(camera.fov || 50);
       const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * Math.max(0.25, camera.aspect || 1));
-      const halfWidth = Math.max(0.025, hint.radius || 0.6);
+      const halfWidth = Math.max(0.025, hint.radius || 0.6) + (orbit.spread || 0);
       const halfHeight = Math.max(0.025, (hint.height || 0.8) * 0.54);
       const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
       const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
@@ -1256,6 +1297,35 @@ export function usePlayerCameraRig() {
           swimCamera * swimPitchBias,
         );
       }
+      const targetFrame = targetFrameRef.current;
+      let framedPose = null;
+      if (!flightCamera && !aiming && viewMode !== 'first' && viewMode !== 'top'
+        && swimCamera < 0.05 && rigStoreState.nearbySpecimenId) {
+        const pose = getSpecimenRuntimePoses(rigStoreState.currentZoneId)?.get(rigStoreState.nearbySpecimenId);
+        if (pose && Math.hypot(pose.x - playerPosition.x, pose.z - playerPosition.z) <= TARGET_FRAME.range) framedPose = pose;
+      }
+      targetFrame.blend = THREE.MathUtils.damp(
+        targetFrame.blend,
+        framedPose ? 1 : 0,
+        framedPose ? TARGET_FRAME.blendIn : TARGET_FRAME.blendOut,
+        delta,
+      );
+      if (framedPose) {
+        // Go to whichever side the animal is on; one nearly dead ahead keeps
+        // the side already chosen rather than swinging across Darwin's back.
+        const lateral = (framedPose.x - playerPosition.x) * cameraRight.x + (framedPose.z - playerPosition.z) * cameraRight.z;
+        if (Math.abs(lateral) > TARGET_FRAME.sideHysteresis) targetFrame.side = Math.sign(lateral);
+        targetFrame.x = framedPose.x;
+        targetFrame.y = framedPose.y;
+        targetFrame.z = framedPose.z;
+      }
+      targetFrame.sideValue = THREE.MathUtils.damp(targetFrame.sideValue, targetFrame.side, 3, delta);
+      const frameBlend = targetFrame.blend > 0.001 ? targetFrame.blend : 0;
+      if (frameBlend) {
+        frameSide = THREE.MathUtils.lerp(frameSide, targetFrame.sideValue * TARGET_FRAME.side, frameBlend);
+        frameDistance = THREE.MathUtils.lerp(frameDistance, Math.min(frameDistance, TARGET_FRAME.distance), frameBlend);
+        effectivePitch -= TARGET_FRAME.pitchDrop * frameBlend;
+      }
       // Smooth the pivot itself: looking straight at the raw player position
       // transmits every small physics/animation displacement to the camera,
       // which reads as jitter when running.
@@ -1275,6 +1345,12 @@ export function usePlayerCameraRig() {
             rawPivot.z += (leadZ / leadLength) * lead;
           }
         }
+      }
+      if (frameBlend) {
+        const lead = TARGET_FRAME.pivotLead * frameBlend;
+        rawPivot.x += (targetFrame.x - playerPosition.x) * lead;
+        rawPivot.z += (targetFrame.z - playerPosition.z) * lead;
+        rawPivot.y = THREE.MathUtils.lerp(rawPivot.y, Math.max(targetFrame.y + 0.4, rawPivot.y - 0.5), lead);
       }
       if (swimCamera > 0.001) {
         rawPivot.y = THREE.MathUtils.lerp(

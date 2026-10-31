@@ -20,11 +20,15 @@ import { generativeRequestsAllowed } from '../ai/generativePolicy';
 import { getThreeIslandLocation } from '../data';
 import { getZone } from '../world/floreanaZones';
 import { formatTraitValue, measureTrait, traitsForSpecies } from '../examine/populationTraits';
+import { casualName } from '../catchRules';
 
 export const createExamineActions = (set, get) => ({
   // --- Examination ------------------------------------------------------
-  // The diegetic examine screen: camera pulls in on the subject, clock
-  // pauses, and a field-inquiry chat + key-facts panel frame the live shot.
+  // The diegetic examine screen: camera pulls in on the subject and a
+  // field-inquiry chat + key-facts panel frame the live shot. The clock stops
+  // for rocks, plants and objects; a live animal carries on with its life and
+  // the clock runs slowly (ThreeDarwinGame ExpeditionClock), so what it does
+  // there can be watched and recorded (fauna/behavior/ObservationWatcher).
   // `target` is null (examine the nearby specimen), an actor id, or
   // { itemTypeId, actorId, focus } for standalone items like letters.
   openExamine: (target = null) => set(state => {
@@ -64,6 +68,26 @@ export const createExamineActions = (set, get) => ({
     };
   }),
   closeExamine: () => set({ examineSession: null }),
+
+  // The animal under a close look has gone off: flown, fled, or simply
+  // wandered out of it. The notes stay open; there is nothing left to take.
+  examineSubjectLeft: (actorId, reason = 'wandered') => set(state => {
+    const session = state.examineSession;
+    if (!session || session.actorId !== actorId || session.subjectGone) return {};
+    const name = casualName(session);
+    const text = reason === 'flew'
+      ? `The ${name} flew off. You note where it went.`
+      : reason === 'fled'
+        ? `Something startled the ${name}, and it was gone.`
+        : `The ${name} went about its business out of sight.`;
+    return {
+      examineSession: {
+        ...session,
+        subjectGone: reason,
+        chat: [...session.chat, { id: `left-${session.chat.length}`, role: 'assistant', text }],
+      },
+    };
+  }),
 
   saveExamineFact: factId => set(state => {
     const session = state.examineSession;
@@ -221,6 +245,7 @@ export const createExamineActions = (set, get) => ({
       set({ examineSession: null });
       return { success: collected };
     }
+    if (session.subjectGone) return null;
     set({ selectedSpecimenId: session.actorId });
     const result = await get().collectNearby(session.actorId);
     set({ examineSession: null, selectedSpecimenId: null });

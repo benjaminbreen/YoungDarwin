@@ -37,6 +37,8 @@ import {
 import { closeBehaviorEpisode, openBehaviorEpisode, updateBehaviorEpisode } from './behaviorEpisodes';
 import { clearBehaviorPresentation, setBehaviorPresentation } from './behaviorPresentation';
 
+// Idle stretches under a watcher's eye are this much shorter.
+const OBSERVED_IDLE_SCALE = 0.5;
 // Longest an animal keeps going after a partner before it gives up.
 const MAX_TRAVEL_SECONDS = 12;
 const PREDATOR_SCAN_INTERVAL = 0.4;
@@ -499,9 +501,10 @@ export function createBehaviorBrain({ speciesId, actorId, seed = 0.5, profile = 
         break;
       }
     }
-    // Leave it to the archetype for a while.
+    // Leave it to the archetype for a while; not so long while Darwin is
+    // sitting watching, or a close look would mostly be of an animal idling.
     brain.cycle += 1;
-    brain.nextDecisionAt = ctx.t + within(repertoire.defaultDuration || [4, 9], unit(41));
+    brain.nextDecisionAt = ctx.t + within(repertoire.defaultDuration || [4, 9], unit(41)) * (ctx.observed ? OBSERVED_IDLE_SCALE : 1);
   }
 
   // --- running --------------------------------------------------------------
