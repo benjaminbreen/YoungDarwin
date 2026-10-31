@@ -1,3 +1,5 @@
+import { comparableLandingCount } from './examine/populationTraits';
+
 const SCORE_MAX = 10;
 
 function clamp(value, min = 0, max = SCORE_MAX) {
@@ -249,9 +251,18 @@ export function evaluateFinalAssessment(state = {}) {
   const detailedNotes = noteAudits.filter(audit => audit.score >= 5).length;
   const documentedOrObserved = uniqueValues([...documentedIds, ...examinedIds]).length;
 
+  // Measured series: a species read on two or more animals at each of two or
+  // more landings is a comparison, which is what the survey is for.
+  const measurements = Array.isArray(state.fieldMeasurements) ? state.fieldMeasurements : [];
+  const measuredAnimals = new Set(measurements.map(record => record.actorId)).size;
+  const comparableSeries = uniqueValues(measurements.map(record => record.specimenId))
+    .filter(specimenId => comparableLandingCount(measurements, specimenId, 2) >= 2).length;
+
   const observation = evidenceIds.length === 0
     ? 0
-    : Math.min(2.2, evidenceIds.length * 0.65)
+    : Math.min(1.2, comparableSeries * 0.8)
+      + Math.min(0.4, measuredAnimals * 0.05)
+      + Math.min(2.2, evidenceIds.length * 0.65)
       + averageNoteRigor * 0.55
       + Math.min(1.2, Math.max(0, evidenceIds.length - 1) * 0.4)
       + Math.min(1, documentedIds.length * 0.25);
@@ -313,6 +324,7 @@ export function evaluateFinalAssessment(state = {}) {
   if (detailedNotes) strengths.push('Several entries preserve enough detail to be compared after the voyage.');
   if (methods.length >= 3 && averageNoteRigor >= 4) strengths.push('The record distinguishes multiple methods of observation or collection.');
   if (visitedIds.length >= 5 && evidenceIds.length >= 3) strengths.push('The route provides useful comparison across distinct island stations.');
+  if (comparableSeries) strengths.push('Repeated measurements set the same creature side by side at different stations.');
   if (!strengths.length && overall >= 4 && evidenceIds.length) strengths.push('The packet contains the beginnings of a usable comparative record.');
 
   const gaps = [];
@@ -323,6 +335,7 @@ export function evaluateFinalAssessment(state = {}) {
   if (locatedNotes < playerNotes.length) gaps.push('Some player-authored observations lack an explicit locality.');
   if (!playerMethods.length && playerNotes.length) gaps.push('Methods are not named consistently in the player’s field record.');
   if (visitedIds.length < 3) gaps.push('The island comparison rests on very limited geographic coverage.');
+  if (measuredAnimals && !comparableSeries) gaps.push('Measurements were taken, but no species on enough animals at two stations to say whether they differ.');
   if (!gaps.length) gaps.push('The strongest claims should still distinguish direct observation from inference.');
 
   const evidenceSummaries = evidenceIds.map(id => {

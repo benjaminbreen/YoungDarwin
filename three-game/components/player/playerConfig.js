@@ -248,6 +248,25 @@ export function actionLockDuration(clip, modelAssetId = null, fallbackDuration =
   return Math.max(0, fallbackDuration || 0);
 }
 
+// Seconds into a tool clip after which the strike has landed and the rest is
+// follow-through. Movement input cuts it there; before this the tools kept
+// playing their whole clip while Darwin walked off, gliding in the swing pose
+// (the net for 3.3s). Each sits just past the swing's impactDelay.
+export const TOOL_FOLLOW_THROUGH = Object.freeze({
+  // The net's bag is closed by 0.72 s (NET_SWEEP.close).
+  butterflyNetSwing: 0.78,
+  swingNet: 0.78,
+  swingHammer: 0.72,
+  heavyToolSwing: 0.72,
+  swingTool: 0.5,
+  fireRifle: 0.3,
+});
+
+export function inToolFollowThrough(state, now) {
+  const after = TOOL_FOLLOW_THROUGH[state?.action];
+  return Number.isFinite(after) && now - (state.actionStartedAt ?? now) >= after;
+}
+
 export const MOVEMENT_INTERRUPTIBLE_ACTIONS = new Set([
   'lookAroundShort',
   'lookAround',

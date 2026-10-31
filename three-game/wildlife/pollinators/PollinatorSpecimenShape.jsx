@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { worldTime } from '../../world/worldTime';
+import { getPollinatorFlight } from './pollinatorFlight';
 
 const NO_RAYCAST_MATERIAL = {
   transparent: true,
@@ -420,13 +421,25 @@ function useButterflySpecimenAssets(species) {
   return assets;
 }
 
-function ButterflyShape({ fritillary = false }) {
+// 0 in flight, easing to 1 while the actor sits perched on a flower.
+function usePerchBlend(actorId) {
+  const blendRef = useRef(0);
+  return (delta) => {
+    const perched = actorId && getPollinatorFlight(actorId)?.mode === 'perched';
+    blendRef.current = THREE.MathUtils.damp(blendRef.current, perched ? 1 : 0, perched ? 7 : 16, delta);
+    return blendRef.current;
+  };
+}
+
+function ButterflyShape({ fritillary = false, actorId = null }) {
   const assets = useButterflySpecimenAssets(fritillary ? 'fritillary' : 'sulphur');
   const bodyRef = useRef(null);
   const foreRefs = useRef([null, null]);
   const hindRefs = useRef([null, null]);
-  useFrame(() => {
+  const perchBlend = usePerchBlend(actorId);
+  useFrame((_, delta) => {
     const t = worldTime.elapsed;
+    const perch = perchBlend(delta);
     const freq = assets.look.flapFreq;
     // Occasional glide: the flap flattens out for a beat or two, wings held
     // in a shallow V, then resumes — the sail-and-flutter rhythm of the real
@@ -434,8 +447,11 @@ function ButterflyShape({ fritillary = false }) {
     const glide = Math.pow(Math.max(0, Math.sin(t * 0.31 + (fritillary ? 2.1 : 0))), 8);
     const amp = THREE.MathUtils.lerp(0.88, 0.14, glide);
     const rest = THREE.MathUtils.lerp(0.26, 0.42, glide);
-    const flap = rest + Math.sin(t * freq) * amp;
-    const hindFlap = rest + Math.sin(t * freq - 0.45) * amp * 0.9;
+    // Perched, the wings close upright over the back ("closes its wings
+    // upright when resting") with a slow fan now and then.
+    const closed = 1.42 + Math.max(0, Math.sin(t * 1.3)) ** 6 * 0.35;
+    const flap = THREE.MathUtils.lerp(rest + Math.sin(t * freq) * amp, closed, perch);
+    const hindFlap = THREE.MathUtils.lerp(rest + Math.sin(t * freq - 0.45) * amp * 0.9, closed - 0.04, perch);
     for (let i = 0; i < 2; i += 1) {
       if (foreRefs.current[i]) foreRefs.current[i].rotation.z = flap;
       if (hindRefs.current[i]) hindRefs.current[i].rotation.z = hindFlap;
@@ -762,16 +778,18 @@ function useCarpenterBeeAssets() {
   return assets;
 }
 
-function CarpenterBeeShape() {
+function CarpenterBeeShape({ actorId = null }) {
   const assets = useCarpenterBeeAssets();
+  const perchBlend = usePerchBlend(actorId);
   const bodyRef = useRef(null);
   const leftWings = useRef(null);
   const rightWings = useRef(null);
-  useFrame(() => {
+  useFrame((_, delta) => {
     const t = worldTime.elapsed;
     // Fast strobing beat with a raised rest angle, plus a light hover tremor
-    // through the whole body so the bee never hangs dead-still.
-    const flap = 0.32 + Math.sin(t * 74) * 0.5;
+    // through the whole body so the bee never hangs dead-still. Perched on a
+    // flower the wings fold flat along the back.
+    const flap = THREE.MathUtils.lerp(0.32 + Math.sin(t * 74) * 0.5, 0.02, perchBlend(delta));
     if (leftWings.current) leftWings.current.rotation.z = flap;
     if (rightWings.current) rightWings.current.rotation.z = flap;
     if (bodyRef.current) {
@@ -810,6 +828,7 @@ function CarpenterBeeShape() {
 }
 
 export function PollinatorSpecimenShape({ specimen }) {
-  if (specimen.id === 'galapagoscarpenterbee') return <CarpenterBeeShape />;
-  return <ButterflyShape fritillary={specimen.id === 'galapagosgulffritillary'} />;
+  const actorId = specimen.instanceId || specimen.id;
+  if (specimen.id === 'galapagoscarpenterbee') return <CarpenterBeeShape actorId={actorId} />;
+  return <ButterflyShape fritillary={specimen.id === 'galapagosgulffritillary'} actorId={actorId} />;
 }

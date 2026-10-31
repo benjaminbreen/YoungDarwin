@@ -30,13 +30,17 @@ import {
 } from '../world/waterTextureManifest';
 import { ecologyIsCached } from '../world/ecology';
 import { prefetchIslandMapImage } from '../ui/expedition/map/islandLocations';
-import { emitPropEvent } from '../physics/props/propEvents';
+import { emitPropEvent, onPropEvent } from '../physics/props/propEvents';
 import { getRuntimeObstacles, obstacleBaseY } from '../world/obstacles';
 import { findAmbientFieldTarget } from '../fieldActions';
 import { SYMS_FIELD_CASE_ID } from '../npcs/symsActivityPlan';
 import { getPlayerHarnessBridge } from './playerHarnessBridge';
 import { auditRenderIntegrity } from './renderIntegrity';
 import { recordMotion } from './motionRecorder';
+
+const RECORDED_PROP_EVENTS = ['tool-swing', 'net-contact', 'net-brush', 'field-action-attempt', 'prop-struck'];
+const PROP_EVENT_LOG_MAX = 80;
+const propEventLog = [];
 
 const HARNESS_VERSION = 4;
 const FULL_CONTENT_PHASE = 6;
@@ -736,6 +740,15 @@ function createHarnessApi() {
     },
     waitForSceneReady: (timeoutMs = 75000) => waitForReadiness({ visualReady: true }, timeoutMs),
     waitForGameplayReady: (timeoutMs = 75000) => waitForReadiness({ gameplayReady: true }, timeoutMs),
+    // The last few gameplay events (tool swings, net strikes, plants brushed),
+    // newest last, so an agent can assert what a swing actually touched.
+    propEvents: (type = null) => propEventLog
+      .filter(entry => !type || entry.type === type)
+      .map(entry => ({ ...entry })),
+    clearPropEvents: () => {
+      propEventLog.length = 0;
+      return true;
+    },
     setMode: modeId => {
       useThreeGameStore.getState().setPlayableMode(modeId);
       return makeSnapshot();
@@ -1223,7 +1236,12 @@ export function ThreeE2EHarness({
     const api = createHarnessApi();
     window.__darwinE2E = api;
     window.__darwinE2EReady = true;
+    const offPropEvents = RECORDED_PROP_EVENTS.map(type => onPropEvent(type, payload => {
+      propEventLog.push({ type, at: Math.round(performance.now()), ...(payload || {}) });
+      if (propEventLog.length > PROP_EVENT_LOG_MAX) propEventLog.splice(0, propEventLog.length - PROP_EVENT_LOG_MAX);
+    }));
     return () => {
+      offPropEvents.forEach(off => off());
       if (window.__darwinE2E === api) {
         delete window.__darwinE2E;
         delete window.__darwinE2EReady;

@@ -239,7 +239,7 @@ function buildFlora() {
     { id: 'northern-highlands-ground-plants', path: `${NATURE}runtime-ground-plants.glb`, sink: 0.05, ySquash: 0.48, tintStrength: 0.3, castShadow: false, motion: { wind: 1.18, bend: 0.36, bendRadius: 1.2 }, items: tint(groundPlants, '#668451', '#405f42') },
     { id: 'northern-highlands-bush-hummocks', path: `${NATURE}runtime-galapagos-bushes.glb`, sink: 0.07, tintStrength: 0.2, castShadow: false, motion: { wind: 0.76, bend: 0.18, bendRadius: 1.8 }, items: tint(bushHummocks, '#91a45f', '#637b4c') },
     { id: 'northern-highlands-cormorant-edge-hummocks', path: `${NATURE}runtime-galapagos-bushes.glb`, sink: 0.075, ySquash: 0.82, tintStrength: 0.24, castShadow: false, motion: { wind: 0.82, bend: 0.2, bendRadius: 1.7 }, items: tint(cormorantEdgeHummocks, '#789455', '#536f45') },
-    { id: 'northern-highlands-castela', label: 'Galapagos bitterbush / Castela galapageia', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.07, tintStrength: 0.2, castShadow: true, motion: { wind: 0.46, bend: 0.08, bendRadius: 1.8 }, items: tint(castela, '#899263', '#656c4e') },
+    { id: 'northern-highlands-castela', label: 'Galapagos bitterbush / Castela galapageia', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.07, tintStrength: 0.2, castShadow: true, motion: { wind: 0.46, bend: 0.26, bendRadius: 1.8 }, items: tint(castela, '#899263', '#656c4e') },
   ];
 }
 

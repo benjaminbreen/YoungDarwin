@@ -46,6 +46,7 @@ import {
   CONTROL_INTERRUPTIBLE_ACTIONS,
   EMPTY_KEYS,
   MOVEMENT_INTERRUPTIBLE_ACTIONS,
+  inToolFollowThrough,
   MOVEMENT_FATIGUE,
   PLAYER,
   SPAWN_DROP,
@@ -67,9 +68,11 @@ import {
 import { updatePlayerFrameFeedback } from './playerFrameFeedback';
 import { finalizePlayerFrame } from './playerFrameFinalization';
 import { updatePlayerActionMotion } from './playerActionMotion';
+import { netSweepState } from './netSweep';
 import { classifyRapierCharacterContacts } from './playerCollisionContacts';
 import { updatePlayerEquipmentState } from './playerEquipmentState';
 import { shotgunAimState, resetShotgunAimState } from '../../shooting/aimState';
+import { toolTargetState } from './toolTargeting';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { setWorldTimeTarget } from '../../world/worldTime';
 import {
@@ -893,6 +896,29 @@ export function PlayerController({
       running: Boolean(stateRef.current.running),
       airborne: Boolean(stateRef.current.airborne),
       crouching: Boolean(stateRef.current.crouching),
+      aiming: Boolean(stateRef.current.aiming),
+      aim: {
+        holdIntent: Boolean(shotgunAimState.holdIntent),
+        active: Boolean(shotgunAimState.active),
+        onTarget: Boolean(shotgunAimState.onTarget),
+        targetLabel: shotgunAimState.targetLabel,
+        hitKind: shotgunAimState.hitKind,
+        pointerLocked: typeof document !== 'undefined' && Boolean(document.pointerLockElement),
+      },
+      toolTarget: toolTargetState.valid
+        ? { toolId: toolTargetState.toolId, kind: toolTargetState.kind, id: toolTargetState.id, label: toolTargetState.label, x: toolTargetState.x, y: toolTargetState.y, z: toolTargetState.z, perched: toolTargetState.perched }
+        : null,
+      netSweep: netSweepState.id
+        ? {
+            id: netSweepState.id,
+            active: netSweepState.active,
+            outcome: netSweepState.outcome,
+            actorId: netSweepState.actorId,
+            hoop: { ...netSweepState.hoop },
+            grip: { ...netSweepState.grip },
+            aim: { ...netSweepState.aim },
+          }
+        : null,
       animationSpeed: stateRef.current.animationSpeed ?? null,
       velocity: { x: velocity.current.x, y: velocity.current.y, z: velocity.current.z },
       facingYaw: Math.atan2(facing.current.x, facing.current.z),
@@ -1501,6 +1527,7 @@ export function PlayerController({
     lastButtons.current.recenterCamera = Boolean(keys.recenterCamera);
     if (moving) {
       interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
+      if (inToolFollowThrough(stateRef.current, now)) interruptAction(new Set([stateRef.current.action]));
     }
     // The action keys cut short a stop or idle flourish too: E pressed the
     // moment Darwin halts used to land during stopWalking and be dropped.
@@ -1654,6 +1681,7 @@ export function PlayerController({
         touch,
         lastButtons,
         activeConstraint,
+        stateRef,
       });
     }
     // The look-around fidget plays bare-handed only: with a tool or gun
@@ -3025,15 +3053,27 @@ export function PlayerController({
           walkChance: CACTUS_HAZARD.walkInjuryChance,
           runChance: CACTUS_HAZARD.runInjuryChance,
         });
-        const spineInjury = isDarwinMode && Math.random() < injuryChance;
-        if (spineInjury) {
+        // Every committed contact pricks: a light graze at a stroll, the full
+        // hazard damage at a run. The old roll now decides only whether the
+        // spines lodge deep enough to slow him (the cactus_spines constraint).
+        if (isDarwinMode) {
+          const speedFraction = THREE.MathUtils.clamp(impactSpeed / playerConfig.runSpeed, 0, 1);
+          const fullDamage = hazard.damage || cactusContact.cactus.damage || 8;
+          const prickDamage = Math.max(2, Math.round(fullDamage * (0.3 + 0.7 * speedFraction)));
           const streak = cactusHazardStreak.current;
           streak.count = now - streak.lastAt <= 8 ? streak.count + 1 : 1;
           streak.lastAt = now;
-          const severeFall = impactSpeed >= playerConfig.runSpeed * 0.86;
-          const embedSpines = streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62;
+          const spinesLodged = Math.random() < injuryChance;
+          const severeFall = spinesLodged && impactSpeed >= playerConfig.runSpeed * 0.86;
+          const embedSpines = spinesLodged
+            && (streak.count >= 2 || impactSpeed >= playerConfig.runSpeed * 0.62);
           if (embedSpines) streak.count = 0;
-          applyCactusDamage(hazard.damage || cactusContact.cactus.damage || 8, {
+          emitPropEvent('spine-prick', {
+            position: { x: group.current.position.x, y: group.current.position.y + 0.9, z: group.current.position.z },
+            intensity: 0.35 + speedFraction * 0.65,
+            hazardKind: hazard.kind || null,
+          });
+          applyCactusDamage(prickDamage, {
             embedSpines,
             severeFall,
             impactSpeed,

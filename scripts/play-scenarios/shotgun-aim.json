@@ -1,0 +1,19 @@
+[
+  ["tp", 32.08, 22.57],
+  ["tool", "shotgun"],
+  ["wait", 1400],
+  ["mouse", "move", 640, 400],
+  ["mouse", "down", { "button": "right" }],
+  ["wait", 900],
+  ["expect", "api.getMotionState().aiming", { "equals": true }],
+  ["js", "window.__aimYaw = window.__darwinE2E.getCameraYaw()"],
+  ["mouse", "move", 900, 400, { "steps": 10 }],
+  ["expect", "Math.abs(api.getCameraYaw() - window.__aimYaw) > 0.1", { "equals": true }],
+  ["mouse", "down"],
+  ["mouse", "up"],
+  ["wait", 300],
+  ["expect", "api.store('shotgunShells').shotgunShells", { "equals": 1 }],
+  ["mouse", "up", { "button": "right" }],
+  ["wait", 400],
+  ["expect", "api.getMotionState().aiming", { "equals": false }]
+]

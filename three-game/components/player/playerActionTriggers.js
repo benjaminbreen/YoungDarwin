@@ -4,6 +4,62 @@ import { ACTION_DURATION } from './playerConfig';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { tryFireShotgun } from '../../shooting/fireShotgun';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { toolTargetDirection } from './toolTargeting';
+import { NET_SWEEP, beginNetSweep, netSweepState } from './netSweep';
+
+// A swing at a marked subject turns Darwin onto it over the wind-up, so the
+// strike lands where the marker was rather than straight down his facing.
+function aimToolSwing(toolId, group, facing, stateRef) {
+  const position = group.current?.position;
+  const direction = toolTargetDirection(toolId, position, facing.current);
+  if (!direction) return { x: facing.current.x, y: 0, z: facing.current.z };
+  if (stateRef) {
+    const now = performance.now() / 1000;
+    stateRef.current.collectionFaceMotion = {
+      targetYaw: Math.atan2(direction.x, direction.z),
+      startedAt: now,
+      until: now + 0.32,
+    };
+  }
+  return { x: direction.x, y: 0, z: direction.z };
+}
+
+// Start the aimed net sweep from where Darwin stands: commit the subject, step
+// in when it sits past the hoop's reach, and tell the plants and sounds.
+// Shared by the plain F swing and the E collection.
+export function startNetSweep({ position, facing, stateRef, target = null }) {
+  const now = performance.now() / 1000;
+  const sweep = beginNetSweep({ position, facing, now, target });
+  const dx = sweep.aim.x - position.x;
+  const dz = sweep.aim.z - position.z;
+  const distance = Math.hypot(dx, dz);
+  const lunge = Math.min(NET_SWEEP.maxLunge, distance - NET_SWEEP.reach);
+  if (stateRef && lunge > 0.05) {
+    stateRef.current.netLunge = {
+      startedAt: now + 0.06,
+      duration: NET_SWEEP.strike - 0.1,
+      x: dx / distance,
+      z: dz / distance,
+      distance: lunge,
+      done: 0,
+    };
+  }
+  emitPropEvent('tool-swing', {
+    tool: 'insect_net',
+    swingId: nextSwingId(),
+    sweepId: sweep.id,
+    position: { x: position.x, y: position.y, z: position.z },
+    facing: { x: sweep.facing.x, y: 0, z: sweep.facing.z },
+    impactDelay: NET_SWEEP.strike,
+  });
+  // A thorn or snag fouls the mesh: nothing is caught this sweep.
+  if (maybeTriggerNetSnagFromSwing({ position, facing: { x: dx, y: 0, z: dz } })) {
+    netSweepState.resolved = true;
+    netSweepState.outcome = 'snagged';
+    return { sweep, snagged: true };
+  }
+  return { sweep, snagged: false };
+}
 
 export function triggerDirectPlayerActions({
   triggerAction,
@@ -14,6 +70,7 @@ export function triggerDirectPlayerActions({
   touch = {},
   lastButtons = null,
   activeConstraint = null,
+  stateRef = null,
 }) {
   const actionOptions = { movementLocked };
   const toolBlocked = (button, toolId) => {
@@ -48,7 +105,7 @@ export function triggerDirectPlayerActions({
         tool: 'hammer',
         swingId: nextSwingId(),
         position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
-        facing: { x: facing.current.x, y: 0, z: facing.current.z },
+        facing: aimToolSwing('hammer', group, facing, stateRef),
         impactDelay: 0.55,
       });
     },
@@ -68,21 +125,13 @@ export function triggerDirectPlayerActions({
     },
   });
   const netBlocked = toolBlocked('net', 'insect_net');
-  triggerAction('net', 'butterflyNetSwing', ACTION_DURATION.butterflyNetSwing, {
+  triggerAction('net', 'butterflyNetSwing', NET_SWEEP.duration, {
     ...actionOptions,
     movementLocked: movementLocked || netBlocked,
     onStart: () => {
-      emitPropEvent('tool-swing', {
-        tool: 'insect_net',
-        swingId: nextSwingId(),
-        position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
-        facing: { x: facing.current.x, y: 0, z: facing.current.z },
-        impactDelay: 1.05,
-      });
-      maybeTriggerNetSnagFromSwing({
-        position: group.current?.position,
-        facing: facing.current,
-      });
+      const swingFacing = aimToolSwing('insect_net', group, facing, stateRef);
+      if (!group.current) return;
+      startNetSweep({ position: group.current.position, facing: swingFacing, stateRef });
     },
   });
   triggerAction('gather', 'gatherGround', ACTION_DURATION.gatherGround, actionOptions);

@@ -127,7 +127,8 @@ export const FOLIAGE_PUSH_PROFILES = {
     recoilRatio: 0.15,
     bendDown: 0.02,
     referenceBend: 0.05,
-    contactKind: 'shrub',
+    // Stiff pads scraping cloth, not leaves: the foley plays it drier.
+    contactKind: 'spine',
   },
 };
 
@@ -136,8 +137,11 @@ export const DEFAULT_FOLIAGE_PUSH_PROFILE = 'shrub';
 // Most specific first: `lava-cactus` must not fall through to `tree` on the
 // strength of some other token in the same path.
 const PROFILE_PATTERNS = [
+  // Castela borrows the palo santo GLB, so its path alone would read as a
+  // mature tree and the bush would stand rigid while Darwin walks through it.
+  ['woodyShrub', /castela|bitterbush/],
   ['succulent', /opuntia|cact(?:us|i)|prickly.?pear|candelabra|succulent|agave|aloe|jasminocereus/],
-  ['grass', /grass|sedge|reed|rush|tussock|meadow|fern|crop|ground.?plant|clover|turf/],
+  ['grass', /grass|sedge|reed|rush|tussock|meadow|fern|\bcrops?\b|ground.?plant|clover|turf/],
   ['herb', /cotton|delilia|sicyos|vine|creeper|herb|forb|flower|blossom|alternanthera|portulaca|ipomoea|passiflora|tribulus|heliotropium/],
   ['tree', /palo.?santo|mangrove|manzanillo|acacia|bursera|piscidia|\btree\b|\btrunk\b|canopy/],
   ['sapling', /sapling|seedling|young.?tree|\bstem\b/],
@@ -155,6 +159,26 @@ export function classifyFoliagePushProfile(descriptor = {}) {
     if (pattern.test(text)) return name;
   }
   return DEFAULT_FOLIAGE_PUSH_PROFILE;
+}
+
+// Layers with no authored `motion` used to get no push at all, so a whole
+// bitterbush stand could be walked through without a twig moving. Anything
+// that classifies as a plant now falls back to its profile's reference bend;
+// non-plant flora (driftwood, coral, algae) stays rigid.
+const NON_PLANT_FLORA = /driftwood|coral|barnacle|algae|wrack|shell/;
+
+// Cached per layer: the renderer keys material builds on motion identity.
+const defaultLayerMotion = new WeakMap();
+
+export function resolveLayerMotion(layer = {}) {
+  if (layer.motion) return layer.motion;
+  if (defaultLayerMotion.has(layer)) return defaultLayerMotion.get(layer);
+  const text = `${layer.id || ''} ${layer.path || ''} ${layer.label || ''}`.toLowerCase();
+  const motion = !text.trim() || NON_PLANT_FLORA.test(text)
+    ? null
+    : { wind: 0.5, bend: FOLIAGE_PUSH_PROFILES[classifyFoliagePushProfile(layer)].referenceBend };
+  defaultLayerMotion.set(layer, motion);
+  return motion;
 }
 
 // Resolve the runtime push response for one material.

@@ -50,7 +50,8 @@ export function isSwingClaimed(swingId) {
 // 'surface-contact' { position: {x,y,z}, direction?, normal?, intensity, biome?, surfaceProfile?, target?, kind?: 'footstep'|'takeoff'|'step-up'|'landing'|'landing-jump', fallSpeed?, horizontalSpeed?, travelDistance?, runningJump? }
 // 'water-ripple' / 'water-step' / 'water-splash' { position: {x,y,z}, direction?, intensity }
 // 'water-object-ripple' { position: {x,y,z}, direction?, yaw?, intensity, radius?, propId? }
-// 'foliage-contact' { sourceId, zoneId, kind: 'grass'|'shrub', position: {x,y,z}, intensity }
+// 'foliage-contact' { sourceId, zoneId, kind: 'grass'|'shrub'|'spine', position: {x,y,z}, intensity }
+// 'spine-prick'     { position: {x,y,z}, intensity, hazardKind } — Darwin pricked by a cactus
 // 'npc-footstep' { npcId, zoneId, position: {x,y,z}, side, speed, movementMode }
 // 'bee-audio-proximity' { zoneId, active, position?: {x,y,z}, phase?: 'hover'|'dart'|'descend', gate? }
 // 'lightning-flash' { zoneId, distance, pan, storm }

@@ -52,6 +52,7 @@ import {
   POST_OFFICE_BAY_SURVEY_TARGET,
 } from '../directives';
 import { ComfortSettings } from './ComfortSettings';
+import { openSoundMixer } from './SoundMixer';
 import { vitalsGradient } from './theme';
 import { QUALITY_CHOICES } from '../qualityPreference';
 import {
@@ -2821,7 +2822,7 @@ function ShotgunStatusChip() {
           <span className="text-[10.5px] italic text-expedition-faded">Reloading</span>
         </span>
       ) : (
-        <span className="text-[10.5px] text-expedition-faded">Hold RMB / F to aim · click fires</span>
+        <span className="text-[10.5px] text-expedition-faded">Hold F or right mouse to aim · tap F or click to fire</span>
       )}
     </div>
   );
@@ -3245,6 +3246,21 @@ function PauseMenu({
             >
               <span className={PAUSE_ROW_LABEL}>Sound</span>
               <span className={PAUSE_ROW_VALUE}>{audioEnabled ? 'On' : 'Off'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                // Back to the field with the mixer floating over it, so each
+                // level can be judged while walking rather than from a menu.
+                openSoundMixer();
+                onResume();
+              }}
+              data-testid="pause-sound-mix"
+              className={PAUSE_ROW}
+            >
+              <span className={PAUSE_ROW_LABEL}>Sound mix</span>
+              <span className={PAUSE_ROW_VALUE}>Tune</span>
             </button>
 
             <div className="rounded-sm border border-expedition-brass/45 bg-black/15">

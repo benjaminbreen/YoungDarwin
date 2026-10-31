@@ -153,7 +153,7 @@ export function encounterAmbientLine(npcId, event = 'nearby', relation = {}) {
 function lawsonReply(input) {
   if (/tortoise|turtle|shell|galapago/.test(input)) {
     return {
-      dialogue: '“The tortoises? I can do better than describe them, sir — bring me a shell from any island in this group and I will name you the island it came from. They differ. Charles Island beasts are not the beasts of Albemarle, nor of Chatham, and any man who has victualled a ship here knows it. It is a talent of mine, long cultivated.”',
+      dialogue: '“The tortoises? I can do better than describe them, sir — bring me a shell from any island in this group and I will name you the island it came from. They differ. Charles Island beasts are not the beasts of Albemarle, nor of Chatham, and any man who has victualled a ship here knows it. It is a talent of mine, long cultivated. Even on this one island the beasts that keep to the springs above the settlement grow larger than those that come down to the dry shore — put a tape over a few of each, if you doubt me.”',
       trustDelta: 2,
       flags: ['named_the_tortoise_difference'],
     };
@@ -174,7 +174,7 @@ function lawsonReply(input) {
   }
   if (/bird|finch|mockingbird|iguana|plant|animal|specimen|collect|natural/.test(input)) {
     return {
-      dialogue: '“Take what you like of it. The small birds are so tame you may knock them down with a hat, which says something about how long men have been absent. The iguanas keep to the black rock on the coast. Mind the manzanillo — the settlers will show you which tree it is, and you should believe them.”',
+      dialogue: '“Take what you like of it. The small birds are so tame you may knock them down with a hat, which says something about how long men have been absent. The settlers swear the finches on the coast have heavier beaks than ours up here; I have never troubled to look. The iguanas keep to the black rock on the coast. Mind the manzanillo — the settlers will show you which tree it is, and you should believe them.”',
       trustDelta: 1,
       flags: ['discussed_natural_history'],
     };

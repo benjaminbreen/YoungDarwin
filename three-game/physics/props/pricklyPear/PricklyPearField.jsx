@@ -321,6 +321,15 @@ const PRICKLY_PEAR_SPEC = {
     ? 'The hammer thuds into the woody basal pad. It shudders, sheds spines, and holds.'
     : 'The pad splits partway; another blow should part it from the plant.'),
   absorbEducationalNote: 'Older opuntia pads turn woody and fibrous at the base; a specimen hammer is the wrong tool for felling one.',
+  // Juvenile pads carry the same spines as the mature plants: brushing one
+  // is a sharp lesson, not a free pass because the plant is breakable.
+  spines: {
+    label: 'prickly pear',
+    kind: 'opuntia',
+    damage: 6,
+    reach: 0.44,
+    educationalNote: 'Even young Floreana prickly pears carry long spines and fine glochids that lodge in cloth and skin at the lightest touch.',
+  },
   tuning: {
     // Succulent pads flex visibly at their joints and return with a soft,
     // slightly under-damped recoil. Site sway moves the whole silhouette;

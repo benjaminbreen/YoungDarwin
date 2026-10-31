@@ -75,12 +75,47 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'collapse', label: 'Collapse exhale', group: 'Darwin body', kind: 'sprite', sprite: DARWIN_BODY_AUDIO.collapse, diagnosticGain: 0.18 },
   { key: 'gear', label: 'Clothing and gear', group: 'Darwin body', kind: 'sprite', sprite: DARWIN_BODY_AUDIO.gear, diagnosticGain: 0.18 },
   { key: 'bodyImpact', label: 'Hard-fall body', group: 'Darwin body', kind: 'sprite', sprite: DARWIN_BODY_AUDIO.bodyImpact, diagnosticGain: 0.2 },
+  // Layers on Darwin's footfalls and plant contact. They reuse the rustle and
+  // clothing recordings but keep their own keys so each can be trimmed alone.
+  { key: 'brushGrass', label: 'Brushing through grass', group: 'Plant contact', kind: 'sprite', sprite: INTERACTION_AUDIO.grass, diagnosticGain: 0.2 },
+  { key: 'brushShrub', label: 'Brushing through shrubs', group: 'Plant contact', kind: 'sprite', sprite: INTERACTION_AUDIO.shrub, diagnosticGain: 0.2 },
+  { key: 'brushSpine', label: 'Scraping past cactus', group: 'Plant contact', kind: 'sprite', sprite: INTERACTION_AUDIO.shrub, diagnosticGain: 0.16 },
+  { key: 'spineSnag', label: 'Cactus spine snag', group: 'Plant contact', kind: 'sprite', sprite: INTERACTION_AUDIO.shrub, diagnosticGain: 0.2 },
+  { key: 'cloth', label: 'Coat and satchel while running', group: 'Darwin body', kind: 'sprite', sprite: DARWIN_BODY_AUDIO.gear, diagnosticGain: 0.18 },
 ]);
 
 const AUDIO_DEBUG_TRACK_BY_KEY = new Map(AUDIO_DEBUG_TRACKS.map(track => [track.key, track]));
-const SOUND_MIX_STORAGE_KEY = 'darwin.sound-mix.v1';
-const SOUND_MIX_SCHEMA = 'darwin-sound-mix-v1';
+// v2: the v1 trims tuned on 2026-10-30 became AUTHORED_MIX below. Bumping
+// the schema drops browsers' saved v1 copies so they are not applied twice.
+const SOUND_MIX_STORAGE_KEY = 'darwin.sound-mix.v2';
+const SOUND_MIX_SCHEMA = 'darwin-sound-mix-v2';
 const BASE_MASTER_GAIN = 0.72;
+// The shipped balance, tuned by ear in the in-game Sound mix panel. Player
+// trims (the sliders, 0 dB by default) ride on top of these offsets.
+const AUTHORED_MIX = Object.freeze({
+  masterDb: -2.5,
+  tracks: Object.freeze({
+    bee: 3.5,
+    brushGrass: -14,
+    brushShrub: -2.5,
+    brushSpine: 4.5,
+    cloth: -10,
+    grass: -10.5,
+    grit: -11.5,
+    litterStep: -12.5,
+    mudStep: -5.5,
+    pain: 5.5,
+    rockStep: -6,
+    rockTakeoff: -6.5,
+    sand: -12.5,
+    shotgunReport: -8,
+    spineSnag: 7.5,
+    symsGrit: -2,
+    tortoiseStep: -6.5,
+    water: -10,
+    woodStep: -7,
+  }),
+});
 const MASTER_TRIM_MIN_DB = -18;
 const MASTER_TRIM_MAX_DB = 6;
 const TRACK_TRIM_MIN_DB = -24;
@@ -173,6 +208,11 @@ const audioState = {
       collapse: 0,
       breath: 0,
       bodyImpact: 0,
+      brushGrass: 0,
+      brushShrub: 0,
+      brushSpine: 0,
+      spineSnag: 0,
+      cloth: 0,
       gear: 0,
       symsGrit: 0,
       symsSand: 0,
@@ -245,7 +285,7 @@ function trackTrimDb(key) {
 }
 
 function trackTrimGain(key) {
-  return dbToGain(trackTrimDb(key));
+  return dbToGain((AUTHORED_MIX.tracks[key] || 0) + trackTrimDb(key));
 }
 
 function debugAllowsTrack(key) {
@@ -269,7 +309,7 @@ function effectiveMasterGain() {
   // mix balance the sound design assumes is preserved at every setting.
   const playerVolume = getPlayerPreferences().masterVolume;
   return audioState.enabled || audioState.debugControl.forceEnabled
-    ? BASE_MASTER_GAIN * dbToGain(audioState.mix.masterDb) * playerVolume
+    ? BASE_MASTER_GAIN * dbToGain(AUTHORED_MIX.masterDb + audioState.mix.masterDb) * playerVolume
     : 0;
 }
 
@@ -619,7 +659,10 @@ export function playAudioSprite(sprite, {
     || !context
     || context.state !== 'running'
     || !buffer
-    || audioState.voices.size >= (priority ? 9 : 7)) return false;
+    // Footfalls now carry a foliage brush and cloth layer, so a run through
+    // scrub holds several short voices at once; the old cap of 7 started
+    // dropping the footsteps themselves.
+    || audioState.voices.size >= (priority ? 12 : 10)) return false;
   if (!debugAllowsTrack(family)) return false;
 
   const safeIndex = Math.max(0, Math.min(sprite.variants - 1, Math.floor(index || 0)));
@@ -810,12 +853,13 @@ function debugTrackSnapshot(definition) {
       : audioState.bufferPromises.has(url) && !audioState.buffers.has(url),
     running: Boolean(track),
     targetGain: rawTarget,
-    effectiveTargetGain: rawTarget == null ? null : rawTarget * dbToGain(mixTrimDb),
+    effectiveTargetGain: rawTarget == null ? null : rawTarget * trackTrimGain(definition.key),
     actualGain: track?.gain?.gain?.value || 0,
     filterHz: ambientTrack?.filter?.frequency?.value || null,
     diagnosticGain: definition.diagnosticGain,
     mixTrimDb,
-    mixMultiplier: dbToGain(mixTrimDb),
+    authoredMixDb: AUTHORED_MIX.tracks[definition.key] || 0,
+    mixMultiplier: trackTrimGain(definition.key),
     muted: audioState.debugControl.mutedKeys.has(definition.key),
     solo: audioState.debugControl.soloKey === definition.key,
     eventCount: audioState.debug.events[definition.key] || 0,

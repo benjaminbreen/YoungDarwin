@@ -104,6 +104,7 @@ export async function recordMotion(steps = [], { durationMs = null } = {}) {
         running: motion.running,
         airborne: motion.airborne,
         locked: performance.now() / 1000 < (motion.lockMovementUntil || 0) || undefined,
+        aiming: motion.aiming || undefined,
         clip: anim?.active || null,
         clipScale: round(anim?.timeScale, 2),
         held: [...held].join('+') || undefined,

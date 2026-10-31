@@ -41,9 +41,11 @@ import { EcologyHabitatDebugLayer } from './EcologyHabitatDebugLayer';
 import { MatureCactusImpactLayer } from './MatureCactusImpactLayer';
 import { matureCactusProfileForPath } from '../../../world/ecology/matureCactusInteractions';
 import { emitPropEvent } from '../../../physics/props/propEvents';
+import { resolveLayerMotion } from '../../../world/ecology/foliagePushProfiles';
 import {
   buildFoliageContactIndex,
   findFoliageContact,
+  noteFoliageImmersion,
 } from '../../../world/ecology/foliageContact';
 
 // Generic renderer for a zone ecology definition (see
@@ -83,6 +85,7 @@ function FoliageMotionDriver({ contactIndex, zoneId }) {
       activeContactId.current = null;
       return;
     }
+    noteFoliageImmersion(contact);
     const isNewPlant = activeContactId.current !== contact.id;
     const recovered = clock.elapsedTime - lastRustleAt.current > 0.85;
     if (!isNewPlant && !recovered) return;
@@ -491,7 +494,7 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
             ySquash={layer.ySquash || 1}
             tint={layer.tint || null}
             tintStrength={layer.tintStrength || 0}
-            motion={layer.motion || null}
+            motion={resolveLayerMotion(layer)}
             castShadow={floraCastsShadow(layer)}
             receiveShadow={layer.receiveShadow !== false}
             maxVisibleDistance={drawDistanceFor(layer)}

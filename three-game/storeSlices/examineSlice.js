@@ -19,6 +19,7 @@ import {
 import { generativeRequestsAllowed } from '../ai/generativePolicy';
 import { getThreeIslandLocation } from '../data';
 import { getZone } from '../world/floreanaZones';
+import { formatTraitValue, measureTrait, traitsForSpecies } from '../examine/populationTraits';
 
 export const createExamineActions = (set, get) => ({
   // --- Examination ------------------------------------------------------
@@ -70,6 +71,81 @@ export const createExamineActions = (set, get) => ({
     const facts = session.facts.map(fact => (fact.id === factId ? { ...fact, saved: true } : fact));
     return { examineSession: { ...session, facts } };
   }),
+
+  // Take the species' measurements on the individual in front of Darwin. The
+  // numbers are the animal's own (examine/populationTraits.js) plus this
+  // reading's error, not a guess, and they go into the field book's measure
+  // record by landing as well as the examination's facts. Measuring the same
+  // animal again takes a fresh reading.
+  measureExamineSubject: () => {
+    const state = get();
+    const session = state.examineSession;
+    if (!session || session.kind !== 'specimen' || session.pending) return false;
+    const traits = traitsForSpecies(session.typeId);
+    if (!traits || !session.actorId) return false;
+    const zoneId = state.currentZoneId;
+    const location = getThreeIslandLocation(zoneId).name;
+    const previous = (state.fieldMeasurements || []).filter(record => record.actorId === session.actorId);
+    const attempt = previous.reduce((max, record) => Math.max(max, (record.attempt || 0) + 1), 0);
+    const readings = traits.map(trait => ({
+      trait,
+      value: measureTrait(trait, session.actorId, zoneId, attempt),
+    }));
+    const records = readings.map(({ trait, value }) => ({
+      id: `${session.actorId}:${trait.id}`,
+      specimenId: session.typeId,
+      actorId: session.actorId,
+      traitId: trait.id,
+      value,
+      zoneId,
+      location,
+      day: state.day,
+      attempt,
+    }));
+    const replaced = new Set(records.map(record => record.id));
+    const lines = readings.map(({ trait, value }) => `${trait.label}, by ${trait.instrument}: ${formatTraitValue(trait, value)}.`);
+    const reply = attempt > 0
+      ? `You measure it again. ${lines.join(' ')} Not quite the first reading; the difference is the instrument and your hand, not the animal.`
+      : `You measure it. ${lines.join(' ')}`;
+    set(current => {
+      const active = current.examineSession;
+      if (!active || active.actorId !== session.actorId) return {};
+      const facts = [...active.facts];
+      for (const { trait, value } of readings) {
+        const fact = {
+          id: `measure-${trait.id}`,
+          label: trait.label,
+          value: formatTraitValue(trait, value),
+          confidence: 'high',
+          measurement: true,
+          saved: true,
+        };
+        const existing = facts.findIndex(item => item.id === fact.id);
+        if (existing >= 0) facts[existing] = fact;
+        else facts.push(fact);
+      }
+      return {
+        fieldMeasurements: [
+          ...(current.fieldMeasurements || []).filter(record => !replaced.has(record.id)),
+          ...records,
+        ],
+        examineSession: {
+          ...active,
+          facts,
+          measurementCallout: formatTraitValue(readings[0].trait, readings[0].value),
+          measured: true,
+          chat: [...active.chat, {
+            id: `measure-${Date.now()}`,
+            role: 'assistant',
+            text: reply,
+            behavior: '',
+            at: Date.now(),
+          }],
+        },
+      };
+    });
+    return true;
+  },
 
   // Saving a written field note is what completes an examination: the note
   // becomes the player's own journal entry (with any saved facts appended)
@@ -173,7 +249,12 @@ export const createExamineActions = (set, get) => ({
       if (!active) return {};
       const facts = [...active.facts];
       let measurementCallout = active.measurementCallout;
-      const fact = payload.fact && payload.fact.label && payload.fact.value ? payload.fact : null;
+      // Once the subject has been measured, a size the narrator volunteers
+      // must not overwrite the reading.
+      const fact = payload.fact && payload.fact.label && payload.fact.value
+        && !(active.measured && payload.fact.measurement)
+        ? payload.fact
+        : null;
       if (fact) {
         const factId = String(fact.label).toLowerCase().replace(/[^a-z0-9]+/g, '-');
         const existing = facts.findIndex(item => item.id === factId);

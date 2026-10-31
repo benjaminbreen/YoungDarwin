@@ -10,6 +10,8 @@ import { downloadExpeditionText, openExpeditionPrintReport } from '../three-game
 import { ExpeditionModal } from '../three-game/ui/expedition/ExpeditionModal';
 import { SketchPortrait } from '../three-game/ui/expedition/SketchPortrait';
 import { expeditionDateForDay } from '../three-game/expeditionOutcomes';
+import { summarizeMeasurements } from '../three-game/examine/populationTraits';
+import { MeasurementPage } from './MeasurementPage';
 
 function formatJournalDate(day, short = false) {
   return new Intl.DateTimeFormat('en-US', {
@@ -109,11 +111,14 @@ function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, o
         { id: 'specimen', label: 'Specimens', count: counts.specimen },
         { id: 'location', label: 'Locations', count: counts.location },
         { id: 'note', label: 'Notes', count: counts.note },
+        { id: 'measures', label: 'Measures', count: counts.measures },
       ];
   const visible = entries.filter(entry => filter === 'all' || entry.type === filter);
-  const emptyCopy = entries.length === 0
-    ? 'The pages await your observations.'
-    : 'No entries in this section yet.';
+  const emptyCopy = filter === 'measures'
+    ? 'Nothing measured yet. Examine a finch, tortoise, lava lizard, locust, mockingbird or prickly pear and take its measurements.'
+    : entries.length === 0
+      ? 'The pages await your observations.'
+      : 'No entries in this section yet.';
 
   return (
     <aside
@@ -160,7 +165,9 @@ function EntryList({ entries, counts, selectedKey, filter, onFilter, onSelect, o
           </>
         )}
       </div>
-      <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="mx-2.5 mt-2" />
+      {/* Five tabs do not fit the 22rem column on one line; they wrap to two
+          rows rather than widen the column past its edge. */}
+      <PanelTabs tabs={tabs} active={filter} onSelect={onFilter} className="mx-2.5 mt-2 flex-wrap" />
       <div className="relative min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5 [scrollbar-width:thin] [scrollbar-color:#7a5d35_rgba(0,0,0,0.22)]">
         {visible.map(entry => (
           <button
@@ -442,7 +449,26 @@ function JournalPanel({ onClose, onOpenMap }) {
   // Below lg the list and page trade places (drill-in) instead of stacking.
   const [mobileView, setMobileView] = useState('list');
 
+  const fieldMeasurements = useThreeGameStore(state => state.fieldMeasurements);
   const journalEntries = useMemo(() => journal.map(normalizeEntry).reverse(), [journal]);
+  // One page per measured species, comparing its landings. Kept out of "All":
+  // these are a view over the readings, not journal pages.
+  const measureEntries = useMemo(() => summarizeMeasurements(fieldMeasurements || []).map(summary => {
+    const specimen = findSpecimen(summary.specimenId);
+    const animals = new Set((fieldMeasurements || [])
+      .filter(record => record.specimenId === summary.specimenId)
+      .map(record => record.actorId)).size;
+    const places = new Set(summary.traits.flatMap(item => item.landings.map(landing => landing.location))).size;
+    return {
+      key: `measures:${summary.specimenId}`,
+      type: 'measures',
+      title: specimen?.name || summary.specimenId,
+      subtitle: `${places} ${places === 1 ? 'place' : 'places'} · ${animals} ${animals === 1 ? 'animal' : 'animals'}`,
+      date: 'Measurements',
+      specimen,
+      summary,
+    };
+  }), [fieldMeasurements]);
   const devCatalogueEntries = useMemo(makeDevCatalogueEntries, []);
   const entries = devCatalogue ? devCatalogueEntries : journalEntries;
   const counts = useMemo(
@@ -452,10 +478,11 @@ function JournalPanel({ onClose, onOpenMap }) {
         acc[entry.type] = (acc[entry.type] || 0) + 1;
         return acc;
       },
-      { all: 0, specimen: 0, location: 0, note: 0 },
+      { all: 0, specimen: 0, location: 0, note: 0, measures: measureEntries.length },
     ),
-    [entries],
+    [entries, measureEntries.length],
   );
+  const listEntries = !devCatalogue && filter === 'measures' ? measureEntries : entries;
   const currentLocation = getThreeIslandLocation(currentZoneId);
   const selectedEntry = devCatalogue
     ? entries.find(entry => entry.key === selectedKey) || entries[0] || null
@@ -470,7 +497,9 @@ function JournalPanel({ onClose, onOpenMap }) {
         page: journal.length + 1,
         content: '',
       }
-      : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
+      : selectedKey.startsWith('measures:')
+        ? measureEntries.find(entry => entry.key === selectedKey) || null
+        : entries.find(entry => entry.key === selectedKey) || entries[0] || null;
   const isDraft = selectedEntry?.type === 'draft';
 
   // Book order: oldest entry first, the blank draft as the final page.
@@ -496,10 +525,14 @@ function JournalPanel({ onClose, onOpenMap }) {
       }
       return;
     }
+    if (selectedKey.startsWith('measures:')) {
+      if (!measureEntries.some(entry => entry.key === selectedKey)) setSelectedKey(entries[0]?.key || 'draft');
+      return;
+    }
     if (selectedKey !== 'draft' && !entries.some(entry => entry.key === selectedKey)) {
       setSelectedKey(entries[0]?.key || 'draft');
     }
-  }, [devCatalogue, devCatalogueEntries, entries, selectedKey]);
+  }, [devCatalogue, devCatalogueEntries, entries, measureEntries, selectedKey]);
 
   const toggleDevCatalogue = () => {
     if (!JOURNAL_DEV_CATALOGUE_AVAILABLE) return;
@@ -559,11 +592,15 @@ function JournalPanel({ onClose, onOpenMap }) {
       <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 px-2.5 pb-2.5 sm:px-4 sm:pb-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <EntryList
           className={mobileView === 'page' ? 'hidden lg:flex' : 'flex'}
-          entries={entries}
+          entries={listEntries}
           counts={counts}
           selectedKey={selectedKey}
           filter={filter}
-          onFilter={setFilter}
+          onFilter={next => {
+            setFilter(next);
+            if (next === 'measures' && measureEntries[0]) setSelectedKey(measureEntries[0].key);
+            else if (next !== 'measures' && selectedKey.startsWith('measures:')) setSelectedKey(entries[0]?.key || 'draft');
+          }}
           onSelect={key => {
             setSelectedKey(key);
             setMobileView('page');
@@ -579,7 +616,9 @@ function JournalPanel({ onClose, onOpenMap }) {
             {selectedEntry && (
               selectedEntry.devCatalogue
                 ? <DevSpecimenCataloguePage entry={selectedEntry} />
-                : <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
+                : selectedEntry.type === 'measures'
+                  ? <MeasurementPage entry={selectedEntry} />
+                  : <JournalPage entry={selectedEntry} draft={draft} onDraftChange={setJournalDraft} />
             )}
           </div>
           {/* Four control groups do not fit one phone row, and letting them wrap

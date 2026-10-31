@@ -163,6 +163,7 @@ const {
 const {
   buildReadinessRecommendations,
   createDefaultObjectives,
+  evaluateCollectionAttempt,
   evaluateExpeditionReadiness,
   getTrapReadiness,
   previewCollectionMethod,
@@ -2306,8 +2307,12 @@ test('environmental audio keeps coastal surf audible across region topology', ()
     resolveZone,
     weather: { windSpeed: 0.8, rainIntensity: 0 },
   });
-  assert.ok(atShore.surf >= 0.4, 'the rolling body of near-shore surf should remain clearly audible');
-  assert.ok(oneMapInland.surf >= 0.1, 'an adjacent map should retain a light but audible surf bed');
+  // Surf is a bed under Darwin's foley (grit steps peak at ~0.3 gain on a
+  // louder recording), so these floors are relative to that mix.
+  assert.ok(atShore.surf >= 0.18, 'the rolling body of near-shore surf should remain clearly audible');
+  assert.ok(atShore.surf <= 0.24, 'near-shore surf must stay a bed under the footfalls, not over them');
+  assert.ok(oneMapInland.surf >= 0.05, 'an adjacent map should retain a light but audible surf bed');
+  assert.ok(atShore.surf >= oneMapInland.surf * 3, 'surf should fall away clearly one map inland');
 });
 
 test('environmental audio follows weather and suppresses dry insects in rain and interiors', () => {
@@ -2566,7 +2571,7 @@ test('sound debug mix trims clamp, serialize, and reset with stable track keys',
   assert.equal(setSoundscapeAudioTrackTrimDb('not-a-track', 4), null);
 
   const tuned = getSoundscapeAudioMixSettings();
-  assert.equal(tuned.schema, 'darwin-sound-mix-v1');
+  assert.equal(tuned.schema, 'darwin-sound-mix-v2');
   assert.equal(tuned.masterDb, 6);
   assert.equal(tuned.tracks.surf, -24);
   assert.equal(tuned.trackLabels.surf, 'Ocean surf');
@@ -4580,6 +4585,63 @@ test('fauna ignore a player far overhead and a player of their own kind', () => 
   assert.ok(panicFor({ x: 1, y: 0, z: 0 }) > 0.5, 'a player beside the finch should alarm it');
   assert.equal(panicFor({ x: 1, y: 8, z: 0 }), 0);
   assert.equal(panicFor({ x: 1, y: 0, z: 0 }, true), 0);
+});
+
+test('island tameness rises with disturbance, crosses tiers once, and fades in game time', () => {
+  const {
+    WARINESS,
+    disturbWildlifeState,
+    sanitizeWildlifeWariness,
+    warinessFor,
+    warinessRadiusScale,
+    warinessTier,
+  } = loadModule('three-game/wildlife/wariness.js');
+  assert.equal(warinessFor({}, 'POST_OFFICE_BAY', 'medium_ground_finch', 0), 0);
+  assert.equal(warinessTier(0), 'tame');
+  assert.ok(warinessRadiusScale(0) < 1 && warinessRadiusScale(1) > 1.5, 'tame animals allow a close approach, wary ones bolt early');
+
+  // Two shots at the same species in one bay: the first leaves it uneasy...
+  let { map, crossings } = disturbWildlifeState({}, {
+    zoneId: 'POST_OFFICE_BAY', speciesIds: ['medium_ground_finch'], amount: WARINESS.shotTarget + 0.1, nowMinutes: 600,
+  });
+  assert.deepEqual(crossings.map(c => c.tier), ['uneasy']);
+  // ...the second makes it wary, and only that rise is reported.
+  ({ map, crossings } = disturbWildlifeState(map, {
+    zoneId: 'POST_OFFICE_BAY', speciesIds: ['medium_ground_finch'], amount: WARINESS.shotTarget, nowMinutes: 610,
+  }));
+  assert.deepEqual(crossings.map(c => c.tier), ['wary']);
+  const fresh = warinessFor(map, 'POST_OFFICE_BAY', 'medium_ground_finch', 610);
+  assert.equal(warinessTier(fresh), 'wary');
+  // The same species elsewhere, and other species here, are still tame.
+  assert.equal(warinessFor(map, 'BLACK_BEACH', 'medium_ground_finch', 610), 0);
+  assert.equal(warinessFor(map, 'POST_OFFICE_BAY', 'lava_lizard', 610), 0);
+  // Half the alarm is gone after one half-life of game time.
+  const later = warinessFor(map, 'POST_OFFICE_BAY', 'medium_ground_finch', 610 + WARINESS.halfLifeMinutes);
+  assert.ok(Math.abs(later - fresh / 2) < 1e-9);
+
+  // No-op disturbances keep the same map so the store does not re-render.
+  const unchanged = disturbWildlifeState(map, { zoneId: 'POST_OFFICE_BAY', speciesIds: [], amount: 0.2, nowMinutes: 620 });
+  assert.equal(unchanged.map, map);
+
+  // Saves keep only well-formed, positive records.
+  assert.deepEqual(sanitizeWildlifeWariness({
+    POST_OFFICE_BAY: { medium_ground_finch: { level: 3, atMinutes: 610 }, lava_lizard: { level: 0, atMinutes: 1 }, bad: null },
+    BLACK_BEACH: 'nope',
+  }), { POST_OFFICE_BAY: { medium_ground_finch: { level: 1, atMinutes: 610 } } });
+});
+
+test('a tame finch lets Darwin close where a wary one panics', () => {
+  const { createThreatField } = loadModule('three-game/fauna/motion/threatField.js');
+  const { warinessRadiusScale } = loadModule('three-game/wildlife/wariness.js');
+  const profile = getWildlifeBehaviorProfile({ id: 'medium_ground_finch' });
+  const panicAt = (distance, radiusScale) => {
+    const state = { position: { x: 0, y: 0, z: 0 } };
+    const field = createThreatField({ profile, habitat: { radiusX: 4, radiusZ: 4 }, state, getClock: () => 0 });
+    return field.evaluate({ player: { x: distance, y: 0, z: 0 }, t: 1, dt: 0.1, radiusScale }).panic;
+  };
+  const distance = profile.alertRadius * 0.9;
+  assert.equal(panicAt(distance, warinessRadiusScale(0)), 0, 'an untroubled finch should ignore a walking Darwin at this range');
+  assert.ok(panicAt(distance, warinessRadiusScale(1)) > 0, 'a persecuted finch should flee at the same range');
 });
 
 test('Galapagos hawks soar and return only to real authored tree perches', () => {
@@ -7358,6 +7420,97 @@ test('perf lab leaves screenshot stalls out of the gameplay phases', () => {
   });
   assert.deepEqual(analysis.phases.map(phase => phase.name), ['idle-a', 'idle-b']);
   assert.ok(analysis.phases.every(phase => phase.spikes.length === 0));
+});
+
+const populationTraits = loadModule('three-game/examine/populationTraits.js');
+
+function traitMean(specimenId, traitId, zoneId, count = 40) {
+  const trait = populationTraits.findTrait(specimenId, traitId);
+  let sum = 0;
+  for (let i = 0; i < count; i += 1) sum += populationTraits.trueTraitValue(trait, `${zoneId}:test-${i}`, zoneId);
+  return sum / count;
+}
+
+test('ground finch bills run deeper in the dry lowlands than the highland', () => {
+  const trait = populationTraits.findTrait('mediumgroundfinch', 'billDepth');
+  const gap = traitMean('mediumgroundfinch', 'billDepth', 'POST_OFFICE_BAY')
+    - traitMean('mediumgroundfinch', 'billDepth', 'NORTHERN_HIGHLANDS');
+  // Real at the population level, and larger than one bird's spread.
+  assert.ok(gap > trait.spread * 1.5, `gap ${gap}`);
+});
+
+test('control traits do not differ between landings', () => {
+  for (const [specimenId, traitId] of [['mediumgroundfinch', 'wingLength'], ['floreanamockingbird', 'billLength']]) {
+    const trait = populationTraits.findTrait(specimenId, traitId);
+    const gap = Math.abs(traitMean(specimenId, traitId, 'POST_OFFICE_BAY', 200) - traitMean(specimenId, traitId, 'W_HIGH', 200));
+    assert.ok(gap < trait.spread * 0.4, `${specimenId}.${traitId} gap ${gap}`);
+  }
+});
+
+test('a measurement is the animal plus reading error, repeatable per attempt', () => {
+  const trait = populationTraits.findTrait('floreanagianttortoise', 'carapaceLength');
+  const truth = populationTraits.trueTraitValue(trait, 'tortoise-a', 'C_HIGH');
+  const first = populationTraits.measureTrait(trait, 'tortoise-a', 'C_HIGH', 0);
+  assert.equal(populationTraits.measureTrait(trait, 'tortoise-a', 'C_HIGH', 0), first);
+  const readings = Array.from({ length: 12 }, (_, attempt) => populationTraits.measureTrait(trait, 'tortoise-a', 'C_HIGH', attempt));
+  assert.ok(new Set(readings).size > 1, 'repeat readings vary');
+  assert.ok(readings.every(value => Math.abs(value - truth) < trait.error * 4));
+  assert.ok(populationTraits.populationRenderScale('floreanagianttortoise', 'C_HIGH') > 1);
+  assert.ok(populationTraits.populationRenderScale('floreanagianttortoise', 'POST_OFFICE_BAY') < 1);
+  assert.equal(populationTraits.populationRenderScale('mediumgroundfinch', 'C_HIGH'), 1);
+});
+
+test('measurement summaries group by landing and count comparable landings', () => {
+  const records = [
+    { specimenId: 'mediumgroundfinch', actorId: 'a', traitId: 'billDepth', value: 10.8, zoneId: 'POST_OFFICE_BAY', location: 'Post Office Bay' },
+    { specimenId: 'mediumgroundfinch', actorId: 'b', traitId: 'billDepth', value: 10.4, zoneId: 'POST_OFFICE_BAY', location: 'Post Office Bay' },
+    { specimenId: 'mediumgroundfinch', actorId: 'c', traitId: 'billDepth', value: 9.5, zoneId: 'C_HIGH', location: 'Cerro Pajas' },
+  ];
+  const [summary] = populationTraits.summarizeMeasurements(records);
+  const landing = summary.traits[0].landings.find(row => row.zoneId === 'POST_OFFICE_BAY');
+  assert.equal(landing.individuals, 2);
+  assert.equal(Number(landing.mean.toFixed(1)), 10.6);
+  assert.equal(populationTraits.comparableLandingCount(records, 'mediumgroundfinch', 1), 2);
+  assert.equal(populationTraits.comparableLandingCount(records, 'mediumgroundfinch', 2), 1);
+});
+
+test('measurements survive a session save', () => {
+  const { sanitizeFieldMeasurements } = loadModule('three-game/sessionSave.js');
+  const kept = sanitizeFieldMeasurements([
+    { id: 'a:billDepth', specimenId: 'mediumgroundfinch', actorId: 'a', traitId: 'billDepth', value: 10.2, zoneId: 'C_HIGH', location: 'Cerro Pajas', day: 2, attempt: 1 },
+    { specimenId: 'mediumgroundfinch', actorId: 'b', traitId: 'billDepth', value: 'not a number' },
+    null,
+  ]);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].value, 10.2);
+  assert.equal(kept[0].attempt, 1);
+});
+
+test('measured series satisfy two landings and earn assessment credit', () => {
+  const twoLandings = DIRECTIVES.find(directive => directive.id === 'two-landings');
+  const records = ['POST_OFFICE_BAY', 'C_HIGH'].flatMap(zoneId => ['x', 'y'].map(id => ({
+    specimenId: 'mediumgroundfinch', actorId: `${zoneId}:${id}`, traitId: 'billDepth', value: 10, zoneId, location: zoneId,
+  })));
+  assert.equal(twoLandings.isDone({ journal: [], fieldMeasurements: records.slice(0, 1) }), false);
+  assert.equal(twoLandings.isDone({ journal: [], fieldMeasurements: [records[0], records[2]] }), true);
+  const base = { examinedTypeIds: ['mediumgroundfinch'], visitedZoneIds: ['POST_OFFICE_BAY', 'C_HIGH'], journal: [] };
+  const without = evaluateFinalAssessment(base);
+  const withSeries = evaluateFinalAssessment({ ...base, fieldMeasurements: records });
+  const score = profile => profile.categories.find(category => category.id === 'observation').score;
+  assert.ok(score(withSeries) > score(without));
+});
+
+test('the net decides an insect catch where hands mostly fail', () => {
+  const sulphur = { id: 'galapagossulphur', name: 'Sulphur', order: 'Insect', ontology: 'Animal', danger: 0, timeofday: 'Diurnal' };
+  let net = 0;
+  let hands = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const common = { specimen: sulphur, location: { id: 'POST_OFFICE_BAY', type: 'scrub' }, gameTime: 600, attempt };
+    if (evaluateCollectionAttempt({ ...common, method: 'insect_net' }).success) net += 1;
+    if (evaluateCollectionAttempt({ ...common, method: 'hands' }).success) hands += 1;
+  }
+  assert.ok(net > hands * 2, `net ${net} hands ${hands}`);
+  assert.equal(evaluateCollectionAttempt({ specimen: sulphur, method: 'insect_net', assured: true, gameTime: 600 }).success, true);
 });
 
 let failed = false;

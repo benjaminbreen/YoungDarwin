@@ -163,7 +163,7 @@ function buildFlora() {
     { id: 'scrub-rise-saltbush-2', path: `${NATURE}runtime-saltbush-2.glb`, sink: 0.05, tintStrength: 0.24, castShadow: false, motion: { wind: 1.08, bend: 0.25, bendRadius: 1.3 }, items: saltbush.filter((_, index) => index % 2 === 1) },
     { id: 'scrub-rise-croton', path: `${NATURE}runtime-croton.glb`, sink: 0.06, tintStrength: 0.22, castShadow: false, motion: { wind: 1.1, bend: 0.26, bendRadius: 1.3 }, items: croton },
     { id: 'scrub-rise-darwiniothamnus', label: DARWINIOTHAMNUS_LABEL, path: DARWINIOTHAMNUS_PATH, variantMode: DARWINIOTHAMNUS_VARIANT_MODE, sink: 0.05, tintStrength: 0.16, castShadow: false, motion: { wind: 0.92, bend: 0.24, bendRadius: 1.6 }, items: darwiniothamnus },
-    { id: 'scrub-rise-castela', label: 'Galapagos bitterbush / Castela galapageia', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.06, tintStrength: 0.22, castShadow: true, motion: { wind: 0.54, bend: 0.1, bendRadius: 1.5 }, items: castela },
+    { id: 'scrub-rise-castela', label: 'Galapagos bitterbush / Castela galapageia', path: `${NATURE}runtime-palo-santo.glb`, sink: 0.06, tintStrength: 0.22, castShadow: true, motion: { wind: 0.54, bend: 0.28, bendRadius: 1.5 }, items: castela },
     { id: 'scrub-rise-candelabra-cactus', path: `${NATURE}runtime-candelabra-cactus.glb`, sink: 0.04, tintStrength: 0.1, castShadow: true, motion: { wind: 0.24, bend: 0.04, bendRadius: 1.45 }, items: cactus },
   ];
 }

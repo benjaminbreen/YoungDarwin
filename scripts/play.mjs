@@ -189,6 +189,15 @@ async function runDaemon(options) {
       }
     }
     await api('api.waitForSettled(4000)');
+    if (drill.tool) {
+      await api(`api.setTool(${JSON.stringify(drill.tool)})`);
+      await page.waitForTimeout(1400);
+    }
+    // --yaw=<rad> swings the camera round (e.g. side-on to watch a swing).
+    if (Number.isFinite(Number(opts.yaw)) && opts.yaw !== undefined) {
+      await api(`api.setCameraYaw(${Number(opts.yaw)})`);
+      await page.waitForTimeout(400);
+    }
     // Film through the DevTools screencast: it streams every composited frame
     // with a timestamp, where a Playwright screenshot costs ~0.5s apiece and
     // would miss a turn entirely.
@@ -306,6 +315,18 @@ async function runDaemon(options) {
       await page.mouse.click(Number(x), Number(y));
       await page.waitForTimeout(200);
       return api('api.getPrompt()');
+    },
+    // Raw mouse: `mouse down|up [--button=right]`, `mouse move x y [--steps=]`.
+    // Real (trusted) events, so pointer capture and pointer lock behave as
+    // they do for a player.
+    mouse: async ([what, x, y], opts) => {
+      const button = opts.button || 'left';
+      if (what === 'down') await page.mouse.down({ button });
+      else if (what === 'up') await page.mouse.up({ button });
+      else if (what === 'move') await page.mouse.move(Number(x), Number(y), { steps: Number(opts.steps || 1) });
+      else throw new Error('mouse down|up|move');
+      await page.waitForTimeout(150);
+      return { pointerLocked: await page.evaluate(() => Boolean(document.pointerLockElement)) };
     },
     // Click an on-screen control by its accessible name (button, link, tab).
     button: async ([name]) => {

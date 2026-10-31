@@ -44,6 +44,33 @@ export function updatePlayerActionMotion({
     }
   }
 
+  // A net sweep at something past the hoop's reach steps into it over the
+  // wind-up. Collides like any move; ordinary locomotion runs after it.
+  if (stateRef.current.netLunge) {
+    const lunge = stateRef.current.netLunge;
+    const progress = THREE.MathUtils.clamp((now - lunge.startedAt) / lunge.duration, 0, 1);
+    const eased = easeInOutCubic(progress);
+    const step = (eased - lunge.done) * lunge.distance;
+    lunge.done = eased;
+    let blocked = false;
+    if (step > 0 && stateRef.current.action === 'butterflyNetSwing') {
+      const before = frameScratch.lungeBefore || (frameScratch.lungeBefore = new THREE.Vector3());
+      before.copy(group.current.position);
+      group.current.position.x += lunge.x * step;
+      group.current.position.z += lunge.z * step;
+      const collision = collisionAdapter.resolveCollision(group.current.position, before);
+      if (collision) {
+        group.current.position.copy(collision.position).addScaledVector(collision.normal, 0.035);
+        blocked = true;
+      }
+      group.current.position.y = collisionAdapter.groundInfo(group.current.position).y;
+      characterController.sync(group.current.position);
+    }
+    if (progress >= 1 || blocked || stateRef.current.action !== 'butterflyNetSwing') {
+      stateRef.current.netLunge = null;
+    }
+  }
+
   if (stateRef.current.climbMotion) {
     const climb = stateRef.current.climbMotion;
     const progress = THREE.MathUtils.clamp((now - climb.startedAt) / climb.duration, 0, 1);

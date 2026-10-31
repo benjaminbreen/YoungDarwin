@@ -6,7 +6,9 @@
 // hard; released pieces settle and become collectible specimens through the
 // existing rock-sample carry prompt flow. Standing pieces sway faintly in
 // the wind and bend away from the player when brushed (visual group only —
-// colliders stay put). Plants are harmless: no spine damage.
+// colliders stay put). Specs with `spines` report the piece Darwin is touching
+// to world/ecology/spineContacts.js, which feeds the shared cactus recoil and
+// damage path in the player controller.
 //
 // A plant module supplies a spec:
 //   id             — slug used for userData/render labels.
@@ -45,6 +47,8 @@ import {
 } from '../../../store';
 import { getThreeSpecimens } from '../../../data';
 import { onPropEvent, emitPropEvent, claimSwing } from '../propEvents';
+import { clearSpineContact, reportSpineContact } from '../../../world/ecology/spineContacts';
+import { noteFoliageImmersion } from '../../../world/ecology/foliageContact';
 import { SHOTGUN } from '../../../shooting/shotgunConfig';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { SpecimenHighlight } from '../../../components/world/SpecimenHighlight';
@@ -1339,6 +1343,34 @@ export function BreakablePlantField({ spec }) {
           });
         }
       }
+    }
+
+    let touching = null;
+    for (const candidate of candidatesBySite.values()) {
+      if (!touching || candidate.surfaceDistance < touching.surfaceDistance) touching = candidate;
+    }
+    if (touching) {
+      noteFoliageImmersion({
+        kind: spec.spines ? 'spine' : tuning.rustleKind,
+        proximity: THREE.MathUtils.clamp(1 - touching.distance / touching.reach, 0, 1),
+      });
+    }
+    const spines = spec.spines;
+    if (spines && touching && touching.surfaceDistance < spines.reach) {
+      const { piece, dx, dz, distance } = touching;
+      reportSpineContact(spec.id, {
+        zoneId: currentZoneId,
+        cactus: {
+          id: `${spec.id}:${currentZoneId}:${piece.siteId}`,
+          spineHazard: spines,
+        },
+        // Away from the piece, toward Darwin.
+        normal: distance > 0.001 ? { x: -dx / distance, z: -dz / distance } : { x: 0, z: 1 },
+        penetration: (spines.reach - touching.surfaceDistance) * 0.5,
+        distance,
+      });
+    } else if (spines) {
+      clearSpineContact(spec.id);
     }
 
     const intendedVelocity = getRuntimePlayerMotion()?.intendedPlanarVelocity;

@@ -3,15 +3,18 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { useThreeGameStore } from '../../store';
+import { getRuntimePlayerMotion, useThreeGameStore } from '../../store';
 import { getSpecimenRarity } from '../../rarity';
 import { notePerfEvent } from '../../perfCapture';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
+import { startlePollinator, stepPollinatorFlight } from '../../wildlife/pollinators/pollinatorFlight';
+import { populationRenderScale } from '../../examine/populationTraits';
 import { getRegionDefinition } from '../../world/regions';
 import { WATER_LEVEL } from '../../world/water';
 import { specimenToInspectable } from '../../world/inspectables';
 import {
+  consumeSpecimenStimuli,
   removeSpecimenRuntimePose,
   setSpecimenRuntimeBounds,
   setSpecimenRuntimePose,
@@ -833,20 +836,30 @@ export function SpecimenActor({ specimen }) {
     if (specimen.pollinator) {
       highlightGroundedRef.current = false;
       const base = behaviorBaseRef.current || position;
-      const t = worldElapsed + actorId.length * 0.37;
+      // Stimuli (a shot, a swept net) make it bolt; nothing else reads them.
+      const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
+      const lastStimulus = stimuli[stimuli.length - 1];
+      if (lastStimulus?.position && !isUnderExamination) {
+        startlePollinator(actorId, lastStimulus.position.x, lastStimulus.position.z, worldElapsed);
+      }
+      let flight = null;
       if (!isUnderExamination) {
-        const radiusX = specimen.habitatRadiusX || 1.35;
-        const radiusZ = specimen.habitatRadiusZ || 1.05;
-        group.current.position.set(
-          base.x + Math.sin(t * 0.52) * radiusX + Math.sin(t * 1.7) * 0.14,
-          base.y + 0.62 + Math.sin(t * 1.23) * 0.22 + Math.sin(t * 5.1) * 0.025,
-          base.z + Math.cos(t * 0.43) * radiusZ + Math.cos(t * 1.45) * 0.12,
-        );
-        group.current.rotation.set(
-          Math.sin(t * 1.1) * 0.08,
-          Math.atan2(Math.cos(t * 0.52) * radiusX, -Math.sin(t * 0.43) * radiusZ),
-          Math.sin(t * 0.9) * 0.18,
-        );
+        const playerVelocity = getRuntimePlayerMotion()?.intendedPlanarVelocity;
+        flight = stepPollinatorFlight({
+          actorId,
+          kind: specimen.id === 'galapagoscarpenterbee' ? 'bee' : 'butterfly',
+          habitat: {
+            x: base.x,
+            z: base.z,
+            radiusX: specimen.habitatRadiusX || 1.35,
+            radiusZ: specimen.habitatRadiusZ || 1.05,
+          },
+          groundAt: (x, z) => terrainHeight(x, z, currentZoneId),
+          now: worldElapsed,
+          object: group.current,
+          playerPosition: playerPose?.position || null,
+          playerSpeed: playerVelocity ? Math.hypot(playerVelocity.x, playerVelocity.z) : 0,
+        });
       }
       publishActorRuntimePosition({
         publisher: setSpecimenRuntimePosition,
@@ -856,7 +869,7 @@ export function SpecimenActor({ specimen }) {
         position: group.current.position,
         now: realElapsed,
         force: isUnderExamination,
-        debug: { motionStatus: isUnderExamination ? 'examining' : 'pollinating' },
+        debug: { motionStatus: isUnderExamination ? 'examining' : flight?.mode || 'flying' },
       });
       return;
     }
@@ -1192,7 +1205,9 @@ export function SpecimenActor({ specimen }) {
     <group
       ref={group}
       position={position}
-      scale={specimen.sceneScale || 1}
+      // A landing's habitat sets the body size for measured species (highland
+      // tortoises run larger), so what the rule reads is what the eye sees.
+      scale={(specimen.sceneScale || 1) * populationRenderScale(specimen.id, currentZoneId)}
       userData={{
         renderSource: `specimen:${specimen.instanceId || specimen.id}`,
         renderLabel: `Specimen: ${specimen.id}`,

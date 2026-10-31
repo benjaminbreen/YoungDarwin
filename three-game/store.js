@@ -42,6 +42,7 @@ import {
   clearSessionSnapshot,
   isExpeditionFinished,
   isUsableSessionSnapshot,
+  sanitizeFieldMeasurements,
   sanitizeAssessmentTranscript,
   sanitizeNpcEncounterState,
   writeSessionSnapshot,
@@ -79,6 +80,8 @@ import { normalizeWeatherState } from './world/weatherStates';
 import { restFlavor } from './restFlavor';
 import { sameFieldAction } from './fieldActions';
 import { createShotgunActions } from './storeSlices/shotgunSlice';
+import { createWarinessActions } from './storeSlices/warinessSlice';
+import { sanitizeWildlifeWariness } from './wildlife/wariness';
 import { createNpcActions } from './storeSlices/npcSlice';
 import { createLibraryActions } from './storeSlices/librarySlice';
 import { createCaseActions } from './storeSlices/caseSlice';
@@ -87,6 +90,13 @@ import { createAnimalModeActions } from './storeSlices/animalModeSlice';
 import { createExamineActions } from './storeSlices/examineSlice';
 import { createZoneTravelActions } from './storeSlices/zoneTravelSlice';
 import { createNarratorActions } from './storeSlices/narratorSlice';
+
+// Counts collection attempts this session so a retry rolls afresh.
+let collectionAttemptSerial = 0;
+const nextCollectionAttempt = () => {
+  collectionAttemptSerial += 1;
+  return collectionAttemptSerial;
+};
 
 // Runtime singletons other modules read straight from the store module.
 export {
@@ -170,6 +180,7 @@ export const useThreeGameStore = create((set, get) => ({
       ? snapshot.journal
       : initial.journal;
     patch.bookLastPages = snapshot.bookLastPages || initial.bookLastPages;
+    patch.fieldMeasurements = sanitizeFieldMeasurements(snapshot.fieldMeasurements);
     patch.assessmentPlayerTranscript = sanitizeAssessmentTranscript(snapshot.assessmentPlayerTranscript);
     patch.npcEncounterState = {
       ...initial.npcEncounterState,
@@ -188,6 +199,8 @@ export const useThreeGameStore = create((set, get) => ({
     patch.downedSpecimenActors = snapshot.downedSpecimenActors && typeof snapshot.downedSpecimenActors === 'object'
       ? snapshot.downedSpecimenActors
       : initial.downedSpecimenActors;
+    // Older saves predate island tameness: their animals start tame.
+    patch.wildlifeWariness = sanitizeWildlifeWariness(snapshot.wildlifeWariness);
     // The snare tool was retired; older saves may still carry it on the belt.
     for (const key of ['toolbarOrder', 'darwinToolbarOrder']) {
       if (Array.isArray(patch[key])) {
@@ -467,6 +480,7 @@ export const useThreeGameStore = create((set, get) => ({
   shotgunShells: 2,
   shotgunReloadUntil: 0,
   ...createShotgunActions(set, get),
+  ...createWarinessActions(set, get),
 
   setToolbarSlot: (slotIndex, toolId) => set(state => {
     if (state.playableModeId !== 'darwin') return {};
@@ -1318,7 +1332,7 @@ export const useThreeGameStore = create((set, get) => ({
 
   ...createNarratorActions(set, get),
 
-  collectNearby: async (targetSpecimenId = null) => {
+  collectNearby: async (targetSpecimenId = null, { assured = false } = {}) => {
     const state = get();
     const specimenId = targetSpecimenId || state.nearbySpecimenId || state.selectedSpecimenId;
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
@@ -1365,6 +1379,8 @@ export const useThreeGameStore = create((set, get) => ({
           fatigue: state.fatigue,
           gameTime: Math.round(state.timeOfDay * 60),
           seed: state.seed,
+          attempt: nextCollectionAttempt(),
+          assured,
         });
 
     const collected = result.success && !documented;

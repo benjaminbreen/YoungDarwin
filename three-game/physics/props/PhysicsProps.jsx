@@ -13,6 +13,7 @@ import ShotgunSystem from '../../shooting/ShotgunSystem';
 import ShotgunFX from '../../shooting/ShotgunFX';
 import SplatTextFX from '../../shooting/SplatTextFX';
 import AimReticle from '../../shooting/AimReticle';
+import ToolTargetMarker from '../../components/player/ToolTargetMarker';
 import WorldTimeTicker from '../../world/WorldTimeTicker';
 
 // Reveal a mounting list a few entries per frame. Mounting a zone's full
@@ -104,6 +105,7 @@ export function PhysicsProps() {
       <ShotgunFX />
       <SplatTextFX />
       <AimReticle />
+      <ToolTargetMarker />
       {mountedProps.map(prop => (
         <PhysicsProp key={prop.id} prop={prop} onBreak={handleBreak} />
       ))}

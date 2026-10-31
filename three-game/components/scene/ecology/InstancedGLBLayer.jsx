@@ -14,7 +14,8 @@ import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
-import { onPropEvent } from '../../../physics/props/propEvents';
+import { emitPropEvent, onPropEvent } from '../../../physics/props/propEvents';
+import { isNetSweepLive, netSweepState } from '../../player/netSweep';
 import { cachedGpuResource, retainGpuResource } from '../../../world/gpuResourceCache';
 import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
 
@@ -120,6 +121,9 @@ function bucketCullBounds(items, maxVisibleDistance) {
   const visibleDistance = maxVisibleDistance + radius;
   return { center, visibleDistanceSq: visibleDistance * visibleDistance };
 }
+
+// How close the hoop passes to a plant's stem to part it, before its size.
+const NET_BRUSH_RADIUS = 0.42;
 
 function setItemMatrix(mesh, index, item, {
   sink,
@@ -255,6 +259,7 @@ export function InstancedGLBLayer({
   const bucketRefs = useRef([]);
   const cullStateRef = useRef(createCameraCullState());
   const reactionStateRef = useRef(new Map());
+  const netBrushRef = useRef({ sweepId: 0, lastX: 0, lastZ: 0, hasLast: false, brushed: new Set() });
   const { scene } = useTrackedGLTF(path);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const qualityCheapMaterials = useThreeGameStore(state => state.cheapMaterials);
@@ -440,9 +445,65 @@ export function InstancedGLBLayer({
     });
   }), [itemIds, sourceId]);
 
+  // A swept net parts the plants it passes through: each swaying plant leans
+  // away along the hoop's path, once per sweep, and the first few tell the
+  // soundscape what was brushed. Only swaying foliage layers react.
+  const brushWithNet = () => {
+    const brush = netBrushRef.current;
+    if (!motion || !isNetSweepLive()) {
+      brush.hasLast = false;
+      return;
+    }
+    if (brush.sweepId !== netSweepState.id) {
+      brush.sweepId = netSweepState.id;
+      brush.hasLast = false;
+      brush.brushed.clear();
+    }
+    const hoop = netSweepState.hoopLive;
+    let dirX = brush.hasLast ? hoop.x - brush.lastX : 0;
+    let dirZ = brush.hasLast ? hoop.z - brush.lastZ : 0;
+    brush.lastX = hoop.x;
+    brush.lastZ = hoop.z;
+    brush.hasLast = true;
+    const travel = Math.hypot(dirX, dirZ);
+    if (travel < 0.004) return;
+    dirX /= travel;
+    dirZ /= travel;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      const dx = item.x - hoop.x;
+      const dz = item.z - hoop.z;
+      const reach = NET_BRUSH_RADIUS + Math.min(0.5, (item.scale || 1) * 0.35);
+      if (dx * dx + dz * dz > reach * reach || brush.brushed.has(item.id)) continue;
+      // Only what stands tall enough to meet a low hoop.
+      const height = (item.scale || 1) * ySquash * (item.heightScale || 1);
+      if (hoop.y - item.y > Math.max(0.35, height * 1.1)) continue;
+      brush.brushed.add(item.id);
+      reactionStateRef.current.set(item.id, {
+        age: 0,
+        amplitude: 0.2,
+        duration: 0.95,
+        frequency: 8,
+        angle: 0,
+        direction: { x: dirX, z: dirZ },
+        done: false,
+        resetRendered: false,
+      });
+      if (brush.brushed.size <= 3) {
+        emitPropEvent('net-brush', {
+          position: { x: item.x, y: item.y, z: item.z },
+          material: sourceKind === 'ecology-glb-layer' && /grass|sedge|reed/i.test(path) ? 'grass' : 'shrub',
+          sweepId: netSweepState.id,
+          index: brush.brushed.size - 1,
+        });
+      }
+    }
+  };
+
   // Coarse per-bucket distance cull (three.js handles frustum culling for free
   // via each bucket's bounding sphere). Far buckets switch off entirely.
   useFrame(({ camera }, delta) => {
+    brushWithNet();
     if (reactionStateRef.current.size) {
       for (const [itemId, reaction] of reactionStateRef.current) {
         if (reaction.done) {

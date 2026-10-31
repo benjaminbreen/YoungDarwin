@@ -11,6 +11,7 @@ import { getZone } from '../world/floreanaZones';
 import { terrainBiomeAt } from '../world/terrain';
 import { WATER_LEVEL } from '../world/water';
 import { getSurfaceContactProfile } from '../world/surfaceContact';
+import { currentFoliageImmersion } from '../world/ecology/foliageContact';
 import { postOfficeBayCoastZ } from '../world/regions/postOfficeBay/terrain';
 import { weatherEnv } from '../world/weatherEnvRuntime';
 import {
@@ -118,6 +119,38 @@ function materialFromInteractionEvent(event, prop = null) {
   return null;
 }
 
+// Darwin's footfalls follow his pace: a stroll is soft and dark, a run lands
+// harder and brighter, and each foot sits a touch to its own side of centre
+// instead of every step coming from one random point.
+const DARWIN_RUN_SPEED = 7.45;
+// Takeoffs and landings were authored against the old, quieter footfalls;
+// they rise with them so a landing still outweighs a step.
+const DARWIN_FOLEY_LIFT = 1.75;
+
+function darwinStepShape(event) {
+  const pace = clamp01((Number(event?.horizontalSpeed) || 0) / DARWIN_RUN_SPEED);
+  const side = event?.side === 'left' ? -1 : event?.side === 'right' ? 1 : 0;
+  return {
+    pace,
+    gain: 0.82 + pace * 0.3,
+    rate: 0.975 + pace * 0.04,
+    // Only a stroll is softened; a normal walk is effectively unfiltered.
+    filterHz: 4800 + pace * 9000,
+    pan: side * 0.045 + (Math.random() - 0.5) * 0.04,
+  };
+}
+
+// The brush layer under each step while wading through a plant. Grass is a
+// light, quick swish; leafy and woody scrub is fuller; cactus pads are a dry,
+// stiff scrape that should never read as leaves.
+// Gains are set against the measured recordings (the grass rustle is ~6 dB
+// quieter than the shrub one) so each brush peaks a few dB under a footfall.
+const FOLIAGE_BRUSH = {
+  grass: { track: 'brushGrass', sprite: 'grass', gain: 0.55, rate: 1.05, filterHz: 7200 },
+  shrub: { track: 'brushShrub', sprite: 'shrub', gain: 0.32, rate: 0.98, filterHz: 6000 },
+  spine: { track: 'brushSpine', sprite: 'shrub', gain: 0.17, rate: 1.2, filterHz: 4200 },
+};
+
 function nearestAudibleWildlife(zoneId, family) {
   const player = getRuntimePlayerPose()?.position;
   const poses = getSpecimenRuntimePoses(zoneId);
@@ -220,6 +253,8 @@ export function IslandSoundscape({ active, enabled }) {
   const lastLandingAtRef = useRef(0);
   const lastWaterAtRef = useRef(0);
   const lastFoliageAtRef = useRef(0);
+  const lastBrushAtRef = useRef(0);
+  const lastClothAtRef = useRef(0);
   const lastBodyImpactAtRef = useRef(0);
   const lastGearAtRef = useRef(0);
   const lastPainAtRef = useRef(0);
@@ -295,7 +330,7 @@ export function IslandSoundscape({ active, enabled }) {
       const phaseGain = event.phase === 'dart' ? 1 : event.phase === 'descend' ? 0.42 : 0.76;
       const phaseRate = event.phase === 'dart' ? 1.045 : event.phase === 'descend' ? 0.955 : 0.99;
       setSpatialAudioTarget('bee', {
-        gain: 0.105 * presence * presence * phaseGain * clamp01(event.gate),
+        gain: 0.06 * presence * presence * phaseGain * clamp01(event.gate),
         pan: wildlifePanFromWorldPosition(position),
         playbackRate: phaseRate,
       }, 0.07);
@@ -637,7 +672,7 @@ export function IslandSoundscape({ active, enabled }) {
         && now >= waveSchedule.nextAt) {
         const closeness = smoothstep(0.58, 1, surfPresence);
         playRandomVariant(variantsRef, 'waveBreak', POST_OFFICE_BAY_AUDIO.waveBreak, {
-          gain: 0.055 + closeness * 0.075,
+          gain: 0.035 + closeness * 0.045,
           playbackRate: randomBetween(0.975, 1.025),
           pan: randomBetween(-0.2, 0.2),
         });
@@ -676,6 +711,36 @@ export function IslandSoundscape({ active, enabled }) {
         pan,
         filterHz,
       });
+    };
+
+    // Layers riding on top of each of Darwin's footfalls: the plant he is
+    // wading through, and on a run, the occasional shift of coat and satchel.
+    const playDarwinStepLayers = (event, step, now) => {
+      const immersion = currentFoliageImmersion();
+      const brush = immersion && FOLIAGE_BRUSH[immersion.kind];
+      // The entry rustle already covers the first contact with a plant.
+      if (brush && step.pace > 0.08 && now - lastBrushAtRef.current >= 240
+        && now - lastFoliageAtRef.current >= 150) {
+        lastBrushAtRef.current = now;
+        const depth = 0.35 + immersion.proximity * 0.65;
+        playContact(brush.track, INTERACTION_AUDIO[brush.sprite], {
+          intensity: step.pace,
+          baseGain: brush.gain * depth * step.gain,
+          pan: step.pan * 1.4,
+          playbackJitter: 0.09,
+          playbackRateCenter: brush.rate + step.pace * 0.03,
+          filterHz: brush.filterHz,
+        });
+      }
+      if (step.pace > 0.7 && now - lastClothAtRef.current >= 520 && Math.random() < 0.45) {
+        lastClothAtRef.current = now;
+        playRandomVariant(variantsRef, 'cloth', DARWIN_BODY_AUDIO.gear, {
+          gain: 0.07 + (step.pace - 0.7) * 0.06,
+          playbackRate: randomBetween(1.0, 1.06),
+          pan: step.pan * 0.5,
+          filterHz: 3800,
+        });
+      }
     };
 
     const scheduleToolFoley = (delayMs, callback) => {
@@ -753,40 +818,53 @@ export function IslandSoundscape({ active, enabled }) {
         }
         const injury = clamp01((58 - Number(current.health)) / 38);
         const soreSide = injury > 0 && event?.side === 'right';
-        const gaitGain = soreSide ? 1 - injury * 0.22 : 1 + injury * 0.04;
-        const gaitRate = soreSide ? 1 - injury * 0.025 : 1;
+        const step = darwinStepShape(event);
+        const gaitGain = (soreSide ? 1 - injury * 0.22 : 1 + injury * 0.04) * step.gain;
+        const gaitRate = (soreSide ? 1 - injury * 0.025 : 1) * step.rate;
+        const stepPan = step.pan;
+        const stepFilterHz = step.filterHz;
         if (hardRock) {
           playContact('rockStep', MOVEMENT_WILDLIFE_AUDIO.rockStep, {
             intensity: event.intensity,
-            baseGain: 0.13 * gaitGain,
+            baseGain: 0.235 * gaitGain,
             playbackJitter: 0.035,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
           });
         } else if (responseKind === 'sand') {
           playContact('sand', POST_OFFICE_BAY_AUDIO.sandSteps, {
             intensity: event.intensity,
-            baseGain: 0.19 * gaitGain,
+            baseGain: 0.34 * gaitGain,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
           });
         } else if (responseKind === 'wood') {
           playContact('woodStep', MOVEMENT_WILDLIFE_AUDIO.woodStep, {
             intensity: event.intensity,
-            baseGain: 0.155 * gaitGain,
+            baseGain: 0.28 * gaitGain,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
             playbackJitter: 0.035,
           });
         } else if (responseKind === 'mud') {
           playContact('mudStep', MOVEMENT_WILDLIFE_AUDIO.mudStep, {
             intensity: event.intensity,
-            baseGain: 0.18 * gaitGain,
+            baseGain: 0.32 * gaitGain,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
             playbackJitter: 0.04,
           });
         } else if (responseKind === 'litter') {
           playContact('litterStep', MOVEMENT_WILDLIFE_AUDIO.litterStep, {
             intensity: event.intensity,
-            baseGain: 0.175 * gaitGain,
+            baseGain: 0.32 * gaitGain,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
             playbackJitter: 0.045,
           });
           if (now - lastTwigAtRef.current >= 9000 && Math.random() < 0.075) {
@@ -800,10 +878,13 @@ export function IslandSoundscape({ active, enabled }) {
         } else if (['grit', 'dust', 'ash'].includes(responseKind)) {
           playContact('grit', POST_OFFICE_BAY_AUDIO.gritSteps, {
             intensity: event.intensity,
-            baseGain: 0.165 * gaitGain,
+            baseGain: 0.3 * gaitGain,
             playbackRateCenter: gaitRate,
+            pan: stepPan,
+            filterHz: stepFilterHz,
           });
         }
+        playDarwinStepLayers(event, step, now);
         return;
       }
       if (contactKind !== 'takeoff'
@@ -860,42 +941,42 @@ export function IslandSoundscape({ active, enabled }) {
         const family = landing ? 'rockLanding' : contactKind === 'step-up' ? 'rockStep' : 'rockTakeoff';
         playContact(family, MOVEMENT_WILDLIFE_AUDIO[family], {
           intensity: movementIntensity,
-          baseGain: landing ? 0.19 + fallStrength * 0.045 : contactKind === 'step-up' ? 0.145 : 0.13,
+          baseGain: (landing ? 0.19 + fallStrength * 0.045 : contactKind === 'step-up' ? 0.145 : 0.13) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.035,
         });
       } else if (responseKind === 'sand') {
         playContact('sand', POST_OFFICE_BAY_AUDIO.sandSteps, {
           intensity: movementIntensity,
-          baseGain: landing ? 0.23 + fallStrength * 0.035 : 0.14,
+          baseGain: (landing ? 0.23 + fallStrength * 0.035 : 0.14) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.055,
         });
       } else if (responseKind === 'wood') {
         playContact('woodStep', MOVEMENT_WILDLIFE_AUDIO.woodStep, {
           intensity: movementIntensity,
-          baseGain: landing ? 0.2 + fallStrength * 0.035 : 0.125,
+          baseGain: (landing ? 0.2 + fallStrength * 0.035 : 0.125) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.035,
         });
       } else if (responseKind === 'mud') {
         playContact('mudStep', MOVEMENT_WILDLIFE_AUDIO.mudStep, {
           intensity: movementIntensity,
-          baseGain: landing ? 0.22 + fallStrength * 0.035 : 0.135,
+          baseGain: (landing ? 0.22 + fallStrength * 0.035 : 0.135) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.045,
         });
       } else if (responseKind === 'litter') {
         playContact('litterStep', MOVEMENT_WILDLIFE_AUDIO.litterStep, {
           intensity: movementIntensity,
-          baseGain: landing ? 0.21 + fallStrength * 0.035 : 0.13,
+          baseGain: (landing ? 0.21 + fallStrength * 0.035 : 0.13) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.05,
         });
       } else if (['grit', 'dust', 'ash'].includes(responseKind)) {
         playContact('grit', POST_OFFICE_BAY_AUDIO.gritSteps, {
           intensity: movementIntensity,
-          baseGain: landing ? 0.205 + fallStrength * 0.04 : 0.125,
+          baseGain: (landing ? 0.205 + fallStrength * 0.04 : 0.125) * DARWIN_FOLEY_LIFT,
           pan: panFromWorldPosition(event?.position),
           playbackJitter: 0.05,
         });
@@ -1062,13 +1143,40 @@ export function IslandSoundscape({ active, enabled }) {
       const tortoise = current.playableModeId === 'tortoise';
       if (now - lastFoliageAtRef.current < (tortoise ? 420 : 310)) return;
       lastFoliageAtRef.current = now;
+      const spine = event?.kind === 'spine';
       const family = event?.kind === 'grass' ? 'grass' : 'shrub';
-      playContact(family, INTERACTION_AUDIO[family], {
+      playContact(spine ? 'brushSpine' : family, INTERACTION_AUDIO[family], {
         intensity: event?.intensity,
-        baseGain: (family === 'grass' ? 0.105 : 0.115) * (tortoise ? 0.62 : 1),
+        baseGain: (spine ? 0.13 : family === 'grass' ? 0.36 : 0.24) * (tortoise ? 0.62 : 1),
         pan: panFromWorldPosition(event?.position),
         playbackJitter: 0.08,
-        playbackRateCenter: tortoise ? 0.94 : 1,
+        playbackRateCenter: (tortoise ? 0.94 : 1) * (spine ? 1.18 : 1),
+        filterHz: spine ? 4200 : null,
+      });
+    });
+    // A spine catching cloth and skin: a short, tight snag of pad against
+    // coat, then the coat tugged free. Darwin's pain voice comes from the
+    // health damage that accompanies it.
+    const offSpinePrick = onPropEvent('spine-prick', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const now = performance.now();
+      const strength = clamp01(Number(event?.intensity) || 0.5);
+      const pan = panFromWorldPosition(event?.position);
+      lastFoliageAtRef.current = now;
+      playContact('spineSnag', INTERACTION_AUDIO.shrub, {
+        intensity: strength,
+        baseGain: 0.2 + strength * 0.1,
+        pan,
+        playbackJitter: 0.05,
+        playbackRateCenter: 1.22,
+        filterHz: 5200,
+      });
+      lastGearAtRef.current = now;
+      playRandomVariant(variantsRef, 'gear', DARWIN_BODY_AUDIO.gear, {
+        gain: 0.15 + strength * 0.07,
+        playbackRate: randomBetween(1.03, 1.1),
+        pan: pan * 0.5,
       });
     });
     const offFinchWing = onPropEvent('finch-wingbeat', event => {
@@ -1119,9 +1227,12 @@ export function IslandSoundscape({ active, enabled }) {
         insect_net: {
           family: 'netSwing',
           sprite: TOOL_FOLEY_AUDIO.netSwing,
-          delay: 610,
-          gain: 0.105,
-          rate: [0.99, 1.045],
+          // The whoosh builds for ~0.44 s to its peak; land the peak on the
+          // aimed sweep's strike (NET_SWEEP.strike), which is quicker than the
+          // old clip, so the sprite runs a touch faster too.
+          delay: Number.isFinite(event?.impactDelay) ? Math.max(0, event.impactDelay * 1000 - 440) : 610,
+          gain: 0.11,
+          rate: Number.isFinite(event?.impactDelay) ? [1.05, 1.11] : [0.99, 1.045],
         },
       }[event?.tool];
       if (!profile) return;
@@ -1137,10 +1248,13 @@ export function IslandSoundscape({ active, enabled }) {
     const offNetContact = onPropEvent('net-contact', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      // A miss is the hoop cutting empty air past the subject: a thin, quick
+      // brush of mesh rather than the bag's flump.
+      const miss = event?.kind === 'miss';
       scheduleToolFoley(Math.max(0, Number(event?.delay) || 0) * 1000, () => {
         playRandomVariant(variantsRef, 'netContact', TOOL_FOLEY_AUDIO.netContact, {
-          gain: event?.kind === 'snag' ? 0.115 : 0.09,
-          playbackRate: randomBetween(0.985, 1.045),
+          gain: event?.kind === 'snag' ? 0.115 : miss ? 0.045 : 0.1,
+          playbackRate: miss ? randomBetween(1.18, 1.28) : randomBetween(0.985, 1.045),
           pan: panFromWorldPosition(event?.position),
           priority: true,
         });
@@ -1153,6 +1267,22 @@ export function IslandSoundscape({ active, enabled }) {
             playbackJitter: 0.05,
           });
         }
+      });
+    });
+    // The swept hoop parting plants (InstancedGLBLayer). Only the first few
+    // per sweep are sent, staggered a little so they read as one pass.
+    const offNetBrush = onPropEvent('net-brush', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const material = event?.material === 'grass' ? 'grass' : 'shrub';
+      scheduleToolFoley((Number(event?.index) || 0) * 45, () => {
+        playContact(material, INTERACTION_AUDIO[material], {
+          intensity: 0.62,
+          baseGain: material === 'grass' ? 0.07 : 0.075,
+          pan: panFromWorldPosition(event?.position),
+          playbackRateCenter: 1.08,
+          playbackJitter: 0.06,
+        });
       });
     });
     const offPropStruck = onPropEvent('prop-struck', event => {
@@ -1295,10 +1425,12 @@ export function IslandSoundscape({ active, enabled }) {
       offPropSettled();
       offPropPush();
       offFoliage();
+      offSpinePrick();
       offFinchWing();
       offShotgun();
       offToolSwing();
       offNetContact();
+      offNetBrush();
       offPropStruck();
       offFieldwork();
       offEquipment();

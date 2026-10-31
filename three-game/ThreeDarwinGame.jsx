@@ -44,6 +44,7 @@ import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
 import { AnimalVisionPostEffect } from './components/scene/AnimalVisionPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
+import { SoundMixerPanel } from './ui/SoundMixer';
 import { ZoneTransitionOverlay } from './ui/ZoneTransitionOverlay';
 import { INITIAL_LAUNCH_PROGRESS, LaunchOverlay } from './ui/LaunchOverlay';
 import { IslandSoundscape } from './audio/IslandSoundscape';
@@ -5588,6 +5589,7 @@ export default function ThreeDarwinGame({
         )}
         {DEV_TOOLS_ENABLED && gameUiVisible && <WaterDevPanel />}
         {gameUiVisible && <AudioDebugPanel open={showAudioDebug} onClose={closeAudioDebug} />}
+        {gameUiVisible && <SoundMixerPanel />}
         {(DEV_TOOLS_ENABLED || PERF_HUD_ENABLED) && (
           <PerformancePanel
             lightweight={PERF_HUD_LIGHTWEIGHT}

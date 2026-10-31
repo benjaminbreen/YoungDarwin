@@ -51,6 +51,7 @@ requestAnimationFrame, so the game crawls and synthetic keys get lost.
 | `walkto <target> [--run] [--radius=] [--timeout=]` | steer with the analog stick until arrival (sidesteps when blocked) |
 | `walk fwd right ms [--run]` | camera-relative stick input for a duration |
 | `key <Code> [holdMs]`, `type <text>`, `click x y`, `button <name>` | real input (keys are held ≥50ms: the game samples once per frame) |
+| `mouse down\|up [--button=right]`, `mouse move x y [--steps=]` | raw trusted mouse input: hold right mouse to aim, chorded clicks, aim drags |
 | `examine`, `close` | E and wait for the examine view; Escape |
 | `tool <id>`, `view <mode>`, `time <hours>`, `mode <id>`, `zone <id> [--instant]` | set state; `zone` uses real travel and waits for settled content |
 | `eval "<expr>"` | evaluate with `api` bound to `window.__darwinE2E` (async allowed) |
@@ -73,7 +74,9 @@ kind or name, or `{ "x": .., "z": .. }` through `eval`.
 - `api.store('key', ...)`: raw store fields, JSON-safe.
 - `api.storeAction('name', ...args)`: call a store action directly.
 - `api.getMotionState()`: the player's current action (`stopWalking`,
-  `jumpDown`, …), jump phase, speed and E-key route. An action that is playing
+  `jumpDown`, …), jump phase, speed and E-key route. It also reports `aiming`,
+  the shotgun aim state (`aim`, including whether the pointer is locked) and
+  `toolTarget`, the subject a net or hammer swing would land on. An action that is playing
   swallows input, so check this when a key "does nothing".
 - `api.obstacle(id)`: the full runtime obstacle (collider shapes, heights).
 - `api.renderAudit()`: visible materials whose texture is loaded but will never
@@ -109,7 +112,9 @@ start latency, stop time and distance, time locked in an action, a clip
 timeline, and foot slide (how fast a planted toe moves in the world; under
 ~1 m/s reads as planted). `--film` adds a contact sheet from a CDP screencast.
 Start the session with `--params={"modelAnimationDebug":"1"}` or the clip
-columns are empty. When a gait clip changes, re-measure its stride speed with
+columns are empty. Tool drills (`net`, `hammer`, `gunTap`, `gunAim`) equip
+the tool first and record when Darwin answers the stick after a swing or shot,
+and whether he is aiming. When a gait clip changes, re-measure its stride speed with
 `node scripts/measure-gait-strides.mjs` and update `STRIDE_SPEED` in
 `gaitProfiles.js`.
 

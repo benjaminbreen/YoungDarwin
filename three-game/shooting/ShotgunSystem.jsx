@@ -6,7 +6,8 @@ import { onPropEvent, emitPropEvent } from '../physics/props/propEvents';
 import { useThreeGameStore } from '../store';
 import { getThreeSpecimens } from '../data';
 import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../world/specimenRuntime';
-import { getWildlifeCollisionRadius, getWildlifeInteractionHeight } from '../wildlife/wildlifeCatalog';
+import { getWildlifeCollisionRadius, getWildlifeInteractionHeight, normalizeWildlifeId } from '../wildlife/wildlifeCatalog';
+import { WARINESS } from '../wildlife/wariness';
 import { getRuntimeObstacles } from '../world/obstacles';
 import { getNpcPoses } from '../world/npcRuntime';
 import { terrainHeight, terrainBiomeAt } from '../world/terrain';
@@ -267,9 +268,14 @@ export default function ShotgunSystem() {
     // whatever the pellets struck.
     const poses = getSpecimenRuntimePoses(zoneId);
     const downedMap = store.downedSpecimenActors || {};
+    const heardSpecies = new Set();
     if (poses) {
-      for (const [actorId] of poses) {
+      for (const [actorId, pose] of poses) {
         if (collectedSet.has(actorId) || downedMap[actorId]) continue;
+        const speciesId = normalizeWildlifeId(specimensByActor.get(actorId)?.id);
+        if (speciesId && Math.hypot(pose.x - o.x, pose.z - o.z) <= WARINESS.shotHeardRadius) {
+          heardSpecies.add(speciesId);
+        }
         pushSpecimenStimulus(zoneId, actorId, {
           kind: 'contact',
           position: { x: o.x, z: o.z },
@@ -278,6 +284,11 @@ export default function ShotgunSystem() {
           intensity: 1.5,
         });
       }
+    }
+    // Island tameness: every animal within earshot learns a little fear of
+    // the report; the species actually fired at learns more (below).
+    if (heardSpecies.size) {
+      store.disturbWildlife?.({ zoneId, speciesIds: [...heardSpecies], amount: WARINESS.shotHeard });
     }
 
     // Physics props check themselves against the pellet ray (impulse, breaks).
@@ -378,6 +389,11 @@ export default function ShotgunSystem() {
     });
 
     if (fauna && fauna.distance <= blockDistance + 0.5) {
+      store.disturbWildlife?.({
+        zoneId,
+        speciesIds: [normalizeWildlifeId(fauna.specimen?.id)],
+        amount: WARINESS.shotTarget,
+      });
       resolveFaunaHit({ fauna, zoneId, o, store });
       // Spent pellets continue past the animal and pepper the ground behind.
       const behind = Math.min(SHOTGUN.maxRange, fauna.distance + 2.2);

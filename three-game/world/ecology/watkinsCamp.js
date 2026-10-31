@@ -298,7 +298,7 @@ function buildFlora() {
       castShadow: true,
       tint: '#9aa27c',
       tintStrength: 0.14,
-      motion: { wind: 0.22, bend: 0.04, bendRadius: 2.2 },
+      motion: { wind: 0.22, bend: 0.24, bendRadius: 2.2 },
       items: scatter('castela-watkins', 8, 811, {
         minX: -46, maxX: 46, minZ: -40, maxZ: -8, scale: [0.18, 0.32], maxGrade: 0.7,
         accept: (biome, x, z) => ['dry-grass', 'terrace-scrub', 'homestead-yard'].includes(biome)

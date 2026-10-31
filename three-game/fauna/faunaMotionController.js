@@ -113,6 +113,8 @@ export function createFaunaMotionController({
       // True when the player is playing as this animal's own kind (a player
       // finch among finches): its approach is not a threat.
       playerIsKin = false,
+      // Island tameness scale on alert distances; see threatField.evaluate.
+      radiusScale = 1,
     }) {
       if (!profile || !habitat || !motion) return { ok: false, reason: 'inactive' };
       if (paused) return { ok: true, reason: 'paused', state };
@@ -134,7 +136,7 @@ export function createFaunaMotionController({
       const t = elapsedTime;
       ctx.clock = t;
       const dt = Math.min(0.2, Math.max(0.001, delta));
-      const threat = threats.evaluate({ player, t, dt, playerIsKin });
+      const threat = threats.evaluate({ player, t, dt, playerIsKin, radiusScale });
 
       return motion.update({
         base,

@@ -58,9 +58,12 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
 export function pulseEquippedToolOnUse(keys, lastButtonsRef) {
   // "Use tool" command (F key / clicking the equipped tool): pulse the
   // control mapped to the active tool; triggerAction picks it up next frame.
+  // The shotgun reads F itself (playerEquipmentState): a tap fires and a
+  // hold shoulders it, so it cannot fire on the press.
   const useToolPressed = Boolean(keys.useTool);
-  if (useToolPressed && !lastButtonsRef.current.useTool) {
-    triggerToolUse(useThreeGameStore.getState().activeToolId);
+  const activeToolId = useThreeGameStore.getState().activeToolId;
+  if (useToolPressed && !lastButtonsRef.current.useTool && activeToolId !== 'shotgun') {
+    triggerToolUse(activeToolId);
   }
   lastButtonsRef.current.useTool = useToolPressed;
 }

@@ -139,6 +139,7 @@ function classifySpecimen(specimen) {
   if (['greenturtle', 'parrotfish', 'hammerhead', 'mantaray', 'seaurchin'].includes(id)) return 'marine';
   if (id === 'sealion' || id === 'feralgoat' || order.includes('mammal')) return 'mammal';
   if (id === 'crab' || id === 'barnacle' || order.includes('crustacean')) return 'crustacean';
+  if (order.includes('insect')) return 'insect';
   if (ontology === 'plant') return 'plant';
   if (ontology === 'mineral' || ['basalt', 'olivine', 'solidifiedsulphur', 'meteoriron', 'coral'].includes(id)) return 'mineral';
   if (ontology === 'object' || ontology === 'document') return 'object';
@@ -158,6 +159,9 @@ const METHOD_FIT = {
     crustacean: 0.42,
     mammal: 0.18,
     marine: 0.08,
+    // Hands close on a butterfly about as often as they miss it, and rub the
+    // wing scales off when they do (see damageRiskForMethod).
+    insect: 0.2,
   },
   snare: {
     lizard: 0.82,
@@ -171,8 +175,12 @@ const METHOD_FIT = {
     plant: 0.05,
     mineral: 0.03,
     object: 0.03,
+    insect: 0.04,
   },
   insect_net: {
+    // What the net is for. Insects used to fall through to a generic
+    // 'animal' row, which gave the net the same odds as bare hands.
+    insect: 0.86,
     small_bird: 0.42,
     bird: 0.28,
     seabird: 0.12,
@@ -184,6 +192,7 @@ const METHOD_FIT = {
     object: 0.02,
   },
   shotgun: {
+    insect: 0.02,
     small_bird: 0.78,
     bird: 0.72,
     seabird: 0.78,
@@ -197,6 +206,7 @@ const METHOD_FIT = {
     object: 0.02,
   },
   hammer: {
+    insect: 0.02,
     mineral: 0.94,
     plant: 0.42,
     crustacean: 0.62,
@@ -210,6 +220,7 @@ const METHOD_FIT = {
     marine: 0.08,
   },
   sketch: {
+    insect: 0.85,
     object: 0.95,
     mineral: 0.92,
     plant: 0.9,
@@ -256,7 +267,13 @@ function terrainModifier(location, category) {
 }
 
 function damageRiskForMethod(methodKey, category, danger = 0) {
-  const damageBase = methodKey === 'shotgun' ? 0.42 : methodKey === 'hammer' && category !== 'mineral' ? 0.35 : 0.08;
+  // A butterfly taken by hand loses scales from the wing it was held by; the
+  // pattern a collector needs is the first thing ruined.
+  const handledInsect = methodKey === 'hands' && category === 'insect';
+  const damageBase = methodKey === 'shotgun' ? 0.42
+    : methodKey === 'hammer' && category !== 'mineral' ? 0.35
+      : handledInsect ? 0.48
+        : 0.08;
   return Math.min(1, damageBase + danger * 0.15);
 }
 
@@ -285,6 +302,12 @@ export function evaluateCollectionAttempt({
   fatigue = 0,
   gameTime = 0,
   seed = 'young-darwin',
+  // Distinguishes repeat attempts within one game minute; without it a retry
+  // straight after a miss rolled the same number and missed again.
+  attempt = 0,
+  // The player already did the deciding (a net sweep that closed over the
+  // insect), so there is no hidden roll left to make. Damage still applies.
+  assured = false,
 } = {}) {
   const resolvedSpecimen = specimen || resolveSpecimen(specimenList, specimenId);
   if (!resolvedSpecimen) {
@@ -311,8 +334,8 @@ export function evaluateCollectionAttempt({
     Math.min(0.96, fit + approachModifier(approach) + terrainModifier(location, category) + locationBonus - fatiguePenalty - timePenalty - danger * 0.07)
   );
 
-  const key = `${canonicalSpecimenId(resolvedSpecimen.id)}:${methodKey}:${location?.id || 'unknown'}:${gameTime}:${approach}`;
-  const roll = seededRandom(seed, key);
+  const key = `${canonicalSpecimenId(resolvedSpecimen.id)}:${methodKey}:${location?.id || 'unknown'}:${gameTime}:${approach}${attempt ? `:${attempt}` : ''}`;
+  const roll = assured ? 0 : seededRandom(seed, key);
   const success = roll <= threshold;
   const damage = success ? Math.min(1, damageRiskForMethod(methodKey, category, danger) + seededRandom(seed, `${key}:damage`) * 0.25) : 0;
   const evidenceRoll = seededRandom(seed, `${key}:evidence`);

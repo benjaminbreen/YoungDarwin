@@ -9,6 +9,8 @@
 // have written) rather than physics state, prop damage, or fauna poses. Those
 // rebuild deterministically from the region seed when the zone mounts.
 
+import { sanitizeWildlifeWariness } from './wildlife/wariness';
+
 export const SESSION_SAVE_KEY = 'darwin-expedition-session-v1';
 export const SESSION_SAVE_VERSION = 2;
 const LEGACY_SESSION_SAVE_VERSION = 1;
@@ -45,6 +47,30 @@ function sanitizeDownedSpecimenActors(value) {
   return Object.fromEntries(Object.entries(value).slice(0, 32).filter(([key, entry]) => (
     typeof key === 'string' && entry && typeof entry === 'object'
   )));
+}
+
+const MAX_FIELD_MEASUREMENTS = 400;
+
+export function sanitizeFieldMeasurements(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-MAX_FIELD_MEASUREMENTS).filter(record => (
+    record
+    && typeof record === 'object'
+    && typeof record.specimenId === 'string'
+    && typeof record.traitId === 'string'
+    && typeof record.actorId === 'string'
+    && Number.isFinite(Number(record.value))
+  )).map(record => ({
+    id: String(record.id || `${record.actorId}:${record.traitId}`).slice(0, 200),
+    specimenId: record.specimenId.slice(0, 80),
+    actorId: record.actorId.slice(0, 160),
+    traitId: record.traitId.slice(0, 80),
+    value: Number(record.value),
+    zoneId: typeof record.zoneId === 'string' ? record.zoneId.slice(0, 80) : null,
+    location: typeof record.location === 'string' ? record.location.slice(0, 160) : '',
+    day: Number.isFinite(Number(record.day)) ? Number(record.day) : null,
+    attempt: Number.isFinite(Number(record.attempt)) ? Number(record.attempt) : 0,
+  }));
 }
 
 function stringArray(value) {
@@ -128,6 +154,8 @@ export function buildSessionSnapshot(state) {
     // shot specimens still lying where they fell stay there.
     journalDraft: typeof state.journalDraft === 'string' ? state.journalDraft.slice(0, JOURNAL_DRAFT_MAX_CHARS) : '',
     downedSpecimenActors: sanitizeDownedSpecimenActors(state.downedSpecimenActors),
+    // How tame each species still is in each region; see wildlife/wariness.js.
+    wildlifeWariness: sanitizeWildlifeWariness(state.wildlifeWariness),
     supplies: state.supplies && typeof state.supplies === 'object' ? { ...state.supplies } : null,
     inventory: Array.isArray(state.inventory) ? state.inventory : [],
     // Specimens already landed aboard the Beagle. Persisted separately from
@@ -136,6 +164,7 @@ export function buildSessionSnapshot(state) {
     shipCollection: Array.isArray(state.shipCollection) ? state.shipCollection : [],
     items: Array.isArray(state.items) ? state.items : [],
     journal: Array.isArray(state.journal) ? state.journal : [],
+    fieldMeasurements: sanitizeFieldMeasurements(state.fieldMeasurements),
     bookLastPages: state.bookLastPages && typeof state.bookLastPages === 'object'
       ? { ...state.bookLastPages }
       : {},

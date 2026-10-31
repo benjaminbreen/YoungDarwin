@@ -28,6 +28,8 @@ import { currentZoneId, getZone } from '../world/floreanaZones';
 import { darwinThought, zoneNarration } from '../narrator/narratorContent';
 import { getNpcPoses } from '../world/npcRuntime';
 import { getSpecimenRarity } from '../rarity';
+import { getWildlifeBehaviorProfile, normalizeWildlifeId } from '../wildlife/wildlifeCatalog';
+import { WARINESS, disturbWildlifeState } from '../wildlife/wariness';
 import {
   getThreeInitialNarration,
   getThreeIslandLocation,
@@ -576,7 +578,19 @@ export function recordSpecimenPatch(state, {
   });
   const rarityTier = getSpecimenRarity(specimen).id;
   const actorIds = state.collectedSpecimenActorIds || [];
+  // Taking a live animal by hand or net teaches the rest of its kind here a
+  // little fear. A bird already downed by a shot was counted when it fell.
+  const speciesId = normalizeWildlifeId(specimen.id);
+  const wildlifeWariness = collected && !state.downedSpecimenActors?.[actorId] && getWildlifeBehaviorProfile(speciesId)
+    ? disturbWildlifeState(state.wildlifeWariness, {
+      zoneId: state.currentZoneId,
+      speciesIds: [speciesId],
+      amount: WARINESS.capture,
+      nowMinutes: gameClockMinutes(state),
+    }).map
+    : null;
   return {
+    ...(wildlifeWariness && wildlifeWariness !== state.wildlifeWariness ? { wildlifeWariness } : {}),
     fatigue: clamp(state.fatigue + (result.fatigueDelta || 0), 0, MAX_FATIGUE),
     inventory: collected
       ? [...state.inventory, { ...specimen, condition: result.outcomeType, ...caseEntry }]
@@ -773,6 +787,10 @@ export function createExpeditionSlice() {
     // species examined everywhere. No longer gates collection; it feeds the
     // final assessment's restraint ratio and the bare-hands Examine prompt.
     examinedTypeIds: expedition.examinedTypeIds || [],
+    // Every trait reading Darwin has taken, one record per individual and
+    // trait (see examine/populationTraits.js). The journal's Measures tab
+    // lays them out landing by landing.
+    fieldMeasurements: expedition.fieldMeasurements || [],
     // One-time teaching lines already shown (see HINT_IDS in ThreeHUD). Kept
     // in the save so a returning player is not taught the same verb twice.
     seenHints: expedition.seenHints || [],

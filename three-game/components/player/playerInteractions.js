@@ -7,16 +7,19 @@ import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMa
 import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
 import { useThreeGameStore } from '../../store';
 import { triggerToolUse } from '../../input/touchControls';
+import { TARGETED_TOOLS, clearToolTarget, solveToolTarget, toolTargetState } from './toolTargeting';
 import { ACTION_DURATION, CONTROL_INTERRUPTIBLE_ACTIONS } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
-import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
+import { NET_SWEEP, distanceToStrike, netSweepState, trackNetSweepAim } from './netSweep';
+import { startNetSweep } from './playerActionTriggers';
 import { getAnimalAction, getPlayableMode } from '../../playable/playableModes';
 import { FORAGE_PROMPT_MODE } from '../../world/forageables';
 import { getNearestNpcEncounter } from '../../encounters/npcEncounters';
-import { emitPropEvent, nextSwingId } from '../../physics/props/propEvents';
+import { emitPropEvent } from '../../physics/props/propEvents';
 import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
 import { TOOL_ACTIONS, fieldSampleFor, findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
 import { getRuntimeObstacles } from '../../world/obstacles';
+import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../../world/specimenRuntime';
 
 const EDGE_TRAVEL_HOLD_SECONDS = 0.55;
 
@@ -237,14 +240,14 @@ export function collectionAnimationForTool(toolId, specimen = null, options = {}
     return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
   }
   if (toolId === 'shotgun') return { clip: 'fireRifle', duration: ACTION_DURATION.fireRifle, lockMovement: true, align: true };
-  if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (toolId === 'insect_net') return { clip: 'butterflyNetSwing', duration: NET_SWEEP.duration, lockMovement: true, align: true };
   if (toolId === 'hammer') return { clip: 'heavyToolSwing', duration: ACTION_DURATION.heavyToolSwing, lockMovement: true, align: true };
   if (toolId === 'sketch') {
     const clip = documentClipForSpecimen(specimen);
     return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
   }
   const kind = specimenKind(specimen);
-  if (kind.order === 'insect') return { clip: 'butterflyNetSwing', duration: ACTION_DURATION.butterflyNetSwing, lockMovement: true, align: true };
+  if (kind.order === 'insect') return { clip: 'butterflyNetSwing', duration: NET_SWEEP.duration, lockMovement: true, align: true };
   if (kind.ontology === 'mineral') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true, align: true };
   const clip = gatherClipForSpecimen(specimen);
   return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
@@ -260,6 +263,117 @@ function runtimeSpecimenPosition(specimen, runtimePositions, fallbackY = 0) {
     y: runtime?.y ?? spawn[1] ?? fallbackY,
     z: runtime?.z ?? spawn[2] ?? 0,
   };
+}
+
+// Where on an animal the hoop aims: the body of a flying insect, partway up a
+// ground animal.
+function netAimHeight(specimen) {
+  if (specimen?.pollinator) return 0;
+  return Math.min(0.35, specimenInteractionHeight(specimen) * 0.5);
+}
+
+function liveSpecimenPose(zoneId, specimen) {
+  const actorId = specimen.instanceId || specimen.id;
+  const live = getSpecimenRuntimePoses(zoneId)?.get(actorId);
+  const stored = useThreeGameStore.getState().specimenRuntimePositions?.[zoneId]?.[actorId];
+  const pose = live || stored;
+  const x = pose?.x ?? specimen.spawnPoint?.[0];
+  const y = pose?.y ?? specimen.spawnPoint?.[1];
+  const z = pose?.z ?? specimen.spawnPoint?.[2];
+  if (![x, y, z].every(Number.isFinite)) return null;
+  return { x, y: y + netAimHeight(specimen), z };
+}
+
+// The net's strike: follow the subject through the wind-up, then at the strike
+// test what the hoop actually swept through. A catch collects a studied
+// species (an insect cannot slip a closed bag, so that is assured) or brings
+// an unstudied one up for a close look; a miss sends the subject off.
+function resolveNetSweep({ now, stateRef, position, facing, currentZoneId, zoneSpecimens, collectNearby }) {
+  const sweep = netSweepState;
+  if (!sweep.id || sweep.resolved) return;
+  const subject = sweep.actorId
+    ? zoneSpecimens.find(item => item && (item.instanceId || item.id) === sweep.actorId)
+    : null;
+  if (subject) trackNetSweepAim(now, liveSpecimenPose(currentZoneId, subject));
+  if (now < sweep.strikeAt) return;
+  // PlayerModel samples the hoop at the strike; models without the aimed
+  // pole (or a dropped frame) fall back to a hoop on the aim line.
+  if (!sweep.strikeSampled && now < sweep.strikeAt + 0.12) return;
+  sweep.resolved = true;
+  if (!sweep.strikeSampled) {
+    const grip = { x: position.x + facing.x * 0.3, y: position.y + 1.15, z: position.z + facing.z * 0.3 };
+    const ax = sweep.aim.x - grip.x;
+    const ay = sweep.aim.y - grip.y;
+    const az = sweep.aim.z - grip.z;
+    const length = Math.hypot(ax, ay, az) || 1;
+    Object.assign(sweep.grip, grip);
+    Object.assign(sweep.hoop, {
+      x: grip.x + (ax / length) * NET_SWEEP.poleLength,
+      y: grip.y + (ay / length) * NET_SWEEP.poleLength,
+      z: grip.z + (az / length) * NET_SWEEP.poleLength,
+    });
+  }
+  const state = useThreeGameStore.getState();
+  const collected = new Set(state.collectedSpecimenActorIds || []);
+  // Whatever the hoop crossed, the marked subject first.
+  let caught = null;
+  let best = Infinity;
+  const candidates = subject ? [subject, ...zoneSpecimens] : zoneSpecimens;
+  for (const specimen of candidates) {
+    if (!specimen || specimen.ontology !== 'Animal') continue;
+    const actorId = specimen.instanceId || specimen.id;
+    if (collected.has(actorId) || state.downedSpecimenActors?.[actorId]) continue;
+    const pose = liveSpecimenPose(currentZoneId, specimen);
+    if (!pose) continue;
+    if (Math.hypot(pose.x - sweep.hoop.x, pose.z - sweep.hoop.z) > 2) continue;
+    const reach = NET_SWEEP.catchRadius + Math.min(0.2, specimen.examineRadius || 0.12);
+    const distance = distanceToStrike(pose);
+    if (distance <= reach && distance < best) {
+      best = distance;
+      caught = { specimen, actorId, pose };
+      if (specimen === subject) break;
+    }
+  }
+  if (caught) {
+    sweep.outcome = 'caught';
+    emitPropEvent('net-contact', {
+      kind: 'capture',
+      position: { ...caught.pose },
+      delay: 0,
+      specimenId: caught.specimen.id,
+      sweepId: sweep.id,
+    });
+    if (state.examinedTypeIds?.includes(caught.specimen.id)) {
+      collectNearby(caught.actorId, { assured: specimenKind(caught.specimen).order === 'insect' });
+    } else {
+      stateRef.current.pendingNetLook = { actorId: caught.actorId, at: now + 0.3 };
+    }
+    return;
+  }
+  if (!subject) {
+    sweep.outcome = 'empty';
+    return;
+  }
+  sweep.outcome = 'missed';
+  pushSpecimenStimulus(currentZoneId, sweep.actorId, {
+    kind: 'contact',
+    position: { x: sweep.hoop.x, z: sweep.hoop.z },
+    radius: 2.4,
+    duration: 2.5,
+    intensity: 1.2,
+  });
+  emitPropEvent('net-contact', {
+    kind: 'miss',
+    position: { ...sweep.hoop },
+    delay: 0,
+    specimenId: subject.id,
+    sweepId: sweep.id,
+  });
+  useThreeGameStore.setState({
+    message: subject.pollinator
+      ? `The ${subject.name.toLowerCase()} jinks clear of the hoop. Wait for it to settle on a flower.`
+      : `The ${subject.name.toLowerCase()} slips past the hoop.`,
+  });
 }
 
 export function updatePlayerInteractions({
@@ -513,6 +627,25 @@ export function updatePlayerInteractions({
   if (storeState.nearbySpecimenId !== nearest) {
     setNearbySpecimen(nearest);
   }
+  // With the net or hammer in hand, mark the subject a swing would land on.
+  // The swing itself turns onto it (playerActionTriggers).
+  if (allowSpecimenInteractions && TARGETED_TOOLS.has(storeState.activeToolId)) {
+    solveToolTarget({
+      toolId: storeState.activeToolId,
+      zoneId: currentZoneId,
+      position,
+      facing,
+      zoneSpecimens,
+      runtimePositions: specimenRuntimePositions,
+      collectedActorIds: collectedSpecimenActorIds,
+      obstacles: storeState.activeToolId === 'hammer'
+        ? getRuntimeObstacles(currentZoneId, storeState.pushableObstacleOffsets)
+        : [],
+      rockDamage: storeState.rockDamage,
+    });
+  } else if (toolTargetState.valid) {
+    clearToolTarget();
+  }
 
   const fieldActionProbe = stateRef.current.fieldActionProbe || { lastAt: -10 };
   stateRef.current.fieldActionProbe = fieldActionProbe;
@@ -616,26 +749,19 @@ export function updatePlayerInteractions({
       ...(celebrate ? { recoverAction: 'happyIdle' } : {}),
     });
     if (currentState.activeToolId === 'insect_net') {
-      emitPropEvent('tool-swing', {
-        tool: 'insect_net',
-        swingId: nextSwingId(),
-        position: { x: position.x, y: position.y, z: position.z },
-        facing: { x: facing.x, y: 0, z: facing.z },
-        impactDelay: 1.05,
+      // The net sweeps at it; the strike decides the catch.
+      const actorId = specimen.instanceId || specimen.id;
+      startNetSweep({
+        position,
+        facing: target ? { x: target.x - position.x, z: target.z - position.z } : facing,
+        stateRef,
+        target: toolTargetState.valid && toolTargetState.actorId === actorId
+          ? toolTargetState
+          : target && { actorId, x: target.x, y: target.y + netAimHeight(specimen), z: target.z },
       });
-      if (maybeTriggerNetSnagFromSwing({ position, facing })) return true;
-      emitPropEvent('net-contact', {
-        kind: 'capture',
-        position: target || {
-          x: position.x + facing.x * 1.6,
-          y: position.y + 1,
-          z: position.z + facing.z * 1.6,
-        },
-        delay: 1.05,
-        specimenId: specimen.id,
-      });
+      return true;
     }
-    collectNearby();
+    collectNearby(specimen.instanceId || specimen.id);
     return true;
   };
 
@@ -708,6 +834,29 @@ export function updatePlayerInteractions({
   }
   lastExamineRef.current = examinePressed;
 
+  resolveNetSweep({
+    now: interactionNow,
+    stateRef,
+    position,
+    facing,
+    currentZoneId,
+    zoneSpecimens,
+    collectNearby,
+  });
+
+  // A net swing that caught an unstudied animal brings it up for a close look
+  // once the hoop has closed over it.
+  const pendingNetLook = stateRef.current.pendingNetLook;
+  if (pendingNetLook && interactionNow >= pendingNetLook.at) {
+    stateRef.current.pendingNetLook = null;
+    const currentState = useThreeGameStore.getState();
+    if (!currentState.examineSession
+      && !currentState.activeConstraint
+      && !currentState.collectedSpecimenActorIds?.includes(pendingNetLook.actorId)) {
+      openExamine(pendingNetLook.actorId);
+    }
+  }
+
   // F swings the tool in hand (playerInputState pulses the swing itself). When
   // it is aimed at the attended subject, tell that subject too, so a struck
   // plant still flinches while E is busy offering Examine.
@@ -725,6 +874,8 @@ export function updatePlayerInteractions({
         facing: { x: facing.x, y: 0, z: facing.z },
       });
     }
+    // F with the net is a plain sweep (playerInputState pulses it); what it
+    // catches is decided at the strike, below.
   }
   stateRef.current.lastUseTool = useToolPressed;
 

@@ -20,6 +20,8 @@
 // Words the final assessment already scores as intellectual honesty
 // (see noteRigor in finalAssessment.js). Reused here so "record something you
 // could not settle" is satisfied by exactly what the ending rewards.
+import { comparableLandingCount } from './examine/populationTraits';
+
 const HEDGE_PATTERN = /\b(perhaps|possibly|probably|appears?|seems?|uncertain|unclear|cannot determine|may be|might be|not sure)\b/i;
 
 function playerNotes(state) {
@@ -134,9 +136,12 @@ export const DIRECTIVES = [
   {
     id: 'two-landings',
     text: 'Record the same creature at two different landings',
-    hint: 'Several species occur across the island. Whether they differ is the question.',
-    detail: 'You need the same animal recorded in two places before you can compare them. Collect it once; at the second landing, document it. That comparison is what the survey is for.',
+    hint: 'Measure it in the examine view at each place; the journal\'s Measures tab sets the landings side by side.',
+    detail: 'You need the same animal recorded in two places before you can compare them, and more than one of them at each place before a difference means anything. That comparison is what the survey is for.',
     isDone: state => {
+      for (const specimenId of new Set((state.fieldMeasurements || []).map(record => record.specimenId))) {
+        if (comparableLandingCount(state.fieldMeasurements, specimenId, 1) >= 2) return true;
+      }
       const bySpecies = new Map();
       for (const { zoneId, species } of recordedByZone(state)) {
         if (!bySpecies.has(species)) bySpecies.set(species, new Set());

@@ -1,6 +1,7 @@
 import {
   FOLIAGE_PUSH_PROFILES,
   classifyFoliagePushProfile,
+  resolveLayerMotion,
 } from './foliagePushProfiles';
 
 const CELL_SIZE = 3;
@@ -13,9 +14,9 @@ function itemPosition(item = {}) {
 
 // Same classification the push shader uses, so what you hear matches what you
 // see bend.
-function contactKindForLayer(layer = {}) {
-  const name = FOLIAGE_PUSH_PROFILES[layer.motion?.profile]
-    ? layer.motion.profile
+function contactKindForLayer(layer = {}, motion = layer.motion) {
+  const name = FOLIAGE_PUSH_PROFILES[motion?.profile]
+    ? motion.profile
     : classifyFoliagePushProfile(layer);
   return FOLIAGE_PUSH_PROFILES[name].contactKind;
 }
@@ -33,9 +34,9 @@ export function buildFoliageContactIndex({
   const layers = [...flora, ...proceduralFlora, ...dryGrassPatches];
   let count = 0;
   for (const layer of layers) {
-    const motion = layer.motion || {};
+    const motion = resolveLayerMotion(layer) || {};
     if ((Number(motion.bend) || 0) <= 0.025 || !Array.isArray(layer.items)) continue;
-    const kind = contactKindForLayer(layer);
+    const kind = contactKindForLayer(layer, motion);
     for (const item of layer.items) {
       const position = itemPosition(item);
       if (!position) continue;
@@ -83,4 +84,24 @@ export function findFoliageContact(index, position) {
     }
   }
   return nearest ? { ...nearest, proximity: 1 - nearestRatio } : null;
+}
+
+// What Darwin is wading through right now, for the footstep foley: each step
+// inside a plant layers a brush of that plant's material over the ground
+// sound. Instanced ecology and the destructible plant fields both report here.
+const IMMERSION_STALE_MS = 220;
+const immersion = { kind: null, proximity: 0, at: -Infinity };
+
+export function noteFoliageImmersion({ kind, proximity = 0 }) {
+  const now = performance.now();
+  // Keep the deeper of two same-frame reports (a saltbush beside a pear).
+  if (now - immersion.at < 16 && proximity < immersion.proximity) return;
+  immersion.kind = kind;
+  immersion.proximity = proximity;
+  immersion.at = now;
+}
+
+export function currentFoliageImmersion() {
+  if (!immersion.kind || performance.now() - immersion.at > IMMERSION_STALE_MS) return null;
+  return { kind: immersion.kind, proximity: immersion.proximity };
 }

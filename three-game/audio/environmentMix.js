@@ -194,7 +194,9 @@ export function computeEnvironmentalAudioTargets({
     // much quieter than each crest). A square-root response keeps that body
     // audible on coastal maps and faintly audible one map inland without
     // flattening the recording or making the crests unnaturally constant.
-    ? (0.045 + Math.sqrt(surfPresence) * 0.385) * (0.94 + windStrength * 0.12)
+    // Mixed as a bed: at the waterline it sits ~7 dB under Darwin's
+    // footfalls, not over them (it used to peak ~5 dB above every step).
+    ? (0.026 + Math.sqrt(surfPresence) * 0.174) * (0.94 + windStrength * 0.12)
     : 0;
   const wind = (0.018 + windStrength * 0.115) * Math.max(0.72, Number(gust) || 1);
   // The field recording sits around -23 LUFS before runtime gain. The old
@@ -207,7 +209,9 @@ export function computeEnvironmentalAudioTargets({
   const insectWeather = (1 - smoothstep(0.025, 0.36, rainIntensity))
     * (1 - windStrength * 0.35);
   const insects = dryInsectHabitat(zone)
-    ? (0.045 + insectTimeActivity(timeOfDay) * 0.1) * insectWeather
+    // A high, continuous buzz reads far louder than its level suggests, so
+    // keep it a texture well under the foley.
+    ? (0.022 + insectTimeActivity(timeOfDay) * 0.05) * insectWeather
     : 0;
 
   return { surf, wind, rain, insects, occlusion: 0 };

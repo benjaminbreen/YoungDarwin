@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getRuntimeObstacles } from '../../world/obstacles';
 import { cactusSpineInjuryChance } from '../../world/ecology/matureCactusInteractions';
+import { findLiveSpineContact } from '../../world/ecology/spineContacts';
 import { LANDING_DUST } from './playerConfig';
 
 export { cactusSpineInjuryChance };
@@ -72,16 +73,28 @@ function matureCactusHazards(zoneId) {
   const obstacles = getRuntimeObstacles(zoneId);
   let hazards = cactusObstacleCache.get(obstacles);
   if (!hazards) {
-    // Destructible juvenile prickly pears remain absent: they bend and break
-    // on player contact. Only the solid mature ecology plants expose this flag.
+    // Destructible prickly pears and lava cacti are not obstacles; they report
+    // live contacts instead (findLiveSpineContact below).
     hazards = obstacles.filter(obstacle => obstacle.kind === 'cactus' && obstacle.spineHazard);
     cactusObstacleCache.set(obstacles, hazards);
   }
   return hazards;
 }
 
+const liveSpineNormal = new THREE.Vector3();
+
 export function findCactusHazardContact(position, playerRadius = 0.42, zoneId = undefined) {
-  return scanCactusHazards(matureCactusHazards(zoneId), position, playerRadius, null);
+  const best = scanCactusHazards(matureCactusHazards(zoneId), position, playerRadius, null);
+  // Destructible prickly pears and lava cacti report the piece Darwin is
+  // touching from their own field; see world/ecology/spineContacts.js.
+  const live = findLiveSpineContact(zoneId);
+  if (!live || (best && best.penetration >= live.penetration)) return best;
+  return {
+    cactus: live.cactus,
+    normal: liveSpineNormal.set(live.normal.x, 0, live.normal.z),
+    penetration: live.penetration,
+    distance: live.distance,
+  };
 }
 
 export function LandingDust({ triggerRef }) {

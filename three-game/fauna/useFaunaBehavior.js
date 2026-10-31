@@ -10,9 +10,26 @@ import { getWildlifeSpecies, normalizeWildlifeId } from '../wildlife/wildlifeCat
 import { onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 import { faunaDebugEnabled } from '../runtimeDebug';
+import { gameClockMinutes } from '../narrator/narratorEvents';
+import { WARINESS, warinessFor, warinessRadiusScale } from '../wildlife/wariness';
 
 const MAX_FAUNA_SIMULATION_STEP = 0.2;
 const MAX_FAUNA_CATCHUP = 0.6;
+// A flock bolting from one charge is one lesson, not six.
+const FLUSH_REPORT_COOLDOWN_MS = 4000;
+const lastFlushReportAt = new Map();
+
+function reportFlush(zoneId, speciesId) {
+  const key = `${zoneId}:${speciesId}`;
+  const now = globalThis.performance?.now?.() ?? Date.now();
+  if (now - (lastFlushReportAt.get(key) ?? -Infinity) < FLUSH_REPORT_COOLDOWN_MS) return;
+  lastFlushReportAt.set(key, now);
+  useThreeGameStore.getState().disturbWildlife?.({
+    zoneId,
+    speciesIds: [speciesId],
+    amount: WARINESS.flush,
+  });
+}
 
 // Is the player currently playing as this animal's own kind (same species, or
 // the same catalog kin group, e.g. a player finch among ground finches)?
@@ -105,8 +122,14 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     delta = 0,
   } = {}) => {
     if (!controller || !profile) return statusRef.current;
-    const { timeOfDay, playableModeId } = useThreeGameStore.getState();
+    const gameState = useThreeGameStore.getState();
+    const { timeOfDay, playableModeId } = gameState;
     const playerIsKin = isPlayerKin(playableModeId, specimenId);
+    const speciesId = normalizeWildlifeId(specimenId);
+    const radiusScale = warinessRadiusScale(
+      warinessFor(gameState.wildlifeWariness, currentZoneId, speciesId, gameClockMinutes(gameState)),
+    );
+    const flushesBefore = controller.state.flushCount || 0;
     const base = basePositionRef?.current || basePosition;
     const actorId = actorKey;
     const stimuli = consumeSpecimenStimuli(currentZoneId, actorId);
@@ -142,6 +165,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
         timeOfDay,
         paused,
         playerIsKin,
+        radiusScale,
       });
     } else {
       while (remaining > 0.000001) {
@@ -156,9 +180,15 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
           timeOfDay,
           paused,
           playerIsKin,
+          radiusScale,
         });
         remaining -= step;
       }
+    }
+    // Only Darwin's chasing teaches fear; a player animal is part of the island.
+    if ((controller.state.flushCount || 0) > flushesBefore
+      && getPlayableMode(playableModeId)?.kind !== 'animal') {
+      reportFlush(currentZoneId, speciesId);
     }
     statusRef.current = status;
     positionRef.current = controller.state.position;

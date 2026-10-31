@@ -306,6 +306,13 @@ export function usePlayerCameraRig() {
     const onPointerMove = event => {
       updatePointerNdc(event);
       if (openingCameraActiveRef.current) return;
+      // A left click while right mouse is held to aim is a chorded press:
+      // browsers report it as a pointermove with a new bit in `buttons`, never
+      // as a pointerdown, so the shot has to be read here.
+      if (event.pointerType === 'mouse' && aimActiveRef.current
+        && event.button === 0 && (event.buttons & 1)) {
+        firePulseRef.current += 1;
+      }
       const examineSession = useThreeGameStore.getState().examineSession;
       if (examineOrbitActive(examineSession)) {
         if (!draggingRef.current) return;
@@ -325,11 +332,13 @@ export function usePlayerCameraRig() {
         return;
       }
       if (examineSession) return;
-      // Pointer-locked mouse look while aiming: deltas rotate the camera and
-      // therefore the crosshair. No drag required — the click means "fire".
-      // Slide up = aim up (positive pitch looks down, so movementY feeds in
-      // directly).
-      if (aimActiveRef.current && document.pointerLockElement === element) {
+      // Mouse look while aiming: deltas rotate the camera and therefore the
+      // crosshair. No drag required — the click means "fire". Slide up = aim
+      // up (positive pitch looks down, so movementY feeds in directly).
+      // Pointer lock is only a nicety (no cursor, no screen edge): browsers
+      // may refuse it, and aim used to freeze outright when they did.
+      if (aimActiveRef.current
+        && (document.pointerLockElement === element || event.pointerType === 'mouse')) {
         aimLook(event.movementX || 0, event.movementY || 0, ads.lookSpeed);
         return;
       }

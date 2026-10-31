@@ -125,7 +125,11 @@ export function createThreatField({ profile, habitat, state, getClock }) {
   // `playerIsKin` is true when the player is playing as this animal's own
   // kind: its approach is then no threat, though contact and hammer strikes
   // still are.
-  function evaluate({ player, t, dt, playerIsKin = false }) {
+  // `radiusScale` is island tameness (wildlife/wariness.js): below 1 a tame
+  // animal lets Darwin walk close, above 1 a persecuted one bolts early. It
+  // scales only the player's approach; gunshots, hammer strikes and contact
+  // are loud whatever the animal's history.
+  function evaluate({ player, t, dt, playerIsKin = false, radiusScale = 1 }) {
     awayFromPlayer.set(state.position.x - player.x, state.position.z - player.z);
     const horizontalDistance = awayFromPlayer.length();
     const verticalSeparation = Number.isFinite(player.y) && Number.isFinite(state.position.y)
@@ -164,11 +168,13 @@ export function createThreatField({ profile, habitat, state, getClock }) {
       0,
       1,
     ) * 0.6;
-    const alertRadius = (profile.alertRadius || 0) * sprintBoost;
+    const tameness = Number.isFinite(radiusScale) && radiusScale > 0 ? radiusScale : 1;
+    const alertRadius = (profile.alertRadius || 0) * sprintBoost * tameness;
+    const panicRadius = (profile.panicRadius || 0) * tameness;
     const playerPanic = !playerIsKin && distanceToPlayer < alertRadius
-      ? THREE.MathUtils.clamp((alertRadius - distanceToPlayer) / Math.max(0.01, alertRadius - profile.panicRadius), 0, 1)
+      ? THREE.MathUtils.clamp((alertRadius - distanceToPlayer) / Math.max(0.01, alertRadius - panicRadius), 0, 1)
       : 0;
-    const startleRadius = (profile.startleRadius || profile.alertRadius) * sprintBoost;
+    const startleRadius = (profile.startleRadius || profile.alertRadius) * sprintBoost * tameness;
     if (
       playerPanic > 0.02
       && distanceToPlayer < startleRadius
@@ -181,6 +187,9 @@ export function createThreatField({ profile, habitat, state, getClock }) {
       startle.intensity = THREE.MathUtils.clamp(playerPanic * 1.2 + 0.18, 0.35, 1);
       startle.until = t + (profile.startleDuration || 0.75);
       startle.cooldownUntil = t + (profile.startleCooldown || 3.0);
+      // Charging an animal until it bolts teaches it to fear Darwin; a
+      // walking approach that merely startles it does not.
+      if (playerMotion.speed >= SPRINT_FLUSH_START) state.flushCount = (state.flushCount || 0) + 1;
     }
     const startleDuration = Math.max(0.1, profile.startleDuration || 0.75);
     const startleFade = t < startle.until

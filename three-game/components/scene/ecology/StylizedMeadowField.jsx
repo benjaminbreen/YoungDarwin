@@ -8,6 +8,7 @@ import { getRegionTerrainConfig, terrainHeight, terrainSlopeAt } from '../../../
 import { seededRandom } from '../../../world/scatter';
 import { weatherEnv, resolveLayerWindDir } from '../../../world/weatherEnvRuntime';
 import { groundCoverFogUniforms } from '../../../world/groundCoverLight';
+import { isNetSweepLive, netSweepState } from '../../player/netSweep';
 
 const OFFSCREEN_Y = -999;
 const TWO_PI = Math.PI * 2;
@@ -136,6 +137,8 @@ function makeStylizedMeadowMaterial(layer) {
       uTime: { value: 0 },
       uPlayerPosition: { value: new THREE.Vector3(0, OFFSCREEN_Y, 0) },
       uPlayerMove: { value: new THREE.Vector3(0, 0, 0) },
+      // The swept net's hoop (xyz) and how hard it is pressing (w, 0 = none).
+      uNetHoop: { value: new THREE.Vector4(0, OFFSCREEN_Y, 0, 0) },
       // Authored `windYaw` is kept as a local deviation from the prevailing
       // trades and re-resolved against the live wind every frame, so the
       // meadow veers with the sky instead of holding a fixed bearing.
@@ -154,6 +157,7 @@ function makeStylizedMeadowMaterial(layer) {
     vertexShader: /* glsl */`
       uniform float uTime;
       uniform vec3 uPlayerPosition;
+      uniform vec4 uNetHoop;
       uniform vec2 uWindDir;
       uniform float uWindSpeed;
       uniform float uWindAmp;
@@ -221,6 +225,17 @@ function makeStylizedMeadowMaterial(layer) {
           worldPosition.xz += normalize(away) * contact * uInteractionAmp * body;
           worldPosition.y -= contact * uInteractionAmp * h * 0.08 * body;
         }
+        if (uNetHoop.w > 0.001) {
+          vec2 hoopAway = iRoot.xz - uNetHoop.xz;
+          float hoopDist = length(hoopAway);
+          // Only blades whose tips the hoop actually reaches.
+          float low = 1.0 - smoothstep(h * 0.9, h * 0.9 + 0.35, uNetHoop.y - iRoot.y);
+          float sweep = (1.0 - smoothstep(0.06, 0.55, hoopDist)) * low * uNetHoop.w;
+          if (sweep > 0.001 && hoopDist > 0.001) {
+            worldPosition.xz += normalize(hoopAway) * sweep * 0.3 * body;
+            worldPosition.y -= sweep * h * 0.22 * body;
+          }
+        }
         vec3 color = mix(iRootColor, iMidColor, smoothstep(0.08, 0.72, tip));
         color = mix(color, iTipColor, smoothstep(0.58, 1.0, tip) * (0.34 + uTipLight));
         color = mix(color, vec3(0.55, 0.55, 0.36), (1.0 - fade) * 0.18);
@@ -275,6 +290,14 @@ export function StylizedMeadowField({ layer, zoneId }) {
     uniforms.uWindSpeed.value = weatherEnv.foliageWindSpeed;
     resolveLayerWindDir(uniforms.uWindDir.value, effectiveLayer.windYaw);
     uniforms.uWindAmp.value = (effectiveLayer.windAmp ?? 0.16) * weatherEnv.foliageWindGain;
+    const hoopUniform = uniforms.uNetHoop.value;
+    if (isNetSweepLive()) {
+      const hoop = netSweepState.hoopLive;
+      hoopUniform.set(hoop.x, hoop.y, hoop.z, Math.min(1, hoopUniform.w + delta * 14));
+    } else if (hoopUniform.w > 0) {
+      // Let the parted blades spring back rather than snap.
+      hoopUniform.w = Math.max(0, hoopUniform.w - delta * 3.5);
+    }
     const pose = getRuntimePlayerPose();
     const position = pose?.position;
     if (!position) return;

@@ -20,6 +20,7 @@ import { CarriedPropAttachment } from './CarriedPropAttachment';
 import { getZoneProps } from '../../physics/props/propRegistry';
 import { carryGripForProp } from './carryProfiles';
 import { WetBoots } from './WetBoots';
+import { NET_SWEEP, netSweepState, netSweepTime } from './netSweep';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -38,6 +39,9 @@ const LAMP_ATTACHMENT = {
 };
 
 const BUTTERFLY_NET_VISUAL = 'butterflyNet';
+// The authored net clip runs 3.3 s with a long settle; the aimed sweep is
+// over in 1.4 s, so the arms play it at about twice speed under the pole.
+const NET_SWING_CLIP_SCALE = 2.3;
 const SNARE_COIL_VISUAL = 'snareCoil';
 const BUTTERFLY_NET_SEGMENTS = 20;
 const BUTTERFLY_NET_RINGS = 7;
@@ -614,7 +618,7 @@ function darwin5TorchActionClip(action, crouching) {
   if (action === 'standToCrouch') return 'torchStandToCrouch';
   if (action === 'crouchToStand') return 'torchCrouchToStand';
   if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
-  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return { clip: 'butterflyNetSwing', timeScale: NET_SWING_CLIP_SCALE, fade: 0.06 };
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'gather') return 'gather';
   if (action === 'standingInspectDownward') return 'standingInspectDownward';
@@ -623,7 +627,7 @@ function darwin5TorchActionClip(action, crouching) {
 }
 
 function darwin5HeldToolActionClip(action) {
-  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return { clip: 'butterflyNetSwing', timeScale: NET_SWING_CLIP_SCALE, fade: 0.06 };
   if (action === 'swingTool') return 'swingTool';
   if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
   return null;
@@ -640,7 +644,7 @@ function darwin5AdaptedActionClip(action) {
   if (action === 'climbWaistHeight') return { clip: 'climbWaistHeight', timeScale: 1.65, fade: 0.05 };
   if (action === 'climbHeadHeight') return { clip: 'climbHeadHeight', timeScale: 1.45, fade: 0.05 };
   if (action === 'fallingToRoll') return { clip: 'fallingToRoll', timeScale: 1.2, fade: 0.05 };
-  if (action === 'swingNet' || action === 'butterflyNetSwing') return 'butterflyNetSwing';
+  if (action === 'swingNet' || action === 'butterflyNetSwing') return { clip: 'butterflyNetSwing', timeScale: NET_SWING_CLIP_SCALE, fade: 0.06 };
   if (action === 'swingHammer' || action === 'heavyToolSwing') return 'heavyToolSwing';
   if (action === 'kneelInspect') return 'kneelInspect';
   if (action === 'lookAround' || action === 'lookAroundShort') return action;
@@ -786,6 +790,128 @@ function HandLamp({ scene, modelAssetId }) {
   return null;
 }
 
+function createNetSweepScratch() {
+  return {
+    boneQuat: new THREE.Quaternion(),
+    carryQuat: new THREE.Quaternion(),
+    sweepQuat: new THREE.Quaternion(),
+    basis: new THREE.Matrix4(),
+    grip: new THREE.Vector3(),
+    forward: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    aimDir: new THREE.Vector3(),
+    windDir: new THREE.Vector3(),
+    followDir: new THREE.Vector3(),
+    dir: new THREE.Vector3(),
+    normal: new THREE.Vector3(),
+    side: new THREE.Vector3(),
+    back: new THREE.Vector3(),
+    hoop: new THREE.Vector3(),
+    carryDir: new THREE.Vector3(),
+  };
+}
+
+const NET_UP = new THREE.Vector3(0, 1, 0);
+const smoothstep01 = x => {
+  const t = THREE.MathUtils.clamp(x, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+// Component of v perpendicular to unit axis, normalised (or the fallback).
+function perpendicularTo(v, axis, fallback) {
+  v.addScaledVector(axis, -v.dot(axis));
+  if (v.lengthSq() < 1e-6) v.copy(fallback);
+  return v.normalize();
+}
+
+// The aimed net sweep. Over the swing clip the pole leaves the carry, rises
+// over the right shoulder, cuts across to the aim point with the hoop mouth
+// leading, then carries on low to the left while the hoop rolls over to close
+// the bag, and eases back to the carry. Shaft = local -Z, hoop mouth normal =
+// local +Y, as built by createButterflyNetVisual.
+function applyNetSweepPose(group, bone, scratch) {
+  const now = performance.now() / 1000;
+  const u = netSweepTime(now);
+  if (u === null) return;
+  const S = NET_SWEEP;
+  bone.getWorldQuaternion(scratch.boneQuat);
+  scratch.carryQuat.copy(scratch.boneQuat).multiply(group.quaternion);
+  group.getWorldPosition(scratch.grip);
+
+  const aim = netSweepState.aim;
+  scratch.forward.set(aim.x - scratch.grip.x, 0, aim.z - scratch.grip.z);
+  if (scratch.forward.lengthSq() < 0.01) scratch.forward.set(netSweepState.facing.x, 0, netSweepState.facing.z);
+  scratch.forward.normalize();
+  scratch.right.set(-scratch.forward.z, 0, scratch.forward.x);
+  scratch.aimDir.set(aim.x - scratch.grip.x, aim.y - scratch.grip.y, aim.z - scratch.grip.z);
+  if (scratch.aimDir.lengthSq() < 0.01) scratch.aimDir.copy(scratch.forward);
+  scratch.aimDir.normalize();
+  // Never sweep up past the horizon or into the ground at his feet.
+  scratch.aimDir.y = THREE.MathUtils.clamp(scratch.aimDir.y, -0.85, 0.35);
+  scratch.aimDir.normalize();
+  scratch.windDir.copy(NET_UP).multiplyScalar(0.9)
+    .addScaledVector(scratch.right, 0.6)
+    .addScaledVector(scratch.forward, -0.15)
+    .normalize();
+  scratch.followDir.copy(scratch.forward).multiplyScalar(0.5)
+    .addScaledVector(scratch.right, -0.85)
+    .addScaledVector(NET_UP, -0.4)
+    .normalize();
+
+  let weight;
+  let roll = 0;
+  if (u < S.windup) {
+    weight = smoothstep01(u / S.windup);
+    scratch.dir.copy(scratch.windDir);
+    scratch.normal.subVectors(scratch.aimDir, scratch.windDir);
+  } else if (u < S.strike) {
+    weight = 1;
+    // Accelerating into the strike.
+    const s = Math.pow((u - S.windup) / (S.strike - S.windup), 1.7);
+    scratch.dir.copy(scratch.windDir).lerp(scratch.aimDir, s).normalize();
+    scratch.normal.subVectors(scratch.aimDir, scratch.windDir);
+  } else if (u < S.close) {
+    // Decelerating through, rolling the hoop over to shut the bag.
+    const s = 1 - Math.pow(1 - (u - S.strike) / (S.close - S.strike), 2);
+    scratch.dir.copy(scratch.aimDir).lerp(scratch.followDir, s).normalize();
+    scratch.normal.subVectors(scratch.followDir, scratch.aimDir);
+    roll = Math.PI * smoothstep01((u - S.strike) / (S.close - S.strike));
+    weight = 1;
+  } else {
+    // Bring the pole back round level to the carry before letting go of it,
+    // rather than slerping the whole pose (which swung it up past vertical).
+    const s = smoothstep01((u - S.close) / (S.settle - S.close));
+    scratch.carryDir.set(0, 0, -1).applyQuaternion(scratch.carryQuat);
+    scratch.dir.copy(scratch.followDir).lerp(scratch.carryDir, s).normalize();
+    scratch.normal.subVectors(scratch.carryDir, scratch.followDir);
+    roll = Math.PI;
+    weight = 1 - smoothstep01((s - 0.55) / 0.45);
+  }
+  perpendicularTo(scratch.normal, scratch.dir, NET_UP);
+  if (roll) scratch.normal.applyAxisAngle(scratch.dir, roll);
+  scratch.back.copy(scratch.dir).negate();
+  scratch.side.crossVectors(scratch.normal, scratch.back).normalize();
+  scratch.basis.makeBasis(scratch.side, scratch.normal, scratch.back);
+  scratch.sweepQuat.setFromRotationMatrix(scratch.basis);
+  scratch.carryQuat.slerp(scratch.sweepQuat, weight);
+  group.quaternion.copy(scratch.boneQuat).invert().multiply(scratch.carryQuat);
+
+  scratch.hoop.set(0, 0, -1).applyQuaternion(scratch.carryQuat)
+    .multiplyScalar(S.poleLength).add(scratch.grip);
+  netSweepState.hoopLive.x = scratch.hoop.x;
+  netSweepState.hoopLive.y = scratch.hoop.y;
+  netSweepState.hoopLive.z = scratch.hoop.z;
+  netSweepState.hoopLiveValid = true;
+  if (!netSweepState.strikeSampled && u >= S.strike) {
+    netSweepState.strikeSampled = true;
+    // At the strike the hoop is on the aim line, whatever this frame's
+    // lerp step left it at.
+    scratch.hoop.copy(scratch.aimDir).multiplyScalar(S.poleLength).add(scratch.grip);
+    Object.assign(netSweepState.hoop, { x: scratch.hoop.x, y: scratch.hoop.y, z: scratch.hoop.z });
+    Object.assign(netSweepState.grip, { x: scratch.grip.x, y: scratch.grip.y, z: scratch.grip.z });
+  }
+}
+
 // Attaches a held-tool GLB to Darwin's right hand and shows it only while that
 // tool is the active one. Hand-oriented props inherit the animated grip pose;
 // body-oriented props remain supported for future coarse world-facing tools.
@@ -816,6 +942,7 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     const e = resolvedConfig.swingEuler || [0, 0, 0];
     return new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0], e[1], e[2]));
   }, [resolvedConfig.swingEuler]);
+  const sweepScratch = useMemo(() => createNetSweepScratch(), []);
 
   useEffect(() => {
     if (!scene || !source) return undefined;
@@ -961,6 +1088,14 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
         scene.getWorldQuaternion(bodyQuat);
         // Cancel the bone's world rotation, re-apply the body's, then the tweak.
         group.quaternion.copy(boneQuat).invert().multiply(bodyQuat).multiply(tweakQuat);
+      }
+    }
+    if (resolvedConfig.toolId === 'insect_net') {
+      if (motionAction === 'butterflyNetSwing' || motionAction === 'swingNet') {
+        applyNetSweepPose(group, bone, sweepScratch);
+      } else if (netSweepState.hoopLiveValid) {
+        // Swing cut short: the hoop is back in the carry.
+        netSweepState.hoopLiveValid = false;
       }
     }
     if (visualRef.current) {

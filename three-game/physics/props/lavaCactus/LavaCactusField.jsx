@@ -274,6 +274,13 @@ const LAVA_CACTUS_SPEC = {
     ? 'The hammer mashes into the grey column; the woody fibres crush but hold.'
     : 'The column splits at the base; one more blow will part it.'),
   absorbEducationalNote: 'Old lava cactus stems turn grey and fibrous with age; only the young golden columns part easily.',
+  spines: {
+    label: 'lava cactus',
+    kind: 'lava-cactus',
+    damage: 5,
+    reach: 0.4,
+    educationalNote: 'Lava cactus (Brachycereus nesioticus) is densely clothed in golden spines, its only defence on bare lava where little else grows.',
+  },
   tuning: {
     // Brittle, stiff little posts: less bend, quicker spring, and a solid
     // run (not just a sprint) snaps one.

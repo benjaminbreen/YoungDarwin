@@ -83,4 +83,36 @@ export const MOVE_DRILLS = {
       { at: 3400, up: ['forward', 'run'] },
     ],
   },
+  // Tool drills equip `tool` first. Each presses F, then asks to walk on
+  // before the swing has finished: how soon does Darwin answer the stick?
+  net: {
+    about: 'Net in hand: F, then hold forward 0.6s later.',
+    tool: 'insect_net',
+    durationMs: 4200,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 320, up: ['useTool'] }, { at: 800, down: ['forward'] }, { at: 3200, up: ['forward'] }],
+  },
+  netSweep: {
+    about: 'Net in hand: F and stand still through the whole sweep.',
+    tool: 'insect_net',
+    durationMs: 1900,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 320, up: ['useTool'] }],
+  },
+  hammer: {
+    about: 'Hammer in hand: F, then hold forward 0.4s later.',
+    tool: 'hammer',
+    durationMs: 3400,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 320, up: ['useTool'] }, { at: 600, down: ['forward'] }, { at: 2600, up: ['forward'] }],
+  },
+  gunTap: {
+    about: 'Shotgun in hand: tap F (hip fire), then hold forward.',
+    tool: 'shotgun',
+    durationMs: 3000,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 300, up: ['useTool'] }, { at: 500, down: ['forward'] }, { at: 2200, up: ['forward'] }],
+  },
+  gunAim: {
+    about: 'Shotgun in hand: hold F 1.2s (aim), release.',
+    tool: 'shotgun',
+    durationMs: 2600,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 1400, up: ['useTool'] }],
+  },
 };

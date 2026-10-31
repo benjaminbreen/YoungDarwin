@@ -10,6 +10,7 @@ import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { RarityBadge } from './RarityBadge';
+import { hasPopulationTraits } from '../examine/populationTraits';
 import {
   cameraDirectiveForProcedure,
   requestExamineCameraDirective,
@@ -22,6 +23,12 @@ import {
 // own the subject view; this layer owns inquiry, evidence, authorship, and the
 // explicit decision to collect after an observation has been recorded.
 
+
+// The size step for species with measurable traits: a real reading with an
+// instrument (examine/populationTraits.js), recorded by landing, rather than
+// an estimate.
+const MEASURE_PROCEDURE = 'Take measurements';
+const MEASURE_REPLACES = new Set(['Estimate size', 'Measure spread']);
 
 const PROCEDURES = {
   Animal: [
@@ -190,6 +197,7 @@ export function ExamineView() {
   const session = useThreeGameStore(state => state.examineSession);
   const closeExamine = useThreeGameStore(state => state.closeExamine);
   const sendExamineMessage = useThreeGameStore(state => state.sendExamineMessage);
+  const measureExamineSubject = useThreeGameStore(state => state.measureExamineSubject);
   const saveExamineFact = useThreeGameStore(state => state.saveExamineFact);
   const saveExamineNote = useThreeGameStore(state => state.saveExamineNote);
   const collectFromExamine = useThreeGameStore(state => state.collectFromExamine);
@@ -251,11 +259,20 @@ export function ExamineView() {
   }, [question, sendExamineMessage, session?.pending]);
 
   const submitProcedure = useCallback((label, prompt) => {
-    if (!prompt || session?.pending) return;
-    sendExamineMessage(prompt);
+    if (session?.pending) return;
+    if (label === MEASURE_PROCEDURE) {
+      measureExamineSubject();
+    } else if (prompt) {
+      sendExamineMessage(prompt);
+    } else {
+      return;
+    }
     // The camera move plays during the pending beat: choosing a procedure is
     // the act of looking, so the framing shifts while the observation forms.
-    const directive = cameraDirectiveForProcedure(session?.category, label);
+    const directive = cameraDirectiveForProcedure(
+      session?.category,
+      label === MEASURE_PROCEDURE ? (session?.category === 'Plant' ? 'Measure spread' : 'Estimate size') : label,
+    );
     if (!directive || !session?.focus) return;
     requestExamineCameraDirective(directive);
     if (directive.strike) {
@@ -281,7 +298,7 @@ export function ExamineView() {
         requestExamineCameraImpulse(1);
       }, 750);
     }
-  }, [sendExamineMessage, session]);
+  }, [measureExamineSubject, sendExamineMessage, session]);
 
   const submitNote = useCallback(() => {
     const trimmed = note.trim();
@@ -322,7 +339,12 @@ export function ExamineView() {
   }, [open, collectReady, confirmCollection]);
 
   const zone = useMemo(() => (open ? getZone(currentZoneId) : null), [open, currentZoneId]);
-  const procedures = useMemo(() => PROCEDURES[session?.category] || PROCEDURES.Item, [session?.category]);
+  const measurable = session?.kind === 'specimen' && hasPopulationTraits(session?.typeId);
+  const procedures = useMemo(() => {
+    const base = PROCEDURES[session?.category] || PROCEDURES.Item;
+    if (!measurable) return base;
+    return base.map(([label, prompt]) => (MEASURE_REPLACES.has(label) ? [MEASURE_PROCEDURE, null] : [label, prompt]));
+  }, [measurable, session?.category]);
   const latestUnsavedFact = useMemo(() => (
     [...(session?.facts || [])].reverse().find(fact => !fact.saved) || null
   ), [session?.facts]);
@@ -387,7 +409,7 @@ export function ExamineView() {
         {session.measurementCallout && (
           <div className={styles.measurement} aria-live="polite">
             <div className={styles.measurementLine}>
-              <span className={styles.measurementValue}>{session.measurementCallout} <em className="text-[10px] text-expedition-faded">estimated</em></span>
+              <span className={styles.measurementValue}>{session.measurementCallout} <em className="text-[10px] text-expedition-faded">{session.measured ? 'measured' : 'estimated'}</em></span>
             </div>
           </div>
         )}
