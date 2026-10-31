@@ -11,6 +11,8 @@ import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { RarityBadge } from './RarityBadge';
 import { hasPopulationTraits } from '../examine/populationTraits';
+import { casualName, catchPlan, toolDisplayName } from '../catchRules';
+import { specimenInHand } from '../components/player/catchRequest';
 import {
   cameraDirectiveForProcedure,
   requestExamineCameraDirective,
@@ -203,6 +205,13 @@ export function ExamineView() {
   const collectFromExamine = useThreeGameStore(state => state.collectFromExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const activeToolId = useThreeGameStore(state => state.activeToolId);
+  const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
+  const setActiveTool = useThreeGameStore(state => state.setActiveTool);
+  const downed = useThreeGameStore(state => Boolean(state.examineSession?.actorId
+    && state.downedSpecimenActors?.[state.examineSession.actorId]));
+  const alreadyCollected = useThreeGameStore(state => Boolean(state.examineSession?.typeId
+    && state.collectedSpecimenIds?.includes(state.examineSession.typeId)));
 
   const [question, setQuestion] = useState('');
   const [note, setNote] = useState('');
@@ -219,6 +228,36 @@ export function ExamineView() {
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
   // Collection is one click: no note prerequisite, no confirmation step.
   const collectReady = Boolean(session?.collectable);
+  // The button says what the tool in hand will actually do (catchRules.js).
+  // A wrong tool turns it into "take up the right one"; a live animal is
+  // caught out in the world, so the button hands the attempt back there.
+  const plan = useMemo(() => (session?.kind === 'specimen'
+    ? catchPlan({
+      specimen: session.specimen,
+      toolId: activeToolId,
+      downed: downed || specimenInHand(session.actorId),
+      alreadyCollected,
+      toolbarOrder,
+    })
+    : null), [session, activeToolId, downed, alreadyCollected, toolbarOrder]);
+  const slot = toolId => {
+    const index = (toolbarOrder || []).indexOf(toolId);
+    return index >= 0 ? ` (${index + 1})` : '';
+  };
+  const subjectName = casualName(session);
+  const collectButton = !plan
+    ? { label: session?.collectVerb, hint: 'Press C to collect. A written note deepens the record.' }
+    : plan.kind === 'wrongTool'
+      ? { label: `Take up the ${toolDisplayName(plan.bestToolId)}${slot(plan.bestToolId)}`, hint: plan.advice }
+      : plan.kind === 'net'
+        ? { label: 'Net it', hint: `Press C to close this and swing the net. The ${subjectName} has to be within a couple of paces.` }
+        : plan.kind === 'hand'
+          ? { label: 'Grab it', hint: `Press C to close this and reach for the ${subjectName}. Come in at a walk; it must still be there when your hand closes.` }
+          : plan.kind === 'shoot'
+            ? { label: 'Close and shoot', hint: 'Hold F or the right mouse button to aim, then fire. Pick it up afterwards.' }
+            : plan.kind === 'document'
+              ? { label: 'Document', hint: 'Press C to record it without taking it.' }
+              : { label: session?.collectVerb, hint: 'Press C to collect. A written note deepens the record.' };
 
   useEffect(() => {
     if (!open) {
@@ -314,10 +353,18 @@ export function ExamineView() {
 
   const confirmCollection = useCallback(async () => {
     if (!collectReady || collecting) return;
+    if (plan?.kind === 'wrongTool') {
+      setActiveTool(plan.bestToolId);
+      return;
+    }
+    if (plan?.kind === 'shoot') {
+      closeExamine();
+      return;
+    }
     setCollecting(true);
     await collectFromExamine();
     setCollecting(false);
-  }, [collectFromExamine, collectReady, collecting]);
+  }, [closeExamine, collectFromExamine, collectReady, collecting, plan, setActiveTool]);
 
   // Focus starts on the notebook rather than being yanked to the close button:
   // the inquiry field is the point of the screen, and stealing focus from it
@@ -331,11 +378,15 @@ export function ExamineView() {
       const typing = tag === 'INPUT' || tag === 'TEXTAREA';
       if (!typing && event.code === 'KeyC' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
         event.preventDefault();
+        // C is also crouch. Taken in the capture phase and stopped here, so
+        // the game never sees it held and Darwin does not drop into a crouch
+        // as the view closes for a catch.
+        event.stopImmediatePropagation();
         confirmCollection();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [open, collectReady, confirmCollection]);
 
   const zone = useMemo(() => (open ? getZone(currentZoneId) : null), [open, currentZoneId]);
@@ -622,12 +673,12 @@ export function ExamineView() {
               onClick={confirmCollection}
               className="min-h-[46px] rounded-[3px] border border-[#f0d9a2] bg-[linear-gradient(160deg,#e8cf94,#c9a35f_48%,#96723d)] px-2 font-sans text-[12.5px] font-bold uppercase tracking-[0.08em] text-[#231a09] shadow-[0_0_16px_rgba(227,197,133,0.32),inset_0_1px_0_rgba(255,241,205,0.75),inset_0_-1px_0_rgba(90,64,28,0.55)] transition hover:shadow-[0_0_26px_rgba(227,197,133,0.55),inset_0_1px_0_rgba(255,241,205,0.85),inset_0_-1px_0_rgba(90,64,28,0.55)] disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-none disabled:bg-transparent disabled:text-expedition-faded/35 disabled:shadow-none"
             >
-              {collecting ? 'Attempting…' : session.collectVerb}
+              {collecting ? 'Attempting…' : collectButton.label}
             </button>
           </div>
 
           <p className={`${styles.noteHint} mb-0 mt-1.5 text-right text-[12px] italic text-expedition-faded/65`}>
-            {collectReady ? 'Press C to collect. A written note deepens the record.' : 'This subject stays where it is; the note is the record.'}
+            {collectReady ? collectButton.hint : 'This subject stays where it is; the note is the record.'}
           </p>
         </section>
       </aside>

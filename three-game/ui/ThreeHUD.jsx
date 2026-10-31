@@ -4296,7 +4296,7 @@ function InteractionPrompt() {
         && (actorId === nearbySpecimenId || specimen.id === nearbySpecimenId);
     }) || null
   ), [collectedSpecimenActorIds, currentZoneId, nearbySpecimenId]);
-  const npcContextCandidate = useMemo(() => nearbyNpcEncounter ? ({
+  const npcContextCandidate = useMemo(() => nearbyNpcEncounter && !nearbyNpcEncounter.yieldsToSpecimen ? ({
     id: `npc:${nearbyNpcEncounter.npcId}`,
     label: `Speak with ${nearbyNpcEncounter.name}`,
     keyLabel: 'E',

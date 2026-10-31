@@ -4630,6 +4630,62 @@ test('island tameness rises with disturbance, crosses tiers once, and fades in g
   }), { POST_OFFICE_BAY: { medium_ground_finch: { level: 1, atMinutes: 610 } } });
 });
 
+test('collecting has no hidden roll: tools are refused with advice, live animals are caught in the world', () => {
+  const { catchPlan, handMissReason, tooFarReason } = loadModule('three-game/catchRules.js');
+  const toolbarOrder = ['shotgun', 'insect_net', 'pocket_knife', 'hammer', 'hands', 'sketch'];
+  const bee = baseSpecimens.find(item => item.id === 'galapagoscarpenterbee');
+  const lizard = baseSpecimens.find(item => item.id === 'lavalizard');
+  const gull = baseSpecimens.find(item => item.id === 'lavagull');
+  const cactus = baseSpecimens.find(item => item.id === 'cactus');
+  assert.ok(bee && lizard && gull && cactus);
+
+  const beeByHand = catchPlan({ specimen: { ...bee, pollinator: true }, toolId: 'hands', toolbarOrder });
+  assert.equal(beeByHand.kind, 'wrongTool');
+  assert.equal(beeByHand.bestToolId, 'insect_net');
+  assert.match(beeByHand.advice, /insect net \(2\)/);
+  assert.equal(catchPlan({ specimen: { ...bee, pollinator: true }, toolId: 'insect_net', toolbarOrder }).kind, 'net');
+
+  assert.equal(catchPlan({ specimen: lizard, toolId: 'hands', toolbarOrder }).kind, 'hand');
+  const lizardByNet = catchPlan({ specimen: lizard, toolId: 'insect_net', toolbarOrder });
+  assert.equal(lizardByNet.kind, 'wrongTool');
+  assert.match(lizardByNet.advice, /hands \(5\)/);
+
+  assert.equal(catchPlan({ specimen: gull, toolId: 'hands', toolbarOrder }).kind, 'wrongTool');
+  assert.equal(catchPlan({ specimen: gull, toolId: 'shotgun', toolbarOrder }).kind, 'shoot');
+  // A bird already shot is simply picked up, by whatever is in hand.
+  assert.equal(catchPlan({ specimen: gull, toolId: 'hands', downed: true, toolbarOrder }).kind, 'pickup');
+
+  assert.equal(catchPlan({ specimen: cactus, toolId: 'hands', toolbarOrder }).kind, 'take');
+  assert.equal(catchPlan({ specimen: lizard, toolId: 'sketch', toolbarOrder }).kind, 'document');
+
+  assert.match(handMissReason({ specimen: lizard, startDistance: 1, endDistance: 1.5, playerWasRunning: true }), /at a run/);
+  assert.match(handMissReason({ specimen: lizard, startDistance: 1, endDistance: 2 }), /edged away/);
+  assert.match(handMissReason({ specimen: lizard, startDistance: 1.5, endDistance: 1.5 }), /one more step/);
+  assert.match(tooFarReason({ specimen: lizard, toolId: 'hands', tier: 'wary' }), /learned to fear you/);
+
+  // When the game changes tool itself, the line gives the reason and says
+  // what Darwin now holds, not an instruction to do it.
+  assert.equal(beeByHand.switchedLine, 'Bare hands crush an insect and rub the colour off its wings. You take up the insect net.');
+  assert.match(lizardByNet.switchedLine, /You put the insect net away\.$/);
+
+  const { catchSuccessLine } = loadModule('three-game/catchRules.js');
+  assert.match(catchSuccessLine({ specimen: lizard, method: 'hand' }), /behind the head/);
+  assert.match(catchSuccessLine({ specimen: bee, method: 'net' }), /hoop closes/);
+  assert.match(catchSuccessLine({ specimen: gull, method: 'shot', damaged: true }), /where it fell.*damaged/);
+});
+
+test('a companion beside Darwin yields the action key to the animal he is attending to', () => {
+  const { npcYieldsToSpecimen } = loadModule('three-game/components/player/attention.js');
+  const position = { x: 0, z: 0 };
+  const facing = { x: 0, z: 1 };
+  // Syms at Darwin's shoulder, a bee ahead: the bee keeps E.
+  assert.equal(npcYieldsToSpecimen({ npc: { x: 1.5, z: -0.5 }, specimen: { x: 0, z: 3 }, position, facing }), true);
+  // Syms ahead and the bee behind: speaking to Syms is what E does.
+  assert.equal(npcYieldsToSpecimen({ npc: { x: 0, z: 2 }, specimen: { x: 0.5, z: -3 }, position, facing }), false);
+  // Whichever is closer wins regardless of facing.
+  assert.equal(npcYieldsToSpecimen({ npc: { x: 0, z: 2.5 }, specimen: { x: 1, z: 0 }, position, facing }), true);
+});
+
 test('a tame finch lets Darwin close where a wary one panics', () => {
   const { createThreatField } = loadModule('three-game/fauna/motion/threatField.js');
   const { warinessRadiusScale } = loadModule('three-game/wildlife/wariness.js');

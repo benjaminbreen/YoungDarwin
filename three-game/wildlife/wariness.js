@@ -25,9 +25,12 @@ export const WARINESS = Object.freeze({
   flush: 0.035,
   uneasyAt: 0.4,
   waryAt: 0.72,
-  // Alert-distance multiplier at level 0 and level 1. The authored profile
-  // radii (scale 1) sit at level ~0.37: a little disturbed.
-  tameRadiusScale: 0.55,
+  // Alert-distance multiplier at level 0 and level 1. Untroubled, an animal
+  // hardly minds a walking Darwin: a lava lizard's 4.2 m alert ring becomes
+  // ~0.85 m, inside arm's reach, so it can be taken by hand (catchRules.js).
+  // The authored profile radii (scale 1) sit at level ~0.52: an animal that
+  // has already learned something.
+  tameRadiusScale: 0.2,
   waryRadiusScale: 1.75,
 });
 

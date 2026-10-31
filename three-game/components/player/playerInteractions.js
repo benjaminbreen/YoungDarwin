@@ -8,7 +8,7 @@ import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
 import { useThreeGameStore } from '../../store';
 import { triggerToolUse } from '../../input/touchControls';
 import { TARGETED_TOOLS, clearToolTarget, solveToolTarget, toolTargetState } from './toolTargeting';
-import { ACTION_DURATION, CONTROL_INTERRUPTIBLE_ACTIONS } from './playerConfig';
+import { ACTION_DURATION, CONTROL_INTERRUPTIBLE_ACTIONS, PLAYER } from './playerConfig';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 import { NET_SWEEP, distanceToStrike, netSweepState, trackNetSweepAim } from './netSweep';
 import { startNetSweep } from './playerActionTriggers';
@@ -20,6 +20,12 @@ import { SYMS_FIELD_CASE_PROMPT_MODE } from '../../npcs/symsActivityPlan';
 import { TOOL_ACTIONS, fieldSampleFor, findAmbientFieldTarget, resolveFieldAction } from '../../fieldActions';
 import { getRuntimeObstacles } from '../../world/obstacles';
 import { getSpecimenRuntimePoses, pushSpecimenStimulus } from '../../world/specimenRuntime';
+import { HAND_CATCH, NET_START_REACH, casualName, catchPlan, handMissReason, tooFarReason } from '../../catchRules';
+import { noteSpecimenInHand, takeSpecimenCatchRequest } from './catchRequest';
+import { npcYieldsToSpecimen } from './attention';
+import { WARINESS, warinessFor, warinessTier } from '../../wildlife/wariness';
+import { normalizeWildlifeId } from '../../wildlife/wildlifeCatalog';
+import { gameClockMinutes } from '../../narrator/narratorEvents';
 
 const EDGE_TRAVEL_HOLD_SECONDS = 0.55;
 
@@ -246,6 +252,9 @@ export function collectionAnimationForTool(toolId, specimen = null, options = {}
     const clip = documentClipForSpecimen(specimen);
     return { clip, duration: ACTION_DURATION[clip], lockMovement: true, align: true };
   }
+  // A live animal taken by hand is a quick reach and lift; the slow gather
+  // clips are for plants, and a lizard will not wait out a four-second stoop.
+  if (options.handCatch) return { clip: 'pickUp', duration: ACTION_DURATION.pickUp, lockMovement: true, align: true };
   const kind = specimenKind(specimen);
   if (kind.order === 'insect') return { clip: 'butterflyNetSwing', duration: NET_SWEEP.duration, lockMovement: true, align: true };
   if (kind.ontology === 'mineral') return { clip: 'kneelInspect', duration: ACTION_DURATION.kneelInspect, lockMovement: true, align: true };
@@ -344,8 +353,10 @@ function resolveNetSweep({ now, stateRef, position, facing, currentZoneId, zoneS
       sweepId: sweep.id,
     });
     if (state.examinedTypeIds?.includes(caught.specimen.id)) {
-      collectNearby(caught.actorId, { assured: specimenKind(caught.specimen).order === 'insect' });
+      // The hoop closed over it: the catch is made, whatever the animal.
+      collectNearby(caught.actorId, { assured: true });
     } else {
+      noteSpecimenInHand(caught.actorId);
       stateRef.current.pendingNetLook = { actorId: caught.actorId, at: now + 0.3 };
     }
     return;
@@ -371,8 +382,59 @@ function resolveNetSweep({ now, stateRef, position, facing, currentZoneId, zoneS
   });
   useThreeGameStore.setState({
     message: subject.pollinator
-      ? `The ${subject.name.toLowerCase()} jinks clear of the hoop. Wait for it to settle on a flower.`
-      : `The ${subject.name.toLowerCase()} slips past the hoop.`,
+      ? `The ${casualName(subject)} jinks clear of the hoop. Wait for it to settle on a flower.`
+      : `The ${casualName(subject)} slips past the hoop.`,
+  });
+}
+
+// Syms keeps pace beside Darwin, so he is nearly always "nearby". He only
+// takes the action key when he is the one being attended to (attention.js).
+function npcYieldsToNearbySpecimen(npc, storeState, zoneId, zoneSpecimens, position, facing) {
+  const actorId = storeState.nearbySpecimenId;
+  if (!actorId || !npc?.pose) return false;
+  const specimen = zoneSpecimens.find(item => item && (item.instanceId || item.id) === actorId);
+  if (!specimen) return false;
+  const runtime = storeState.specimenRuntimePositions?.[zoneId]?.[actorId];
+  return npcYieldsToSpecimen({
+    npc: npc.pose,
+    specimen: { x: runtime?.x ?? specimen.spawnPoint?.[0] ?? 0, z: runtime?.z ?? specimen.spawnPoint?.[2] ?? 0 },
+    position,
+    facing,
+  });
+}
+
+// The hand catch: when the hand closes, the animal is either still within
+// reach or it is not. The threat field (scaled by island tameness) has
+// already decided whether it stayed put while Darwin closed in.
+function resolveHandGrab({ now, stateRef, position, currentZoneId, zoneSpecimens, collectNearby }) {
+  const grab = stateRef.current.pendingHandGrab;
+  if (!grab || now < grab.strikeAt) return;
+  stateRef.current.pendingHandGrab = null;
+  const specimen = zoneSpecimens.find(item => item && (item.instanceId || item.id) === grab.actorId);
+  const pose = specimen ? liveSpecimenPose(currentZoneId, specimen) : null;
+  if (!specimen || !pose) return;
+  const endDistance = Math.hypot(pose.x - position.x, pose.z - position.z);
+  if (endDistance <= HAND_CATCH.closeReach) {
+    collectNearby(grab.actorId, { assured: true });
+    return;
+  }
+  // A lunge that misses sends it off, and its kind here remember it.
+  pushSpecimenStimulus(currentZoneId, grab.actorId, {
+    kind: 'contact',
+    position: { x: position.x, z: position.z },
+    radius: 2.4,
+    duration: 2.5,
+    intensity: 1.2,
+  });
+  const store = useThreeGameStore.getState();
+  store.disturbWildlife?.({ speciesIds: [normalizeWildlifeId(specimen.id)], amount: WARINESS.flush, narrate: false });
+  useThreeGameStore.setState({
+    message: handMissReason({
+      specimen,
+      startDistance: grab.startDistance,
+      endDistance,
+      playerWasRunning: grab.wasRunning,
+    }),
   });
 }
 
@@ -424,10 +486,15 @@ export function updatePlayerInteractions({
       stateRef.current.pendingCarryPickup = null;
     }
   }
-  const nearbyNpcEncounter = getNearestNpcEncounter(currentZoneId, position);
-  if ((storeState.nearbyNpcEncounter?.npcId || null) !== (nearbyNpcEncounter?.npcId || null)) {
+  const nearestNpc = getNearestNpcEncounter(currentZoneId, position);
+  const nearbyNpcEncounter = nearestNpc && npcYieldsToNearbySpecimen(nearestNpc, storeState, currentZoneId, zoneSpecimens, position, facing)
+    ? { ...nearestNpc, yieldsToSpecimen: true }
+    : nearestNpc;
+  if ((storeState.nearbyNpcEncounter?.npcId || null) !== (nearbyNpcEncounter?.npcId || null)
+    || Boolean(storeState.nearbyNpcEncounter?.yieldsToSpecimen) !== Boolean(nearbyNpcEncounter?.yieldsToSpecimen)) {
+    const arrived = (storeState.nearbyNpcEncounter?.npcId || null) !== (nearbyNpcEncounter?.npcId || null);
     storeState.setNearbyNpcEncounter?.(nearbyNpcEncounter);
-    if (nearbyNpcEncounter) storeState.recordNpcActivity?.(nearbyNpcEncounter.npcId, 'nearby');
+    if (nearbyNpcEncounter && arrived) storeState.recordNpcActivity?.(nearbyNpcEncounter.npcId, 'nearby');
   }
   const constraintLocksInteractions = Boolean(storeState.activeConstraint?.movementLock);
   const currentPromptId = storeState.edgePrompt?.id || null;
@@ -447,7 +514,7 @@ export function updatePlayerInteractions({
   if (actHeld && !stateRef.current.actRoute) {
     const hasInteractTarget = Boolean(
       storeState.carriedObjectId
-      || storeState.nearbyNpcEncounter
+      || (storeState.nearbyNpcEncounter && !storeState.nearbyNpcEncounter.yieldsToSpecimen)
       || storeState.interiorPrompt
       || storeState.carryPrompt
       || storeState.edgePrompt?.kind === 'blocked'
@@ -714,9 +781,24 @@ export function updatePlayerInteractions({
     const examined = Boolean(fieldTarget?.typeId && currentState.examinedTypeIds?.includes(fieldTarget.typeId));
     const sampled = Boolean(fieldTarget?.id
       && currentState.sampledRockIds?.includes(`field:${fieldTarget.id}`));
-    currentState.setFieldAction?.(allowSpecimenInteractions
+    let resolvedAction = allowSpecimenInteractions
       ? resolveFieldAction({ toolId: currentState.activeToolId, target: fieldTarget, examined, sampled })
-      : null);
+      : null;
+    // Say which tool a subject needs before E is pressed, not after.
+    if (resolvedAction?.kind === 'collect' && nearbySpecimen && fieldTarget?.kind === 'specimen') {
+      const plan = catchPlan({
+        specimen: nearbySpecimen,
+        toolId: currentState.activeToolId,
+        downed: Boolean(currentState.downedSpecimenActors?.[fieldTarget.actorId]),
+        alreadyCollected: currentState.collectedSpecimenIds?.includes(nearbySpecimen.id),
+        toolbarOrder: currentState.toolbarOrder,
+      });
+      if (plan?.kind === 'wrongTool') resolvedAction = { ...resolvedAction, label: plan.shortLabel, shortLabel: 'Wrong tool' };
+      else if (plan?.kind === 'shoot') resolvedAction = { ...resolvedAction, label: `Aim and fire at the ${casualName(nearbySpecimen)}`, shortLabel: 'Shoot' };
+      else if (plan?.kind === 'hand') resolvedAction = { ...resolvedAction, label: `Grab the ${casualName(nearbySpecimen)}`, shortLabel: 'Grab' };
+      else if (plan?.kind === 'net') resolvedAction = { ...resolvedAction, label: `Net the ${casualName(nearbySpecimen)}`, shortLabel: 'Net' };
+    }
+    currentState.setFieldAction?.(resolvedAction);
   }
 
   const startSpecimenCollection = (currentState, specimen) => {
@@ -727,8 +809,49 @@ export function updatePlayerInteractions({
     }
     const alreadyCollected = currentState.collectedSpecimenIds?.includes(specimen.id) || false;
     const documented = currentState.activeToolId === 'sketch' || alreadyCollected;
-    const animation = collectionAnimationForTool(currentState.activeToolId, specimen, { documented });
+    const actorId = specimen.instanceId || specimen.id;
+    const plan = catchPlan({
+      specimen,
+      toolId: currentState.activeToolId,
+      downed: Boolean(currentState.downedSpecimenActors?.[actorId]),
+      alreadyCollected,
+      toolbarOrder: currentState.toolbarOrder,
+    });
+    // A wrong tool costs nothing: Darwin changes to the right one and says
+    // why, and the next press acts. A live animal for the gun is answered in
+    // words (collectNearby writes the advice).
+    if (plan?.kind === 'wrongTool') {
+      setActiveTool(plan.bestToolId);
+      useThreeGameStore.setState({ message: plan.switchedLine });
+      return true;
+    }
+    if (plan?.kind === 'shoot') {
+      collectNearby(actorId);
+      return true;
+    }
     const target = runtimeSpecimenPosition(specimen, specimenRuntimePositions, position.y);
+    const live = plan?.kind === 'hand' || plan?.kind === 'net';
+    const livePose = live ? liveSpecimenPose(currentZoneId, specimen) : null;
+    const startDistance = livePose ? Math.hypot(livePose.x - position.x, livePose.z - position.z) : 0;
+    if (live && livePose) {
+      const reach = plan.kind === 'net' ? NET_START_REACH : HAND_CATCH.startReach;
+      if (startDistance > reach) {
+        const level = warinessFor(
+          currentState.wildlifeWariness,
+          currentZoneId,
+          normalizeWildlifeId(specimen.id),
+          gameClockMinutes(currentState),
+        );
+        useThreeGameStore.setState({
+          message: tooFarReason({ specimen, toolId: plan.kind === 'net' ? 'insect_net' : 'hands', tier: warinessTier(level) }),
+        });
+        return true;
+      }
+    }
+    const animation = collectionAnimationForTool(currentState.activeToolId, specimen, {
+      documented,
+      handCatch: plan?.kind === 'hand',
+    });
     if (animation.align && target) {
       const dx = target.x - position.x;
       const dz = target.z - position.z;
@@ -750,7 +873,6 @@ export function updatePlayerInteractions({
     });
     if (currentState.activeToolId === 'insect_net') {
       // The net sweeps at it; the strike decides the catch.
-      const actorId = specimen.instanceId || specimen.id;
       startNetSweep({
         position,
         facing: target ? { x: target.x - position.x, z: target.z - position.z } : facing,
@@ -761,7 +883,17 @@ export function updatePlayerInteractions({
       });
       return true;
     }
-    collectNearby(specimen.instanceId || specimen.id);
+    if (plan?.kind === 'hand') {
+      // The hand closes partway through the reach; resolveHandGrab decides.
+      stateRef.current.pendingHandGrab = {
+        actorId,
+        strikeAt: performance.now() / 1000 + (animation.duration || 1) * HAND_CATCH.strikeFraction,
+        startDistance,
+        wasRunning: performance.now() / 1000 - (stateRef.current.lastRunAt ?? -Infinity) < 0.8,
+      };
+      return true;
+    }
+    collectNearby(actorId, { assured: true });
     return true;
   };
 
@@ -844,6 +976,21 @@ export function updatePlayerInteractions({
     collectNearby,
   });
 
+  if ((stateRef.current.speed || 0) > PLAYER.walkSpeed * 1.15) stateRef.current.lastRunAt = interactionNow;
+  resolveHandGrab({ now: interactionNow, stateRef, position, currentZoneId, zoneSpecimens, collectNearby });
+
+  // A catch asked for from the examine panel or the HUD runs exactly as if E
+  // had been pressed at that animal.
+  const catchRequest = allowSpecimenInteractions
+    && !stateRef.current.action
+    && !useThreeGameStore.getState().examineSession
+    ? takeSpecimenCatchRequest()
+    : null;
+  if (catchRequest) {
+    const specimen = zoneSpecimens.find(item => item && (item.instanceId || item.id) === catchRequest.actorId);
+    if (specimen) startSpecimenCollection(useThreeGameStore.getState(), specimen);
+  }
+
   // A net swing that caught an unstudied animal brings it up for a close look
   // once the hoop has closed over it.
   const pendingNetLook = stateRef.current.pendingNetLook;
@@ -899,7 +1046,7 @@ export function updatePlayerInteractions({
       // other ambient E targets. Otherwise the HUD can promise "drop" while E
       // performs an unrelated nearby interaction.
       currentState.dropCarriedObject?.({ reason: 'manual', mode: 'place' });
-    } else if (currentState.nearbyNpcEncounter && !stateRef.current.action) {
+    } else if (currentState.nearbyNpcEncounter && !currentState.nearbyNpcEncounter.yieldsToSpecimen && !stateRef.current.action) {
       currentState.openNpcEncounter?.(currentState.nearbyNpcEncounter.npcId);
     } else if (currentState.interiorPrompt) {
       const prompt = currentState.interiorPrompt;

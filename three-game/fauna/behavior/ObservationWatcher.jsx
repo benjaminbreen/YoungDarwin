@@ -32,12 +32,16 @@ export function ObservationWatcher() {
       if (state.watchFocus) state.setWatchFocus(null);
       return;
     }
-    const episodes = activeBehaviorEpisodes(state.currentZoneId);
+    // An animal already in the case is no longer out there to be watched,
+    // though its last behaviour episode may not have been closed.
+    const collected = state.collectedSpecimenActorIds || [];
+    const episodes = [...(activeBehaviorEpisodes(state.currentZoneId)?.values() || [])]
+      .filter(episode => !collected.includes(episode.actorId) && !collected.includes(episode.partnerActorId));
     const pose = getRuntimePlayerPose();
     const velocity = getRuntimePlayerMotion()?.intendedPlanarVelocity;
     camera.getWorldDirection(view);
     const { done, focus } = witness.tick({
-      episodes: episodes?.values(),
+      episodes,
       player: pose?.position,
       view,
       playerSpeed: velocity ? Math.hypot(velocity.x || 0, velocity.z || 0) : 0,

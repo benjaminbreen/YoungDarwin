@@ -24,6 +24,7 @@ import { symsZoneAfterDirective } from '../npcs/symsCompanion';
 export const createNpcActions = (set, get) => ({
   setNearbyNpcEncounter: nearbyNpcEncounter => set(state => (
     (state.nearbyNpcEncounter?.npcId || null) === (nearbyNpcEncounter?.npcId || null)
+      && Boolean(state.nearbyNpcEncounter?.yieldsToSpecimen) === Boolean(nearbyNpcEncounter?.yieldsToSpecimen)
       ? state
       : { nearbyNpcEncounter }
   )),

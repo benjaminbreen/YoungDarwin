@@ -124,7 +124,7 @@ function isTimeCompatible(specimen, gameTime) {
   return preferred === period || period === 'Crepuscular' || (preferred === 'Crepuscular' && period !== 'Nocturnal');
 }
 
-function classifySpecimen(specimen) {
+export function classifySpecimen(specimen) {
   const id = canonicalSpecimenId(specimen?.id);
   const ontology = String(specimen?.ontology || '').toLowerCase();
   const order = String(specimen?.order || '').toLowerCase();

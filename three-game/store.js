@@ -64,6 +64,8 @@ import { darwinThought, specimenNarration, zoneNarration } from './narrator/narr
 import { emitPropEvent } from './physics/props/propEvents';
 import { encounterAmbientLine } from './encounters/npcEncounters';
 import { evaluateCollectionAttempt } from '../utils/expeditionSystems';
+import { casualName, catchPlan, catchSuccessLine } from './catchRules';
+import { releaseSpecimenFromHand, requestSpecimenCatch, specimenInHand } from './components/player/catchRequest';
 import { findPlayableSpawn, getPlayableMode, getPlayableToolbarIds } from './playable/playableModes';
 import { generativeRequestsAllowed } from './ai/generativePolicy';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
@@ -1357,6 +1359,32 @@ export const useThreeGameStore = create((set, get) => ({
     const alreadyCollected = state.collectedSpecimenIds.includes(specimen.id);
     const documented = tool.id === 'sketch' || alreadyCollected;
 
+    // No hidden roll (see catchRules.js). A wrong tool is refused with advice
+    // and costs nothing; a live animal is caught in the world, so a call that
+    // has not already caught it hands the attempt to the interaction loop.
+    const downed = Boolean(state.downedSpecimenActors?.[actorId]);
+    const inHand = specimenInHand(actorId);
+    const plan = catchPlan({
+      specimen,
+      toolId: tool.id,
+      downed: downed || inHand,
+      alreadyCollected,
+      toolbarOrder: state.toolbarOrder,
+    });
+    if (plan.kind === 'wrongTool') {
+      set({ message: plan.advice });
+      return { success: false, outcomeType: 'wrong-tool', reason: plan.advice, bestToolId: plan.bestToolId };
+    }
+    if (!assured && (plan.kind === 'hand' || plan.kind === 'net')) {
+      requestSpecimenCatch(actorId);
+      return null;
+    }
+    if (plan.kind === 'shoot') {
+      const reason = `Shoot the ${casualName(specimen)} first: hold F or the right mouse button to aim, then fire. Then pick it up.`;
+      set({ message: reason });
+      return { success: false, outcomeType: 'needs-shot', reason };
+    }
+
     // The case is the only limit on taking specimens. Full case: the player
     // chooses between retiring to the Beagle and releasing something.
     if (!documented && state.inventory.length >= state.caseCapacity) {
@@ -1384,10 +1412,18 @@ export const useThreeGameStore = create((set, get) => ({
           gameTime: Math.round(state.timeOfDay * 60),
           seed: state.seed,
           attempt: nextCollectionAttempt(),
-          assured,
+          assured: true,
         });
 
     const collected = result.success && !documented;
+    if (collected) {
+      releaseSpecimenFromHand(actorId);
+      result.reason = catchSuccessLine({
+        specimen,
+        method: downed ? 'shot' : inHand || plan.kind === 'net' ? 'net' : plan.kind === 'hand' ? 'hand' : 'take',
+        damaged: result.damage > 0.55,
+      });
+    }
 
     set(current => {
       const rarityTier = getSpecimenRarity(specimen).id;
