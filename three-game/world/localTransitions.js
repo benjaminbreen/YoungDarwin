@@ -5,6 +5,7 @@ import {
   LAWSON_HOUSE_ZONE_ID,
   getInteriorTransitions,
 } from '../interiors/interiorRegistry';
+import { GABRIEL_CAVE_ZONE_IDS } from '../interiors/blueprints/gabrielCave';
 import { getGovernorHouseFrontEntry } from './penalColonyLayout';
 
 const governorHouseEntry = getGovernorHouseFrontEntry();
@@ -17,7 +18,7 @@ const LOCAL_TRANSITIONS = {
       toRegionId: ROCKY_CLEARING_CAVE.destinationZoneId,
       label: "Enter Gabriel's Cave",
       description: 'Duck beneath the basalt arch and step into the dark volcanic passage.',
-      entryEdge: 'south',
+      entryEdge: 'from-rocky-clearing',
       position: { x: ROCKY_CLEARING_CAVE.promptX, z: ROCKY_CLEARING_CAVE.promptZ },
       radius: 4.8,
       closeRadius: 2.75,
@@ -57,6 +58,7 @@ const LOCAL_TRANSITIONS = {
   ],
   [BEAGLE_CABIN_ZONE_ID]: getInteriorTransitions(BEAGLE_CABIN_ZONE_ID),
   [LAWSON_HOUSE_ZONE_ID]: getInteriorTransitions(LAWSON_HOUSE_ZONE_ID),
+  ...Object.fromEntries(GABRIEL_CAVE_ZONE_IDS.map(zoneId => [zoneId, getInteriorTransitions(zoneId)])),
 };
 
 export function getLocalTransitions(zoneId) {
@@ -105,5 +107,9 @@ export function nearestLocalTransitionPrompt(zoneId, position, facing = null) {
     fatigue: best.fatigue,
     routeLabel: best.routeLabel,
     entryEdge: best.entryEdge || null,
+    // Standing in the doorway and facing through it: the threshold outranks
+    // anything examinable nearby, so E goes through rather than examining a
+    // rock beside the door.
+    thresholdReady: best.distance <= (best.closeRadius ?? 0) && best.facingWeight > 0.35,
   };
 }

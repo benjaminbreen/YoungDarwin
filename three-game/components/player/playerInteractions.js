@@ -528,11 +528,13 @@ export function updatePlayerInteractions({
       && storeState.edgePrompt?.kind === 'open'
       && storeState.edgePrompt.toRegionId
     );
+    const thresholdReady = edgeOpen && storeState.edgePrompt?.thresholdReady === true;
     stateRef.current.actRoute = hasInteractTarget ? 'interact'
-      : hasFieldTarget ? 'field'
-        : storeState.edgePrompt?.requiresHold ? 'hold-return'
-          : edgeOpen ? 'edge'
-            : 'field';
+      : thresholdReady ? 'edge'
+        : hasFieldTarget ? 'field'
+          : storeState.edgePrompt?.requiresHold ? 'hold-return'
+            : edgeOpen ? 'edge'
+              : 'field';
     stateRef.current.actStartedAt = interactionNow;
   } else if (!actHeld) {
     stateRef.current.actRoute = null;
@@ -658,7 +660,8 @@ export function updatePlayerInteractions({
     setEdgePrompt(null);
   } else if ((visiblePromptPayload?.id || null) !== currentPromptId
     || Math.abs((visiblePromptPayload?.commitProgress || 0) - (storeState.edgePrompt?.commitProgress || 0)) > 0.035
-    || Boolean(visiblePromptPayload?.visible) !== Boolean(storeState.edgePrompt?.visible)) {
+    || Boolean(visiblePromptPayload?.visible) !== Boolean(storeState.edgePrompt?.visible)
+    || Boolean(visiblePromptPayload?.thresholdReady) !== Boolean(storeState.edgePrompt?.thresholdReady)) {
     setEdgePrompt(visiblePromptPayload);
   }
   if (autoTransitionStarted) {

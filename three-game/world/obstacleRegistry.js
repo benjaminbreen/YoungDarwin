@@ -13,6 +13,7 @@ import { getPenalColonyObstacles } from './penalColonyLayout';
 import { getBeagleDeckObstacles } from './beagleDeckLayout';
 import { getBeagleCabinObstacles } from './beagleCabinLayout';
 import { getLawsonHouseObstacles } from './lawsonHouseLayout';
+import { getGabrielCaveObstacles } from './gabrielCaveLayout';
 import { getWatkinsCampObstacles } from './watkinsCampLayout';
 import { getPostScrubRiseRockObstacles } from './postScrubRiseLayout';
 import { getLavaFlatsRockObstacles } from './lavaFlatsLayout';
@@ -50,6 +51,10 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   BEAGLE: [getBeagleDeckObstacles],
   BEAGLE_CABIN: [getBeagleCabinObstacles],
   LAWSON_HOUSE: [getLawsonHouseObstacles],
+  CAVE_ENTRANCE: [() => getGabrielCaveObstacles('CAVE_ENTRANCE')],
+  GABRIEL_QUARTERS: [() => getGabrielCaveObstacles('GABRIEL_QUARTERS')],
+  GABRIEL_PRESS: [() => getGabrielCaveObstacles('GABRIEL_PRESS')],
+  GABRIEL_SPRING: [() => getGabrielCaveObstacles('GABRIEL_SPRING')],
   WATKINS: [getWatkinsCampObstacles],
   POST_SCRUB_RISE: [getPostScrubRiseRockObstacles],
   LAVA_FLATS: [getLavaFlatsRockObstacles],

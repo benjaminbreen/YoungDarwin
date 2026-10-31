@@ -4,11 +4,13 @@
 
 import { PROP_TYPES } from './propTypes';
 import { BEAGLE_CABIN_ZONE_ID, LAWSON_HOUSE_ZONE_ID, getInteriorPropSpawns } from '../../interiors/interiorRegistry';
+import { GABRIEL_CAVE_ZONE_IDS } from '../../interiors/blueprints/gabrielCave';
 import { SYMS_FIELD_CASE_ID, SYMS_FIELD_CASE_PLACEMENT } from '../../npcs/symsActivityPlan';
 
 export const ZONE_PROPS = {
   [BEAGLE_CABIN_ZONE_ID]: getInteriorPropSpawns(BEAGLE_CABIN_ZONE_ID),
   [LAWSON_HOUSE_ZONE_ID]: getInteriorPropSpawns(LAWSON_HOUSE_ZONE_ID),
+  ...Object.fromEntries(GABRIEL_CAVE_ZONE_IDS.map(zoneId => [zoneId, getInteriorPropSpawns(zoneId)])),
   POST_OFFICE_BAY: [
     {
       id: 'post-office-bay-large-barrel',

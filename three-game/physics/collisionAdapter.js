@@ -18,6 +18,7 @@ import {
   queryObstacleBounds,
   resolveObstacleCollision,
 } from '../world/obstacles';
+import { caveRayDistance, getCaveSpec } from '../interiors/cave/caveRuntime';
 
 const DEFAULT_SUPPORT_RADIUS = 0.28;
 const STANCE_SUPPORT_RADIUS = 0.1;
@@ -120,6 +121,10 @@ function cameraDistanceLimit(origin, target, obstacles, options = {}) {
       const distance = boxRayDistance(origin, direction, requested, obstacle, shape);
       if (distance !== null && distance < hitDistance) hitDistance = distance;
     }
+  }
+  if (options.zoneId && getCaveSpec(options.zoneId)) {
+    // Caves are a closed shell, not boxes: keep the eye inside the rock.
+    hitDistance = Math.min(hitDistance, caveRayDistance(options.zoneId, origin, direction, requested, 0.12));
   }
   if (hitDistance >= requested) return requested;
   const minimum = Math.max(0.25, Number(options.minimumDistance) || 0.65);
@@ -278,7 +283,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
       || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)
     ),
-    cameraDistanceLimit: (origin, target, options) => cameraDistanceLimit(origin, target, obstacles, options),
+    cameraDistanceLimit: (origin, target, options) => cameraDistanceLimit(origin, target, obstacles, { ...options, zoneId }),
     clampToWalkable: (position, previousPosition, options) => {
       if (options?.allowObstacleSupport !== false) {
         const supportY = getObstacleSupportHeight(position.x, position.z, position.y, DEFAULT_SUPPORT_RADIUS, obstacles);

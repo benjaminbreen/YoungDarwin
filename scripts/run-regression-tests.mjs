@@ -359,6 +359,7 @@ const {
   resolveTerrainSegments,
   terrainGeometryStats,
 } = loadModule('three-game/world/terrainGeometry.js');
+const { bakeTerrainOcclusion } = loadModule('three-game/world/terrainOcclusion.js');
 const {
   getRegionTerrainConfig,
   isWalkableTerrain,
@@ -3618,6 +3619,33 @@ test('terrain quality caps reduce mesh work without upsampling small interiors',
   assert.equal(resolveTerrainSegments(360, null), 360);
   assert.deepEqual(terrainGeometryStats(200), { segments: 200, vertices: 40401, triangles: 80000 });
   assert.deepEqual(terrainGeometryStats(300), { segments: 300, vertices: 90601, triangles: 180000 });
+});
+
+test('baked terrain occlusion darkens hollows, leaves open ground, and fades at the map edge', () => {
+  const segments = 64;
+  const size = 64;
+  const side = segments + 1;
+  const grid = heightOf => {
+    const positions = new Float32Array(side * side * 3);
+    for (let zIndex = 0; zIndex < side; zIndex += 1) {
+      for (let xIndex = 0; xIndex < side; xIndex += 1) {
+        const index = zIndex * side + xIndex;
+        const x = -size / 2 + xIndex;
+        positions[index * 3] = x;
+        positions[index * 3 + 1] = heightOf(x);
+        positions[index * 3 + 2] = -size / 2 + zIndex;
+      }
+    }
+    return positions;
+  };
+  const centre = (side >> 1) * side + (side >> 1);
+  const flat = bakeTerrainOcclusion(grid(() => 0), segments, size, size);
+  assert.ok(flat.every(value => value === 0));
+  // A 45-degree V trench running along z: its floor loses sky on both sides.
+  const trench = bakeTerrainOcclusion(grid(x => Math.abs(x)), segments, size, size);
+  assert.ok(trench[centre] > 0.3 && trench[centre] < 0.7, `trench floor ${trench[centre]}`);
+  assert.equal(trench[side >> 1], 0, 'border vertex fades to zero for carry strips');
+  assert.ok(trench.every(Number.isFinite));
 });
 
 test('heavy authored regions stay within the seamless-travel terrain budget', () => {
@@ -7039,6 +7067,115 @@ test('Lawson house transitions connect the authored doorway without catching arr
   assert.ok(Math.hypot(houseMarker.at.x - penalMarker.at.x, houseMarker.at.y - penalMarker.at.y) < 0.04);
 });
 
+test('Gabriel cave chambers form a connected loop whose doors never catch an arrival', () => {
+  const {
+    GABRIEL_CAVE_ZONE_IDS,
+    GABRIEL_CAVE_MOUTH_ZONE_ID,
+    getGabrielCaveBlueprint,
+  } = loadModule('three-game/interiors/blueprints/gabrielCave.js');
+  const { isCaveWalkable, caveMovementHeight } = loadModule('three-game/interiors/cave/caveRuntime.js');
+  const caveRegions = loadModule('three-game/world/regions/gabrielCave/terrain.js');
+  const regionByZone = Object.fromEntries(Object.values(caveRegions).map(region => [region.id, region]));
+  assert.equal(GABRIEL_CAVE_ZONE_IDS.length, 4);
+
+  const edges = new Set();
+  for (const zoneId of GABRIEL_CAVE_ZONE_IDS) {
+    const blueprint = getGabrielCaveBlueprint(zoneId);
+    assert.ok(regionByZone[zoneId], `${zoneId} has a registered region`);
+    assert.equal(getInteriorDefinition(zoneId).kind, 'cave-interior');
+    const [spawnX, , spawnZ] = blueprint.navigation.defaultSpawn;
+    assert.ok(isCaveWalkable(zoneId, spawnX, spawnZ), `${zoneId} default spawn is walkable`);
+    for (const [edge, [x, , z]] of Object.entries(blueprint.navigation.entrySpawns)) {
+      assert.ok(isCaveWalkable(zoneId, x, z), `${zoneId} ${edge} spawn is walkable`);
+      assert.ok(Math.abs(caveMovementHeight(zoneId, x, z)) < 1.4, `${zoneId} ${edge} spawn stands on the floor`);
+    }
+    for (const transition of getLocalTransitions(zoneId)) {
+      edges.add(`${zoneId}>${transition.toRegionId}`);
+      // The transition's own trigger is reachable on foot.
+      assert.ok(isCaveWalkable(zoneId, transition.position.x, transition.position.z) || transition.closeRadius > 0.8, `${zoneId} ${transition.id} is reachable`);
+      const destination = getGabrielCaveBlueprint(transition.toRegionId);
+      if (!destination) continue;
+      const arrival = destination.navigation.entrySpawns[transition.entryEdge];
+      assert.ok(arrival, `${transition.toRegionId} defines the ${transition.entryEdge} arrival`);
+      for (const back of getLocalTransitions(transition.toRegionId)) {
+        const distance = Math.hypot(back.position.x - arrival[0], back.position.z - arrival[2]);
+        assert.ok(distance > back.radius, `${transition.toRegionId} ${back.id} does not catch the arrival from ${zoneId}`);
+      }
+    }
+    for (const collider of blueprint.fixedColliders.filter(item => item.kind === 'furniture')) {
+      const [x, , z] = collider.position;
+      assert.ok(regionByZone[zoneId].terrain.height(x, z) < 3, `${zoneId} ${collider.id} stands inside the cave`);
+    }
+  }
+  for (const [a, b] of [
+    ['E_MID', GABRIEL_CAVE_MOUTH_ZONE_ID],
+    [GABRIEL_CAVE_MOUTH_ZONE_ID, 'E_MID'],
+    [GABRIEL_CAVE_MOUTH_ZONE_ID, 'GABRIEL_QUARTERS'],
+    ['GABRIEL_QUARTERS', 'GABRIEL_PRESS'],
+    ['GABRIEL_PRESS', 'GABRIEL_SPRING'],
+    ['GABRIEL_SPRING', GABRIEL_CAVE_MOUTH_ZONE_ID],
+    ['GABRIEL_QUARTERS', GABRIEL_CAVE_MOUTH_ZONE_ID],
+    ['GABRIEL_PRESS', 'GABRIEL_QUARTERS'],
+    ['GABRIEL_SPRING', 'GABRIEL_PRESS'],
+    [GABRIEL_CAVE_MOUTH_ZONE_ID, 'GABRIEL_SPRING'],
+  ]) {
+    if (a === 'E_MID') {
+      assert.ok(getLocalTransitions('E_MID').some(item => item.toRegionId === b), 'Rocky Clearing leads into the cave');
+    } else {
+      assert.ok(edges.has(`${a}>${b}`), `${a} connects to ${b}`);
+    }
+  }
+});
+
+test('Gabriel cave rock is a closed shell that keeps the camera inside', () => {
+  const { GABRIEL_CAVE_ZONE_IDS, getGabrielCaveBlueprint } = loadModule('three-game/interiors/blueprints/gabrielCave.js');
+  const { getCaveRuntime, caveRayDistance } = loadModule('three-game/interiors/cave/caveRuntime.js');
+  const { meshCaveField } = loadModule('three-game/interiors/cave/caveMesher.js');
+  for (const zoneId of GABRIEL_CAVE_ZONE_IDS) {
+    const { field, spec } = getCaveRuntime(zoneId);
+    const { nx, ny, nz, values } = field;
+    // Sides and bottom are sealed; only a mouth may open its +z face.
+    for (let j = 0; j < ny; j += 4) {
+      for (let k = 0; k < nz; k += 4) {
+        const z = field.min[2] + k * field.step;
+        if (spec.outside && z > spec.outside.at - 0.5) continue;
+        assert.ok(values[(k * ny + j) * nx] > 0, `${zoneId} -x face sealed`);
+        assert.ok(values[(k * ny + j) * nx + nx - 1] > 0, `${zoneId} +x face sealed`);
+      }
+    }
+    if (!spec.outside) {
+      for (let i = 0; i < nx; i += 4) assert.ok(values[((nz - 1) * ny + 2) * nx + i] > 0, `${zoneId} +z face sealed`);
+    }
+    // A camera ray from head height at the spawn meets rock before 20 m in
+    // every horizontal direction except out of the mouth.
+    const [x, , z] = getGabrielCaveBlueprint(zoneId).navigation.defaultSpawn;
+    const origin = { x, y: 1.5, z };
+    for (let a = 0; a < 8; a += 1) {
+      const angle = (a / 8) * Math.PI * 2;
+      const direction = { x: Math.sin(angle), y: 0.15, z: Math.cos(angle) };
+      const length = Math.hypot(direction.x, direction.y, direction.z);
+      direction.x /= length; direction.y /= length; direction.z /= length;
+      const hit = caveRayDistance(zoneId, origin, direction, 30);
+      if (spec.outside && direction.z > 0.6) continue;
+      assert.ok(hit < 30, `${zoneId} camera ray ${a} meets rock`);
+    }
+    const mesh = meshCaveField(field);
+    assert.ok(mesh.triangleCount > 8000, `${zoneId} shell has detail`);
+    assert.ok(mesh.ceilingIndices.length > 0, `${zoneId} roof is split out for the cutaway`);
+  }
+});
+
+test('standing in a doorway facing through it outranks examinable things nearby', () => {
+  const entrance = getLocalTransitions('E_MID').find(item => item.toRegionId === 'CAVE_ENTRANCE');
+  const facingIn = nearestLocalTransitionPrompt('E_MID', { x: entrance.position.x, z: entrance.position.z + 1.0 }, { x: 0, z: -1 });
+  assert.equal(facingIn.toRegionId, 'CAVE_ENTRANCE');
+  assert.equal(facingIn.thresholdReady, true);
+  const facingAway = nearestLocalTransitionPrompt('E_MID', { x: entrance.position.x, z: entrance.position.z + 1.0 }, { x: 0, z: 1 });
+  assert.equal(Boolean(facingAway?.thresholdReady), false);
+  const interactionSource = fs.readFileSync(path.resolve('three-game/components/player/playerInteractions.js'), 'utf8');
+  assert.match(interactionSource, /thresholdReady \? 'edge'\s*: hasFieldTarget \? 'field'/);
+});
+
 test('Floreana sun crosses an east-to-west near-equatorial arc', () => {
   const sunrise = sunDirection(6, 1);
   const noon = sunDirection(12, 1);
@@ -7794,6 +7931,45 @@ test('what Darwin watches during a close look goes into that examination as well
   observe.recordFieldObservation({ actorId: 'Z:tortoise', partnerActorId: 'Z:finch', speciesId: 'floreanagianttortoise', behaviorId: 'riseForCleaning', zoneId: 'NORTHERN_HIGHLANDS' });
   assert.equal(state.examineSession.chat.length, 2, 'its partner in an interaction');
   assert.equal(state.fieldObservations.length, 3);
+});
+
+test('no resident animal is placed inside a rock or cactus', () => {
+  const populationsModule = loadModule('three-game/world/ecology/faunaPopulations.js');
+  const { getRuntimeObstacles, obstacleSurfaceHeightForActor } = loadModule('three-game/world/obstacles.js');
+  const buried = [];
+  for (const zoneId of Object.keys(populationsModule.FAUNA_POPULATIONS)) {
+    const obstacles = getRuntimeObstacles(zoneId);
+    for (const specimen of getThreeSpecimens(zoneId).filter(item => item.population)) {
+      const [x, , z] = specimen.spawnPoint;
+      const ground = terrainHeight(x, z, zoneId);
+      for (const obstacle of obstacles) {
+        if (Math.hypot((obstacle.x ?? 0) - x, (obstacle.z ?? 0) - z) > (obstacle.radius || 1) + 0.5) continue;
+        const top = obstacleSurfaceHeightForActor(obstacle, x, z, 0);
+        if (Number.isFinite(top) && top > ground + 0.25) buried.push(`${specimen.instanceId} in ${obstacle.id}`);
+      }
+    }
+  }
+  assert.deepEqual(buried, []);
+});
+
+test('a flying insect goes over a boulder in its patch, never through it', () => {
+  const { stepPollinatorFlight, clearPollinatorFlight } = loadModule('three-game/wildlife/pollinators/pollinatorFlight.js');
+  // A 1.5 m block, 1.2 m across, in the middle of the habitat.
+  const groundAt = (x, z) => (Math.abs(x) < 0.6 && Math.abs(z) < 0.6 ? 1.5 : 0);
+  const habitat = { x: 0, z: 0, radiusX: 2.2, radiusZ: 2.2 };
+  for (const kind of ['butterfly', 'bee']) {
+    const actorId = `boulder-test-${kind}`;
+    clearPollinatorFlight(actorId);
+    let overBlock = 0;
+    for (let i = 0; i < 2400; i += 1) {
+      const state = stepPollinatorFlight({ actorId, kind, habitat, groundAt, now: i / 40, playerPosition: null, playerSpeed: 0 });
+      if (Math.abs(state.x) < 0.6 && Math.abs(state.z) < 0.6) {
+        overBlock += 1;
+        assert.ok(state.y >= 1.5, `${kind} inside the boulder at ${state.x.toFixed(2)}, ${state.y.toFixed(2)}, ${state.z.toFixed(2)}`);
+      }
+    }
+    assert.ok(overBlock > 0, `${kind} never crossed the boulder, so the test proved nothing`);
+  }
 });
 
 test('every repertoire behaviour is well formed and every response has a reaction', () => {

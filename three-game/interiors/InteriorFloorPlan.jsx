@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useThreeGameStore } from '../store';
+import { CaveSurveyPlan } from './cave/CaveSurveyPlan';
 
 function planPoint(x, z, dimensions) {
   return {
@@ -11,6 +12,11 @@ function planPoint(x, z, dimensions) {
 }
 
 export function InteriorFloorPlan({ definition }) {
+  if (definition.procedural === 'cave') return <CaveSurveyPlan definition={definition} />;
+  return <RoomFloorPlan definition={definition} />;
+}
+
+function RoomFloorPlan({ definition }) {
   const pose = useThreeGameStore(state => state.minimapPlayerPose);
   const blueprint = definition.blueprint;
   const dimensions = blueprint.dimensions;

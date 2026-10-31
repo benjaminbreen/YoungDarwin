@@ -8,6 +8,7 @@ import { getSpecimenRarity } from '../../rarity';
 import { notePerfEvent } from '../../perfCapture';
 import { faunaDebugEnabled } from '../../runtimeDebug';
 import { clampToWalkable, terrainHeight } from '../../world/terrain';
+import { getRuntimeObstacles, obstacleSurfaceHeightForActor } from '../../world/obstacles';
 import { startlePollinator, stepPollinatorFlight } from '../../wildlife/pollinators/pollinatorFlight';
 import { populationRenderScale } from '../../examine/populationTraits';
 import { getRegionDefinition } from '../../world/regions';
@@ -648,6 +649,24 @@ export function SpecimenActor({ specimen }) {
     );
     return new THREE.Vector3(safe.x, terrainHeight(safe.x, safe.z, currentZoneId) + 0.04, safe.z);
   }, [currentZoneId, spawnAquatic, spawnX, spawnZ]);
+  // A flying insect's floor: the ground, or the top of any rock, cactus or
+  // wall it is over, so it goes over a boulder rather than through it.
+  const pollinatorObstacles = useMemo(() => {
+    if (!specimen.pollinator) return [];
+    const reach = Math.max(specimen.habitatRadiusX || 1.35, specimen.habitatRadiusZ || 1.05) + 4;
+    return getRuntimeObstacles(currentZoneId).filter(obstacle => (
+      Math.hypot((obstacle.x ?? 0) - position.x, (obstacle.z ?? 0) - position.z) <= reach + (obstacle.radius || 1)
+    ));
+  }, [currentZoneId, position, specimen.habitatRadiusX, specimen.habitatRadiusZ, specimen.pollinator]);
+  const pollinatorSurfaceAt = useCallback((x, z) => {
+    let top = terrainHeight(x, z, currentZoneId);
+    for (const obstacle of pollinatorObstacles) {
+      if (Math.hypot((obstacle.x ?? 0) - x, (obstacle.z ?? 0) - z) > (obstacle.radius || 1) + 0.3) continue;
+      const surface = obstacleSurfaceHeightForActor(obstacle, x, z, 0);
+      if (Number.isFinite(surface) && surface > top) top = surface;
+    }
+    return top;
+  }, [currentZoneId, pollinatorObstacles]);
   const faunaBehavior = useFaunaBehavior({
     specimen,
     basePositionRef: behaviorBaseRef,
@@ -875,7 +894,7 @@ export function SpecimenActor({ specimen }) {
             radiusX: specimen.habitatRadiusX || 1.35,
             radiusZ: specimen.habitatRadiusZ || 1.05,
           },
-          groundAt: (x, z) => terrainHeight(x, z, currentZoneId),
+          groundAt: pollinatorSurfaceAt,
           now: worldElapsed,
           object: group.current,
           playerPosition: playerPose?.position || null,

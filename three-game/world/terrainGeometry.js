@@ -4,6 +4,7 @@ import {
   terrainRenderSample,
   terrainSurfaceNoise,
 } from './terrain';
+import { bakeTerrainOcclusion } from './terrainOcclusion';
 
 export const TERRAIN_WATER_SURFACE_Y = -0.9;
 const WET_SAND_TINT = new THREE.Color('#7e9487');
@@ -74,6 +75,10 @@ function buildTerrainGeometry(regionId, segmentCap) {
 
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute('roughnessMix', new THREE.Float32BufferAttribute(roughness, 1));
+  geometry.setAttribute(
+    'aTerrainOcclusion',
+    new THREE.BufferAttribute(bakeTerrainOcclusion(position.array, segments, config.width, config.depth), 1),
+  );
   geometry.computeVertexNormals();
   geometry.userData.terrainSegments = segments;
   geometry.userData.terrainRegionId = regionId;

@@ -21,19 +21,21 @@
 // persisted 0 would silently mask the new defaults.
 const STORAGE_KEY = 'darwin.terrainLook.v2';
 
-// Baked from Ben's tuning pass at Post Office Bay, 2026-08-03: slightly deeper
+// Baked from Ben's tuning pass at Post Office Bay, 2026-08-03, and re-baked
+// 2026-10-31 with the baked-occlusion pass (stronger AO, calmer detail tiling,
+// neutral saturation, less cool): slightly deeper
 // and cooler ground, a little more colour and contrast, much stronger macro
 // breakup, more matte, and noticeably more grain from the normal maps.
 export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // Overall albedo gain. Below 1 deepens the ground, above 1 lifts it.
   brightness: 0.91,
   // 0 is greyscale, 1 is authored, above 1 pushes the mineral colour.
-  saturation: 1.06,
+  saturation: 1,
   // Pivots albedo around mid grey. Sand at this key flattens easily; a little
   // contrast is usually what makes ground read as surface rather than paper.
   contrast: 1.06,
   // Negative cools toward the sea light, positive warms toward iron sand.
-  warmth: -0.2,
+  warmth: -0.12,
   // Scales the large-wavelength tonal/hue breakup that regions apply on top
   // of their tiled detail. This is the knob that stops open ground reading as
   // one flat sheet at a distance.
@@ -53,21 +55,40 @@ export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
 
   // Pushes steep faces toward exposed rock: desaturated and a little darker.
   // Sells cut banks and dune shoulders without authoring a separate layer.
-  slopeTint: 0.28,
+  slopeTint: 0.2,
   // Tints with elevation over roughly the first 25m — negative cools the high
   // ground, positive warms it. A cheap way to separate shore from upland.
-  heightTint: -0.22,
+  heightTint: -0.3,
   // Aerial perspective for the ground plane itself: distant ground
   // desaturates and lifts slightly, so a long beach stops reading as one
   // continuous sheet of the same tan.
-  distanceFade: 0.25,
+  distanceFade: 0.28,
   // Scales the tiled detail UVs. Below 1 makes the grain larger and calmer,
   // above 1 finer and busier. Currently read by Post Office Bay; other regions
   // opt in by multiplying their layer scales by uTerrainGradeShape.w.
-  detailTiling: 1,
+  detailTiling: 0.7,
+
+  // --- baked occlusion -------------------------------------------------------
+  // Heightfield AO baked per vertex (world/terrainOcclusion.js). Scales how
+  // much hollows, dune toes and the feet of banks lose their sky light.
+  aoStrength: 2.65,
+  // Share of the occlusion also applied to direct sun. 0 is physically pure
+  // AO, which barely shows at midday; more lets creases read in full sun.
+  aoDirect: 0.8,
 });
 
-export const terrainLookTuning = { ...TERRAIN_LOOK_DEFAULTS, ...readStored() };
+export const terrainLookTuning = { ...TERRAIN_LOOK_DEFAULTS, ...readStored(), ...readUrlOverrides() };
+
+// `?noTerrainAo` switches the baked occlusion off for one session, so
+// perf:sweep and look can A/B it without touching the persisted dials.
+function readUrlOverrides() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return new URLSearchParams(window.location.search).has('noTerrainAo') ? { aoStrength: 0 } : null;
+  } catch {
+    return null;
+  }
+}
 
 function readStored() {
   if (typeof window === 'undefined') return null;

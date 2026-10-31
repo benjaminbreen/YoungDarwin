@@ -5,6 +5,7 @@ import {
   terrainRenderSample,
   terrainSurfaceNoise,
 } from './terrain';
+import { bakeTerrainOcclusion } from './terrainOcclusion';
 
 // Kept local so the worker does not import the main-thread geometry/cache
 // module. These values deliberately mirror terrainGeometry.js.
@@ -116,6 +117,7 @@ function buildTerrainPayload(regionId, segmentCap) {
   normalGeometry.computeVertexNormals();
   const normals = normalGeometry.getAttribute('normal').array;
   normalGeometry.dispose();
+  const occlusion = bakeTerrainOcclusion(positions, segments, config.width, config.depth);
 
   const colliderSegments = resolveColliderSegments(regionId, config.segments);
   const colliderSide = colliderSegments + 1;
@@ -141,6 +143,7 @@ function buildTerrainPayload(regionId, segmentCap) {
     indices,
     colors,
     roughness,
+    occlusion,
     minimumHeight,
     maximumHeight,
     colliderSegments,
@@ -161,6 +164,7 @@ self.onmessage = event => {
       payload.indices.buffer,
       payload.colors.buffer,
       payload.roughness.buffer,
+      payload.occlusion.buffer,
       payload.colliderHeights.buffer,
     ]);
   } catch (error) {

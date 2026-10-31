@@ -93,7 +93,7 @@ import {
 } from './expedition/map/islandLocations';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { getNpcPoses } from '../world/npcRuntime';
-import { getInteriorDefinition, getInteriorTransitions } from '../interiors/interiorRegistry';
+import { getInteriorDefinition, getInteriorQuickExit } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
 import { rarityLabel } from '../world/inspectables';
 import { normalizeWeatherState } from '../world/weatherStates';
@@ -1962,7 +1962,7 @@ function MinimapBody({
   const interiorExitBlocked = useThreeGameStore(state => Boolean(state.activeConstraint?.movementLock));
   const zone = getZone(currentZoneId);
   const interior = getInteriorDefinition(currentZoneId);
-  const interiorExit = interior ? getInteriorTransitions(currentZoneId)[0] || null : null;
+  const interiorExit = interior ? getInteriorQuickExit(currentZoneId) : null;
   const chartUrl = useTerrainChart(zone, mapStyle);
   const chartWidth = zone.terrainWidth || zone.terrainSize || (zone.bounds ? zone.bounds * 2 : 100);
   const chartDepth = zone.terrainDepth || zone.terrainSize || chartWidth;
@@ -1971,9 +1971,9 @@ function MinimapBody({
   const surveyStyle = mapStyle === 'survey';
 
   if (interior) {
-    const quickExitLabel = interior.kind === 'ship-interior'
+    const quickExitLabel = interior.quickExit?.label || (interior.kind === 'ship-interior'
       ? 'Go up to the weather deck'
-      : 'Leave the house';
+      : 'Leave the house');
     const quickExitDisabled = transitionActive || interiorExitBlocked;
     const beginInteriorExit = () => {
       if (!interiorExit || quickExitDisabled) return;
@@ -4378,7 +4378,12 @@ function InteractionPrompt() {
     return <CollectionCelebration toast={outcomeToast} onClose={dismissOutcomeToast} />;
   }
 
-  if (renderedContextPrompt && renderedContextPrompt.source !== 'traversal') {
+  // A doorway the player is standing in and facing takes the prompt from
+  // field targets, matching the E routing in playerInteractions.js.
+  const thresholdReady = Boolean(edgePrompt?.localTransition && edgePrompt.thresholdReady);
+  const thresholdOverridesField = thresholdReady
+    && (!renderedContextPrompt || String(renderedContextPrompt.source || '').startsWith('field'));
+  if (renderedContextPrompt && renderedContextPrompt.source !== 'traversal' && !thresholdOverridesField) {
     const onClick = renderedContextPrompt.source === 'npc'
       ? () => {
           acknowledgeContextPrompt('npc');
@@ -4400,7 +4405,7 @@ function InteractionPrompt() {
       </CompactPrompt>
     );
   }
-  if (!nearby && !renderedSpecimen && edgePrompt) {
+  if ((thresholdOverridesField || (!nearby && !renderedSpecimen)) && edgePrompt) {
     if (edgePrompt.visible === false) return null;
     const isOpen = edgePrompt.kind === 'open';
     if (isOpen && edgePrompt.toRegionId) {

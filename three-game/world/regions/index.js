@@ -56,6 +56,13 @@ import { beagleCabinRegion } from './beagleCabin/terrain';
 import { createBeagleCabinTerrainMaterial } from './beagleCabin/material';
 import { lawsonHouseRegion } from './lawsonHouse/terrain';
 import { createLawsonHouseTerrainMaterial } from './lawsonHouse/material';
+import {
+  gabrielCaveMouthRegion,
+  gabrielCavePressRegion,
+  gabrielCaveQuartersRegion,
+  gabrielCaveSpringRegion,
+} from './gabrielCave/terrain';
+import { createGabrielCaveTerrainMaterial } from './gabrielCave/material';
 import { watkinsCampRegion } from './watkinsCamp/terrain';
 import { createWatkinsCampTerrainMaterial } from './watkinsCamp/material';
 import { postScrubRiseRegion } from './postScrubRise/terrain';
@@ -107,6 +114,10 @@ const authoredRegions = [
   { ...beagleDeckRegion, createTerrainMaterial: createBeagleDeckTerrainMaterial },
   { ...beagleCabinRegion, createTerrainMaterial: createBeagleCabinTerrainMaterial },
   { ...lawsonHouseRegion, createTerrainMaterial: createLawsonHouseTerrainMaterial },
+  { ...gabrielCaveMouthRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
+  { ...gabrielCaveQuartersRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
+  { ...gabrielCavePressRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
+  { ...gabrielCaveSpringRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },
   { ...postScrubRiseRegion, createTerrainMaterial: createPostScrubRiseTerrainMaterial },
   { ...coastalScrublandRegion, createTerrainMaterial: createCoastalScrublandTerrainMaterial },

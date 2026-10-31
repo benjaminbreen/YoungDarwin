@@ -269,37 +269,28 @@ export function loadStandardFootPathSplatTexture(path) {
     // v=0 rather than following the top-row-first convention of an image.
     // Decoding as-is and uploading with flipY=false is the only combination
     // that puts the baked mask on the same texels the generated one occupied;
-    // pre-flipping at decode (the usual advice for ImageBitmap) lands the path
-    // mirrored in z. An HTMLImageElement uploads top-row-first too, so the
-    // fallback below needs the same flipY.
+    // pre-flipping at decode lands the path mirrored in z. An
+    // HTMLImageElement uploads top-row-first, so it needs flipY=false too.
     texture.flipY = false;
     texture.needsUpdate = true;
   };
 
-  // Safari rejects createImageBitmap with this options dict, which left the
-  // splat on its transparent placeholder and erased every path in the zone.
-  const loadViaImageElement = () => {
-    new THREE.TextureLoader().load(
-      path,
-      loaded => adopt(loaded.image),
-      undefined,
-      error => {
-        console.error(`[terrain-path-splat] ${path}: ${error?.message || error}`);
-      },
-    );
-  };
-
-  if (typeof createImageBitmap === 'undefined') {
-    loadViaImageElement();
-  } else {
-    const loader = new THREE.ImageBitmapLoader();
-    loader.setOptions({
-      imageOrientation: 'none',
-      premultiplyAlpha: 'none',
-      colorSpaceConversion: 'none',
-    });
-    loader.load(path, adopt, undefined, loadViaImageElement);
-  }
+  // An image element, not ImageBitmapLoader. All four channels are independent
+  // data and the alpha (verge dust) is 0 down every path's centre. WebKit's
+  // createImageBitmap ignores premultiplyAlpha: 'none' and premultiplies
+  // anyway, which zeroes those texels and cut a bare strip down the middle of
+  // every path in Safari (measured: 253/149/41/0 decodes as 0/0/0/0). An
+  // HTMLImageElement uploaded with UNPACK_PREMULTIPLY_ALPHA false comes
+  // through exact in both WebKit and Chromium, and the masks are small enough
+  // that main-thread decode is a few milliseconds.
+  new THREE.TextureLoader().load(
+    path,
+    loaded => adopt(loaded.image),
+    undefined,
+    error => {
+      console.error(`[terrain-path-splat] ${path}: ${error?.message || error}`);
+    },
+  );
   texture.addEventListener('dispose', () => texture.image?.close?.());
   return texture;
 }

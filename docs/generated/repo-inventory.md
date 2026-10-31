@@ -103,6 +103,10 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `BEAGLE` | `hms-beagle-deck` | 300 |
 | `BEAGLE_CABIN` | `hms-beagle-aft-cabins` | 96 |
 | `LAWSON_HOUSE` | `lawson-house-interior` | 72 |
+| `CAVE_ENTRANCE` | `gabriel-cave-mouth-gallery-interior` | 176 |
+| `GABRIEL_QUARTERS` | `gabriel-cave-living-chamber-interior` | 144 |
+| `GABRIEL_PRESS` | `gabriel-cave-press-gallery-interior` | 152 |
+| `GABRIEL_SPRING` | `gabriel-cave-fern-spring-interior` | 144 |
 | `POST_OFFICE_BAY` | `floreana-cove` | 288 |
 | `ALT_POST_OFFICE_BAY` | `floreana-cove-alt` | 420 |
 | `POST_SCRUB_RISE` | `post-office-scrub-rise` | 280 |

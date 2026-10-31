@@ -4,7 +4,10 @@
 //
 // Encoding: color maps (albedo/color/diffuse) lossy q90; everything that is
 // data — normal, roughness, height, displacement, nrh packs, ao, masks,
-// splats — lossless WebP, byte-exact pixels. Water bakes are skipped
+// splats — lossless WebP. Lossless is byte-exact only where alpha is
+// non-zero: libwebp zeroes RGB under zero alpha and sharp exposes no `exact`
+// switch, so foot-path splat masks (independent data in all four channels,
+// alpha 0 down every path centre) stay PNG. Water bakes are skipped
 // entirely: their names are built at runtime and their mip behavior is
 // deliberately fragile.
 //
@@ -47,6 +50,7 @@ for (const file of sourceFiles) {
 const worldFiles = (await walk(WORLD_ROOT)).filter(file => (
   file.endsWith('.png')
   && !SKIP_DIRS.some(skip => file.startsWith(skip))
+  && !file.endsWith('-path-splat.png')
   && referenced.has(path.basename(file))
 ));
 

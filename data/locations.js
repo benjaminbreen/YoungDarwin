@@ -2402,34 +2402,115 @@ export const locations = [
   },
   {
   id: 'CAVE_ENTRANCE',
-  name: "Gabriel's Cave",
-  description: "A hidden revolutionary's sanctuary carved into volcanic rock.",
-  x: 999,
-  y: 999,
-  color: '#333333',
-  type: 'cave',
-  validMoves: ['S'],
-  playerStart: [0, 0, 10],
+  name: "Gabriel's Cave: Mouth Gallery",
+  description: 'A highland lava tube behind Rocky Clearing, where a fugitive printer keeps watch over the only way in.',
+  x: 996,
+  y: 990,
+  color: '#3a3430',
+  type: 'caveInterior',
+  validMoves: [],
+  playerStart: null,
   specimens: [],
   npcs: ['gabriel_puig'],
-  routeOverrides: { S: 'E_MID' },
-  routeOverrideTravel: {
-    S: {
-      description: 'Step back through the cave mouth into Rocky Clearing.',
-      minutes: 2,
-      fatigue: 0,
-      routeLabel: 'Cave mouth',
-    },
-  },
   boundaries: {},
   discoveries: [
-    "A dark passage leads deeper into the rock, faintly lit by dripping candles.",
-    "You notice scattered pamphlets and scribbled manifestos in Spanish and Catalan."
+    'A low wall of fitted stones lets someone watch the clearing without being seen.',
+    'Woodsmoke drifts from one branch of the tube; green light and dripping water from the other.'
   ],
   notableFeatures: [
-    "Volcanic walls glistening with condensation.",
-    "Rudimentary living arrangements—a bedroll and hidden stash of supplies."
-  ]
+    'Horizontal ledges on the walls record the falling levels of the lava river that hollowed the tube.',
+    'A shell-hung cord crosses the passage at shin height.'
+  ],
+  narration: {
+    weather: 'cloudy',
+    sounds: ['water dripping into a cask', 'wind across the cave mouth', 'a far-off crackle of fire'],
+    loadingNote: 'You duck beneath the basalt arch and step into the cool dark of the lava tube.',
+    educationalNote: 'Lava tubes form when the crust of a flow hardens while its molten interior drains away; on Floreana they gave water, shelter, and concealment to anyone who knew where they were.'
+  }
+},
+{
+  id: 'GABRIEL_QUARTERS',
+  name: "Gabriel's Cave: Living Chamber",
+  description: 'A domed chamber deep in the lava tube where Gabriel Puig i Ferrer cooks, sleeps, and keeps his store against a search.',
+  x: 995,
+  y: 990,
+  color: '#4a3a2e',
+  type: 'caveInterior',
+  validMoves: [],
+  playerStart: null,
+  specimens: [],
+  npcs: ['gabriel_puig'],
+  boundaries: {},
+  discoveries: [
+    'Tally marks scratched above the bed count the days since 1833.',
+    'A goatskin map marks the springs and the hours the guards walk their paths.'
+  ],
+  notableFeatures: [
+    'A natural flue above the hearth draws the smoke out of the chamber.',
+    'A rock shelf serves as a larder, stocked for waiting out a search.'
+  ],
+  narration: {
+    weather: 'cloudy',
+    sounds: ['embers settling', 'a pot simmering', 'wind drawing through the flue'],
+    loadingNote: 'The passage opens into a warm, smoky chamber.',
+    educationalNote: 'Political exiles were among those deported to the Ecuadorian settlement on Floreana; escape into the humid highlands was possible, survival there less certain.'
+  }
+},
+{
+  id: 'GABRIEL_PRESS',
+  name: "Gabriel's Cave: Press Gallery",
+  description: 'A timber-shored gallery where a hand press turns out broadsides for the whaling crews and the mainland.',
+  x: 994,
+  y: 990,
+  color: '#3d3329',
+  type: 'caveInterior',
+  validMoves: [],
+  playerStart: null,
+  specimens: [],
+  npcs: ['gabriel_puig'],
+  boundaries: {},
+  discoveries: [
+    'A forme of type is locked in the bed of the press, inked and ready.',
+    'Bundles of finished pamphlets are labelled for Guayaquil, Callao, and Boston.'
+  ],
+  notableFeatures: [
+    'Printed sheets dry on lines strung between the shoring posts.',
+    'The paper is a patchwork of rag stock, logbook leaves, and the endpapers of books.'
+  ],
+  narration: {
+    weather: 'cloudy',
+    sounds: ['paper stirring on the lines', 'the creak of the press', 'water dripping in the crawl'],
+    loadingNote: 'The passage widens into a long gallery that smells of linseed oil and damp paper.',
+    educationalNote: 'The hand press made print cheap enough to be political: broadsides, catechisms, and handbills travelled along the same shipping routes that carried naturalists and whale oil.'
+  }
+},
+{
+  id: 'GABRIEL_SPRING',
+  name: "Gabriel's Cave: Fern Spring",
+  description: 'A collapsed skylight in the lava tube where daylight, ferns, and a cold spring meet underground.',
+  x: 993,
+  y: 990,
+  color: '#3f4a3a',
+  type: 'caveInterior',
+  validMoves: [],
+  playerStart: null,
+  specimens: [],
+  npcs: ['gabriel_puig'],
+  boundaries: {},
+  discoveries: [
+    'Ferns and liverworts grow only where light from the skylight reaches wet rock.',
+    'Water collects in a basin of black lava beneath the fallen roof.'
+  ],
+  notableFeatures: [
+    'Roots of the forest above hang through the hole in the roof.',
+    'A cask cistern and a washing stone stand at the water\'s edge.'
+  ],
+  narration: {
+    weather: 'misty',
+    sounds: ['water dripping into the pool', 'leaves stirring at the skylight', 'a drop striking stone'],
+    loadingNote: 'The crawl opens beneath a fallen roof, into green light and the sound of water.',
+    educationalNote: 'Light, not soil, sets the limits of life in a cave: the sharp edge between green rock and bare rock follows the edge of the sunlit patch.'
+  }
 },
 
 {

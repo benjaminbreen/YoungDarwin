@@ -29,6 +29,7 @@ function buildGeometry(payload) {
   geometry.setAttribute('uv', new THREE.BufferAttribute(payload.uvs, 2));
   geometry.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
   geometry.setAttribute('roughnessMix', new THREE.BufferAttribute(payload.roughness, 1));
+  geometry.setAttribute('aTerrainOcclusion', new THREE.BufferAttribute(payload.occlusion, 1));
   geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
   const centerY = (payload.minimumHeight + payload.maximumHeight) * 0.5;
   geometry.boundingBox = new THREE.Box3(

@@ -199,7 +199,7 @@ function InteriorPracticalMaterials({ groupRef, lighting }) {
     // An orange flame-shaped mesh is conspicuous even with zero emission.
     // Daylight Lawson lamps are extinguished; they appear only once the room
     // is dark enough for their practical lights to matter.
-    for (const mesh of flameMeshesRef.current) mesh.visible = activation > 0.075;
+    for (const mesh of flameMeshesRef.current) mesh.visible = lighting.practicalsAlwaysLit === true || activation > 0.075;
 
     // The shared sky now remains visible beyond one restrained haze veil. Keep
     // the veil only slightly luminous; the former HDR cards clipped windows to
@@ -673,8 +673,9 @@ function PortalLight({ portal, portalGroups, portalBudgets, worldYaw = 0 }) {
   );
 }
 
-function PracticalLamp({ lamp, index }) {
+function PracticalLamp({ lamp, index, alwaysLit = false }) {
   const lightRef = useRef(null);
+  const basePosition = useMemo(() => new THREE.Vector3(...lamp.position), [lamp.position]);
   useFrame(({ clock }) => {
     const light = lightRef.current;
     if (!light) return;
@@ -691,14 +692,30 @@ function PracticalLamp({ lamp, index }) {
       lamp.nightIntensity ?? 6,
       activation,
     );
-    const flicker = 0.965
-      + Math.sin(clock.elapsedTime * (7.1 + index * 0.43) + index * 1.9) * 0.025
-      + Math.sin(clock.elapsedTime * 16.3 + index * 2.7) * 0.01;
+    // `flicker` scales the authored candle wobble; an open hearth (3+) also
+    // gets slow gusts and a small wander of the light itself so its shadows
+    // breathe on the walls.
+    const amplitude = lamp.flicker ?? 1;
+    const t = clock.elapsedTime;
+    const wobble = Math.sin(t * (7.1 + index * 0.43) + index * 1.9) * 0.025
+      + Math.sin(t * 16.3 + index * 2.7) * 0.01;
+    const gust = amplitude > 2
+      ? (Math.sin(t * 2.3 + index) * 0.5 + Math.sin(t * 5.7 + index * 3.1) * 0.35 + Math.sin(t * 11.9) * 0.15) * 0.03
+      : 0;
+    const flicker = 1 - 0.035 * Math.min(amplitude, 1) + wobble * amplitude + gust * amplitude;
     light.intensity = base * flicker;
+    if (amplitude > 2) {
+      light.position.set(
+        basePosition.x + Math.sin(t * 3.7 + index) * 0.012 * amplitude,
+        basePosition.y + Math.sin(t * 6.1) * 0.01 * amplitude,
+        basePosition.z + Math.cos(t * 4.3 + index) * 0.012 * amplitude,
+      );
+    }
     // Daytime practicals in Lawson are authored at effectively zero output.
     // Excluding those lights entirely avoids paying for four point lights that
     // cannot visibly affect the room, while retaining their full night setup.
-    light.visible = base > 0.02;
+    // Caves keep theirs burning, and toggling a light would recompile shaders.
+    light.visible = alwaysLit || base > 0.02;
   });
   return (
     <pointLight
@@ -747,7 +764,7 @@ export function InteriorLightingRig({ definition, groupRef }) {
         />
       ))}
       {(lighting.lamps || []).map((lamp, index) => (
-        <PracticalLamp key={lamp.id || index} lamp={lamp} index={index} />
+        <PracticalLamp key={lamp.id || index} lamp={lamp} index={index} alwaysLit={lighting.practicalsAlwaysLit === true} />
       ))}
       <InteriorPracticalMaterials groupRef={groupRef} lighting={lighting} />
     </>

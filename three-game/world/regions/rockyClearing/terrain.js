@@ -165,5 +165,13 @@ export const rockyClearingRegion = {
     color: rockyClearingColor,
     isWalkable: isRockyClearingWalkable,
     defaultSpawn: [-5, 0, 3.2],
+    // Stepping out of Gabriel's cave lands on the apron below the arch,
+    // facing the clearing, clear of the mouth's own prompt.
+    entrySpawns: {
+      'from-gabriels-cave': [ROCKY_CLEARING_CAVE.promptX, 0, ROCKY_CLEARING_CAVE.promptZ + 4.6],
+    },
+    entryFacings: {
+      'from-gabriels-cave': [0, 0, 1],
+    },
   },
 };

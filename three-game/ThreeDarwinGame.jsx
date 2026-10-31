@@ -3348,6 +3348,13 @@ function TerrainLookSection() {
         <DevSlider label="Height tint" value={terrainLookTuning.heightTint} min={-1} max={1} step={0.02} format={v => (v === 0 ? 'off' : `${v > 0 ? '+' : ''}${v.toFixed(2)}`)} onChange={value => set({ heightTint: value })} />
         <DevSlider label="Distance fade" value={terrainLookTuning.distanceFade} min={0} max={1} step={0.02} format={v => (v === 0 ? 'off' : v.toFixed(2))} onChange={value => set({ distanceFade: value })} />
       </div>
+      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+        Baked occlusion · hollows and banks
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Baked AO" value={terrainLookTuning.aoStrength} min={0} max={3} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ aoStrength: value })} />
+        <DevSlider label="AO on sunlight" value={terrainLookTuning.aoDirect} min={0} max={1} step={0.02} format={v => (v === 0 ? 'ambient only' : v.toFixed(2))} onChange={value => set({ aoDirect: value })} />
+      </div>
     </div>
   );
 }

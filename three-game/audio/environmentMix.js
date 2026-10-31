@@ -10,6 +10,7 @@ const AUTHORED_COASTAL_ZONE_IDS = new Set([
 
 const INTERIOR_BIOMES = new Set([
   'cabin',
+  'caveinterior',
   'governorshouse',
   'governorslibrary',
   'houseinterior',
@@ -167,6 +168,18 @@ function interiorEnvironmentalAudioTargets({ zone, weather = {}, timeOfDay = 12,
       rain: rainResponse * (0.026 + Math.sqrt(rainIntensity) * 0.105),
       insects: rainIntensity < 0.025 ? 0.008 * nightActivity : 0,
       occlusion: 0.7,
+    };
+  }
+  if (zone?.type === 'caveInterior') {
+    // Rock overhead: the island's weather arrives only as a draught at the
+    // mouth and the skylit spring, and as rain on the fern pool.
+    const open = zone.id === 'CAVE_ENTRANCE' || zone.id === 'GABRIEL_SPRING';
+    return {
+      surf: 0,
+      wind: open ? (0.004 + windStrength * 0.02) * Math.max(0.75, Number(gust) || 1) : 0.002,
+      rain: open ? rainResponse * (0.012 + Math.sqrt(rainIntensity) * 0.05) : 0,
+      insects: 0,
+      occlusion: 0.86,
     };
   }
   return { surf: 0, wind: 0, rain: 0, insects: 0, occlusion: 0.75 };

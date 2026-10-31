@@ -13,6 +13,7 @@ import { InteriorInteractionSensors } from './InteriorInteractionSensors';
 import { InteriorLightingRig } from './InteriorLightingRig';
 import { getInteriorDefinition } from './interiorRegistry';
 import { ReadableBookActor } from './ReadableBookActor';
+import { GabrielCaveScene } from './cave/GabrielCaveScene';
 
 function CutawayDriver({ groupRef, enabled }) {
   const lastEnabledRef = useRef(null);
@@ -91,6 +92,7 @@ export function InteriorZone() {
       <InteriorLightingRig definition={definition} groupRef={groupRef} />
       {definition.exteriorApron && <InteriorExteriorApron apron={definition.exteriorApron} />}
       <group ref={groupRef}>
+        {definition.procedural === 'cave' && <GabrielCaveScene zoneId={zoneId} />}
         {assetPath && (
           <StaticGLB
             path={assetPath}

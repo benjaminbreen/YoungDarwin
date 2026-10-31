@@ -49,6 +49,7 @@ const REGION_SIZE_BY_TYPE = {
   interior: [38, 30],
   shipInterior: [22, 25],
   houseInterior: [21, 17],
+  caveInterior: [36, 36],
   governorslibrary: [38, 30],
   governorshouse: [38, 30],
 };
@@ -57,6 +58,12 @@ const AUTHORED_REGION_TERRAIN = {
   BEAGLE: { preset: 'hms-beagle-deck', segments: 300 },
   BEAGLE_CABIN: { preset: 'hms-beagle-aft-cabins', segments: 96 },
   LAWSON_HOUSE: { preset: 'lawson-house-interior', segments: 72 },
+  // Gabriel's cave chambers. The heightfield must resolve the rock walls the
+  // cave field draws, so these keep roughly 0.25 m cells.
+  CAVE_ENTRANCE: { preset: 'gabriel-cave-mouth-gallery-interior', segments: 176, width: 36, depth: 46 },
+  GABRIEL_QUARTERS: { preset: 'gabriel-cave-living-chamber-interior', segments: 144, width: 36, depth: 36 },
+  GABRIEL_PRESS: { preset: 'gabriel-cave-press-gallery-interior', segments: 152, width: 38, depth: 30 },
+  GABRIEL_SPRING: { preset: 'gabriel-cave-fern-spring-interior', segments: 144, width: 34, depth: 34 },
   // The cove's broad analytic forms and shoreline remain stable at 288; the
   // former 360 grid spent ~36% more terrain triangles on sub-texel detail.
   POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 288 },
@@ -107,8 +114,11 @@ function humanDirection(edge) {
 }
 
 function regionDimensions(cell) {
-  const [width, depth] = REGION_SIZE_BY_TYPE[cell.type] || [96, 86];
-  const segments = AUTHORED_REGION_TERRAIN[cell.id]?.segments || 140;
+  const authored = AUTHORED_REGION_TERRAIN[cell.id];
+  const [typeWidth, typeDepth] = REGION_SIZE_BY_TYPE[cell.type] || [96, 86];
+  const width = authored?.width || typeWidth;
+  const depth = authored?.depth || typeDepth;
+  const segments = authored?.segments || 140;
   return { width, depth, segments };
 }
 

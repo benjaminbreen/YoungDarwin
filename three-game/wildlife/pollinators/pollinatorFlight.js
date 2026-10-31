@@ -10,6 +10,8 @@
 // marker and the net strike, never through React.
 
 const states = new Map();
+// How far ahead (in seconds of flight) an insect looks for something to clear.
+const LOOK_AHEAD_SECONDS = 0.45;
 
 function hashSeed(text) {
   let h = 2166136261;
@@ -226,6 +228,10 @@ export function stepPollinatorFlight({
       state.vx += (wx - state.vx) * steer;
       state.vy += (wy + Math.sin(now * 3.1 + state.phase) * 0.22 - state.vy) * steer;
       state.vz += (wz - state.vz) * steer;
+      // Rise ahead of a rock or bush in the way (groundAt includes their tops)
+      // instead of popping up through it on arrival.
+      const aheadFloor = groundAt(state.x + state.vx * LOOK_AHEAD_SECONDS, state.z + state.vz * LOOK_AHEAD_SECONDS) + 0.12;
+      if (aheadFloor > state.y) state.vy = Math.max(state.vy, (aheadFloor - state.y) / LOOK_AHEAD_SECONDS);
       state.x += state.vx * dt;
       state.y += state.vy * dt;
       state.z += state.vz * dt;

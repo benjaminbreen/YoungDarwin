@@ -12,24 +12,29 @@
 // here has no recipe, so the runtime cannot ask for a file the bake never
 // produced.
 
+// PNG, not WebP. All four channels are independent data, and the alpha
+// (verge dust) is 0 down every path's centre where red/green (worn tread) are
+// at full strength. libwebp discards RGB under zero alpha even in lossless
+// mode, and sharp cannot ask it not to, so the 2026-08 WebP conversion cut a
+// bare strip down the middle of every path. PNG keeps those texels.
 const GENERATED = '/assets/textures/world/floreana-generated';
 
 export const PATH_SPLAT_BAKES = Object.freeze({
-  'n-shore': `${GENERATED}/n-shore-path-splat.webp`,
-  'post-office-bay': `${GENERATED}/post-office-bay-path-splat.webp`,
-  'lava-flats': `${GENERATED}/lava-flats-path-splat.webp`,
-  'penal-colony': `${GENERATED}/penal-colony-path-splat.webp`,
-  'watkins-creek': `${GENERATED}/watkins-creek-path-splat.webp`,
-  'coastal-scrubland': `${GENERATED}/coastal-scrubland-path-splat.webp`,
-  'punta-sur': `${GENERATED}/punta-sur-path-splat.webp`,
-  'southeastern-coast': `${GENERATED}/southeastern-coast-path-splat.webp`,
-  'el-mirador': `${GENERATED}/el-mirador-path-splat.webp`,
-  'rocky-clearing': `${GENERATED}/rocky-clearing-path-splat.webp`,
-  'eastern-cliffs': `${GENERATED}/eastern-cliffs-path-splat.webp`,
-  'post-scrub-rise': `${GENERATED}/post-scrub-rise-path-splat.webp`,
-  'northern-highlands': `${GENERATED}/northern-highlands-path-splat.webp`,
-  'cerro-pajas': `${GENERATED}/cerro-pajas-path-splat.webp`,
-  'asilo-spring': `${GENERATED}/asilo-spring-path-splat.webp`,
+  'n-shore': `${GENERATED}/n-shore-path-splat.png`,
+  'post-office-bay': `${GENERATED}/post-office-bay-path-splat.png`,
+  'lava-flats': `${GENERATED}/lava-flats-path-splat.png`,
+  'penal-colony': `${GENERATED}/penal-colony-path-splat.png`,
+  'watkins-creek': `${GENERATED}/watkins-creek-path-splat.png`,
+  'coastal-scrubland': `${GENERATED}/coastal-scrubland-path-splat.png`,
+  'punta-sur': `${GENERATED}/punta-sur-path-splat.png`,
+  'southeastern-coast': `${GENERATED}/southeastern-coast-path-splat.png`,
+  'el-mirador': `${GENERATED}/el-mirador-path-splat.png`,
+  'rocky-clearing': `${GENERATED}/rocky-clearing-path-splat.png`,
+  'eastern-cliffs': `${GENERATED}/eastern-cliffs-path-splat.png`,
+  'post-scrub-rise': `${GENERATED}/post-scrub-rise-path-splat.png`,
+  'northern-highlands': `${GENERATED}/northern-highlands-path-splat.png`,
+  'cerro-pajas': `${GENERATED}/cerro-pajas-path-splat.png`,
+  'asilo-spring': `${GENERATED}/asilo-spring-path-splat.png`,
 });
 
 export function pathSplatBakeFile(key) {

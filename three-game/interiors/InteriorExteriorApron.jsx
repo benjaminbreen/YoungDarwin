@@ -22,6 +22,21 @@ function sourcePoint(localX, localZ, apron) {
   };
 }
 
+// Height of the apron surface at a local (interior-space) point, so things
+// can be set down on it.
+export function apronSurfaceY(apron, localX, localZ) {
+  const anchorSample = terrainRenderSample(apron.sourceAnchor[0], apron.sourceAnchor[1], apron.sourceRegionId);
+  const source = sourcePoint(localX, localZ, apron);
+  const sample = terrainRenderSample(source.x, source.z, apron.sourceRegionId);
+  const houseEdgeDistance = Math.max(
+    Math.abs(localX) - (apron.houseHalfWidth || 10.5),
+    Math.abs(localZ) - (apron.houseHalfDepth || 8.5),
+    0,
+  );
+  const reliefBlend = smoothstep(houseEdgeDistance, apron.reliefStart ?? 1.4, apron.reliefFull ?? 12);
+  return (apron.baseY ?? -0.12) + (sample.height - anchorSample.height) * (apron.reliefScale ?? 0.28) * reliefBlend;
+}
+
 function createApronGeometry(apron) {
   const bounds = apron.bounds;
   const segmentsX = apron.segmentsX || 52;

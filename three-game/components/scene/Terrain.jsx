@@ -238,19 +238,24 @@ function injectTerrainRenderingExtensions(material) {
     shader.uniforms.uTerrainGradeExtra = { value: new THREE.Vector3(1, 0, 1) };
     // (slopeTint, heightTint, distanceFade, detailTiling)
     shader.uniforms.uTerrainGradeShape = { value: new THREE.Vector4(0, 0, 0, 1) };
+    // Baked heightfield occlusion (world/terrainOcclusion.js): (strength, direct share).
+    shader.uniforms.uTerrainAo = { value: new THREE.Vector2(0, 0) };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
         attribute float aApronDepth;
+        attribute float aTerrainOcclusion;
         varying float vTerrainCarryDepth;
+        varying float vTerrainOcclusion;
         varying vec3 vCausticsW;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vTerrainCarryDepth = aApronDepth;
+        vTerrainOcclusion = aTerrainOcclusion;
         vCausticsW = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
       );
     shader.fragmentShader = shader.fragmentShader
@@ -262,7 +267,9 @@ function injectTerrainRenderingExtensions(material) {
         uniform vec4 uTerrainGrade;
         uniform vec3 uTerrainGradeExtra;
         uniform vec4 uTerrainGradeShape;
+        uniform vec2 uTerrainAo;
         varying float vTerrainCarryDepth;
+        varying float vTerrainOcclusion;
         ${TERRAIN_TEXTURE_CARRY_GLSL}
         ${CAUSTICS_GLSL}`,
       )
@@ -288,6 +295,20 @@ function injectTerrainRenderingExtensions(material) {
         `normal = normalize(mix(nonPerturbedNormal, normal, uTerrainGradeExtra.z));
         #include <lights_physical_fragment>`,
       )
+      // Baked occlusion darkens the ambient/sky light fully. Hollows also
+      // take a share of the direct sun term: strictly that is not what AO
+      // means, but under a midday sun indirect light is too small a part of
+      // the ground's brightness for the creases to read otherwise.
+      .replace(
+        '#include <aomap_fragment>',
+        `#include <aomap_fragment>
+        {
+          float terrainAo = 1.0 - clamp(vTerrainOcclusion * uTerrainAo.x, 0.0, 0.85);
+          reflectedLight.indirectDiffuse *= terrainAo;
+          reflectedLight.indirectSpecular *= terrainAo;
+          reflectedLight.directDiffuse *= mix(1.0, terrainAo, uTerrainAo.y);
+        }`,
+      )
       .replace(
         '#include <opaque_fragment>',
         `${TERRAIN_TEXTURE_CARRY_APPLY}
@@ -296,7 +317,7 @@ function injectTerrainRenderingExtensions(material) {
       );
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry-baked-ao`;
   material.needsUpdate = true;
   return material;
 }
@@ -316,16 +337,24 @@ function pruneTerrainMaterialCache(protectedRegionId = null) {
   }
 }
 
-function ensureTerrainApronDepthAttribute(geometry, value = -1) {
-  if (!geometry || geometry.getAttribute('aApronDepth')) return geometry;
+function ensureFloatAttribute(geometry, name, value) {
+  if (!geometry || geometry.getAttribute(name)) return geometry;
   geometry.setAttribute(
-    'aApronDepth',
+    name,
     new THREE.BufferAttribute(
       new Float32Array(geometry.getAttribute('position').count).fill(value),
       1,
     ),
   );
   return geometry;
+}
+
+// Every geometry drawn with the terrain material must carry both attributes:
+// WebGL feeds a missing one whatever generic value was last bound at that
+// location, which would make occlusion arbitrary on carry strips and skirts.
+function ensureTerrainVertexAttributes(geometry, apronDepth = -1) {
+  ensureFloatAttribute(geometry, 'aApronDepth', apronDepth);
+  return ensureFloatAttribute(geometry, 'aTerrainOcclusion', 0);
 }
 
 // A destination shader is prepared before travel and then mounted here using
@@ -371,7 +400,7 @@ function retainTerrainRenderMaterial(regionId) {
 export function Terrain({ segmentCap = null }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const { geometryEntry } = readTerrainResource(currentZoneId, segmentCap);
-  const geometry = ensureTerrainApronDepthAttribute(geometryEntry.geometry);
+  const geometry = ensureTerrainVertexAttributes(geometryEntry.geometry);
 
   const material = useMemo(
     () => getTerrainRenderMaterial(currentZoneId),
@@ -434,6 +463,9 @@ export function Terrain({ segmentCap = null }) {
           terrainLookTuning.distanceFade,
           terrainLookTuning.detailTiling,
         );
+      }
+      if (shader.uniforms.uTerrainAo) {
+        shader.uniforms.uTerrainAo.value.set(terrainLookTuning.aoStrength, terrainLookTuning.aoDirect);
       }
       if (shader.uniforms.uTerrainWetShine) {
         // The shore-wet glint band is tuned for surf beaches (~1-2 m of wet
@@ -505,7 +537,7 @@ function NeighborCarryStrips({ regionId, material }) {
       {carryStrips.map(strip => (
         <mesh
           key={strip.id}
-          geometry={strip.geometry}
+          geometry={ensureTerrainVertexAttributes(strip.geometry)}
           material={material}
           receiveShadow={false}
           userData={{
@@ -604,7 +636,7 @@ function buildSkirtGeometry(regionId, excludeEdges = []) {
   );
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return geo;
+  return ensureTerrainVertexAttributes(geo);
 }
 
 function ContinuationTerrainSkirts({ regionId, material, excludeEdges = [] }) {

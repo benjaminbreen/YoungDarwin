@@ -1,5 +1,6 @@
 import beagleCabinBlueprint from './blueprints/beagleCabin.json';
 import lawsonHouseBlueprint from './blueprints/lawsonHouse.json';
+import { GABRIEL_CAVE_INTERIORS } from './gabrielCaveInteriors';
 
 export const BEAGLE_CABIN_ZONE_ID = 'BEAGLE_CABIN';
 export const LAWSON_HOUSE_ZONE_ID = 'LAWSON_HOUSE';
@@ -630,6 +631,7 @@ const INTERIORS = {
       }
     }
   },
+  ...GABRIEL_CAVE_INTERIORS,
 };
 
 export function getInteriorDefinition(zoneId) {
@@ -672,6 +674,19 @@ export function getInteriorInteractions(zoneId) {
     })),
     ...(blueprint.inspectables || []),
   ];
+}
+
+export function isCaveInteriorZone(zoneId) {
+  return getInteriorDefinition(zoneId)?.kind === 'cave-interior';
+}
+
+// The one-click way out of an interior. Houses and cabins have a single door,
+// so it is their only transition; the cave chambers all lead to the surface.
+export function getInteriorQuickExit(zoneId) {
+  const definition = getInteriorDefinition(zoneId);
+  if (!definition) return null;
+  if (definition.quickExit) return { ...definition.quickExit, zoneId };
+  return getInteriorTransitions(zoneId)[0] || null;
 }
 
 export function getInteriorNarrationTriggers(zoneId) {
