@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import * as THREE from 'three';
 import { COLONIST_RANCHO as R } from '../blueprints/colonistRancho';
 import { Beam, Cyl, hash, Rope, StaticBatch } from '../cave/props/primitives';
-import { mergeAll, plankBox, poleGeometry, roofSlabGeometry, stoneWallGeometry } from './hutGeometry';
+import { mergeAll, projectUVs, poleGeometry, roofSlabGeometry, stoneWallGeometry } from './hutGeometry';
 import { HangingProduce, Hammock } from './hutProps';
 import { RanchoGarden } from './RanchoGarden';
 import { useDisposable } from './useDisposable';
@@ -58,13 +59,16 @@ function buildSill() {
 // Daub wall panels between the posts, cut around the door and window.
 function buildWalls() {
   const parts = [];
-  const rand = () => 0.37;
   const y0 = R.sill;
   const y1 = R.wallTop;
   const t = R.wall;
   const add = (cx, cy, cz, sx, sy, sz) => {
-    const geometry = plankBox(sx, sy, sz, 1.8, rand);
+    const geometry = new THREE.BoxGeometry(sx, sy, sz);
     geometry.translate(cx, cy, cz);
+    // Wall material has horizontal cane under vertical stakes: never apply
+    // plankBox's longest-axis grain rotation to narrow daub panels. Project
+    // after translation so the detail continues across door/window cuts.
+    projectUVs(geometry, 1.8);
     parts.push(geometry.toNonIndexed());
     geometry.dispose();
   };

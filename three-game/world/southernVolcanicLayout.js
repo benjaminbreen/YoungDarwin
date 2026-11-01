@@ -1,8 +1,14 @@
 import { buildRockObstacles, rockVisualBounds } from './proceduralRocks';
 import { seededRandom } from './scatter';
+import { spreadCount, spreadFeature, spreadNear } from './regionSpread';
 import {
+  AUTHORED_CONE,
+  AUTHORED_KIPUKA,
+  AUTHORED_OLIVINE_POCKET,
+  AUTHORED_SCORIA_FIELD,
   FUMAROLES,
   SOUTHERN_VOLCANIC,
+  SOUTHERN_VOLCANIC_SPREAD as S,
   SPATTER_CONE,
   TUMULI,
   southernVolcanicConeInfo,
@@ -109,15 +115,22 @@ function tumulusLips() {
   return lips;
 }
 
+// Authored at the original map scale; each keeps its distance from the
+// landmark or trail it marks when the map is spread.
+const nearRock = (anchor, rock) => makeRock(spreadNear(rock, anchor, S));
+const NORTH_TRAIL_BEND = { x: 4.4, z: -40 };
+const EAST_TRAIL_GATE = { x: 45, z: 0.6 };
+const WEST_TRAIL_BEND = { x: -31, z: 30.6 };
+
 const HERO_ROCKS = [
-  makeRock({ id: 'scoria-field-bomb', x: -22.4, z: -9.6, radiusX: 1.1, radiusY: 0.72, radiusZ: 0.9, yaw: 0.4, sink: 0.12, color: '#8a4f39', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: true }),
-  makeRock({ id: 'scoria-field-block', x: -15.2, z: -15.4, radiusX: 1.3, radiusY: 0.6, radiusZ: 0.95, yaw: -0.6, sink: 0.14, color: '#7a4535', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: true }),
-  makeRock({ id: 'cone-bomb-east', x: -7.6, z: 18.8, radiusX: 0.8, radiusY: 0.55, radiusZ: 0.62, yaw: 1.1, sink: 0.1, color: '#5e3a2e', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria' }),
-  makeRock({ id: 'olivine-pocket-ledge', x: 24.6, z: 16.2, radiusX: 1.5, radiusY: 0.4, radiusZ: 0.9, yaw: 0.3, sink: 0.12, color: '#4c4d44', materialKey: 'weatheredHighlandBasalt' }),
-  makeRock({ id: 'kipuka-edge-block', x: 21.6, z: -9.4, radiusX: 1.2, radiusY: 0.52, radiusZ: 0.86, yaw: -0.2, sink: 0.14, color: '#3a3934', obstacle: true }),
-  makeRock({ id: 'east-gate-slab', x: 46.2, z: 5.2, radiusX: 1.4, radiusY: 0.46, radiusZ: 1.0, yaw: 0.6, sink: 0.14, color: '#403f3a', materialKey: 'weatheredHighlandBasalt', obstacle: true }),
-  makeRock({ id: 'north-trail-marker', x: 8.4, z: -36.2, radiusX: 1.0, radiusY: 0.6, radiusZ: 0.78, yaw: 0.9, sink: 0.12, color: '#36352f', obstacle: true }),
-  makeRock({ id: 'west-trail-block', x: -36.4, z: 27.4, radiusX: 1.24, radiusY: 0.56, radiusZ: 0.9, yaw: -0.4, sink: 0.14, color: '#45433d', materialKey: 'weatheredHighlandBasalt', obstacle: true }),
+  nearRock(AUTHORED_SCORIA_FIELD, { id: 'scoria-field-bomb', x: -22.4, z: -9.6, radiusX: 1.1, radiusY: 0.72, radiusZ: 0.9, yaw: 0.4, sink: 0.12, color: '#8a4f39', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: true }),
+  nearRock(AUTHORED_SCORIA_FIELD, { id: 'scoria-field-block', x: -15.2, z: -15.4, radiusX: 1.3, radiusY: 0.6, radiusZ: 0.95, yaw: -0.6, sink: 0.14, color: '#7a4535', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: true }),
+  nearRock(AUTHORED_CONE, { id: 'cone-bomb-east', x: -7.6, z: 18.8, radiusX: 0.8, radiusY: 0.55, radiusZ: 0.62, yaw: 1.1, sink: 0.1, color: '#5e3a2e', materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria' }),
+  nearRock(AUTHORED_OLIVINE_POCKET, { id: 'olivine-pocket-ledge', x: 24.6, z: 16.2, radiusX: 1.5, radiusY: 0.4, radiusZ: 0.9, yaw: 0.3, sink: 0.12, color: '#4c4d44', materialKey: 'weatheredHighlandBasalt' }),
+  nearRock(AUTHORED_KIPUKA, { id: 'kipuka-edge-block', x: 21.6, z: -9.4, radiusX: 1.2, radiusY: 0.52, radiusZ: 0.86, yaw: -0.2, sink: 0.14, color: '#3a3934', obstacle: true }),
+  nearRock(EAST_TRAIL_GATE, { id: 'east-gate-slab', x: 46.2, z: 5.2, radiusX: 1.4, radiusY: 0.46, radiusZ: 1.0, yaw: 0.6, sink: 0.14, color: '#403f3a', materialKey: 'weatheredHighlandBasalt', obstacle: true }),
+  nearRock(NORTH_TRAIL_BEND, { id: 'north-trail-marker', x: 8.4, z: -36.2, radiusX: 1.0, radiusY: 0.6, radiusZ: 0.78, yaw: 0.9, sink: 0.12, color: '#36352f', obstacle: true }),
+  nearRock(WEST_TRAIL_BEND, { id: 'west-trail-block', x: -36.4, z: 27.4, radiusX: 1.24, radiusY: 0.56, radiusZ: 0.9, yaw: -0.4, sink: 0.14, color: '#45433d', materialKey: 'weatheredHighlandBasalt', obstacle: true }),
 ];
 
 // Pāhoehoe toes: the leading edges of the last flows, each a glazed lobe
@@ -153,7 +166,7 @@ const FLOW_TOES = [
     form: 'shelf', irregularity: 0.16, detail: 3, tint: '#6f4a3d',
     materialKey: 'oxidizedScoriaceousBasalt', inspectableType: 'scoria', obstacle: true,
   },
-];
+].map(formation => spreadFeature(formation, S));
 
 let rocks = null;
 
@@ -170,11 +183,12 @@ export function getSouthernVolcanicRocks() {
   if (rocks) return rocks;
   const list = [...HERO_ROCKS, ...spatterRim(), ...tumulusLips()];
   let attempts = 0;
-  while (list.length < 96 && attempts < 9000) {
+  const target = list.length + spreadCount(96 - list.length, S);
+  while (list.length < target && attempts < spreadCount(9000, S)) {
     attempts += 1;
     const i = attempts + 8123;
-    const x = -52 + seededRandom(i, 3) * 104;
-    const z = -48 + seededRandom(i, 7) * 96;
+    const x = (-52 + seededRandom(i, 3) * 104) * S;
+    const z = (-48 + seededRandom(i, 7) * 96) * S;
     const path = southernVolcanicPathInfo(x, z);
     if (path.distance < path.width * 1.5) continue;
     if (nearVent(x, z, 1.6)) continue;

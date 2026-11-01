@@ -1,9 +1,12 @@
 import { makeZoneScatter, seededRandom, varyScatterTransforms } from '../scatter';
+import { spreadBounds, spreadBoundsNear, spreadCount } from '../regionSpread';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 import { getSouthernVolcanicFlowToes, getSouthernVolcanicRocks } from '../southernVolcanicLayout';
 import {
+  AUTHORED_KIPUKA,
   FUMAROLES,
   SOUTHERN_VOLCANIC,
+  SOUTHERN_VOLCANIC_SPREAD as S,
   southernVolcanicConeInfo,
   southernVolcanicKipukaMask,
   southernVolcanicPathInfo,
@@ -31,6 +34,13 @@ import { coastalBirds } from './flyingBirds';
 
 const NATURE = '/assets/models/nature/';
 
+// Bounds and counts are authored at the original map scale. Plain-wide layers
+// grow with the spread map and keep their density; kīpuka layers follow the
+// kīpuka, which keeps its size.
+const plain = bounds => spreadBounds(bounds, S);
+const onKipuka = bounds => spreadBoundsNear(bounds, AUTHORED_KIPUKA, S);
+const plainCount = count => spreadCount(count, S);
+
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
@@ -44,9 +54,9 @@ function buildSurfaceLitter() {
   return [buildDryVolcanicLitterLayer({
     zoneId: SOUTHERN_VOLCANIC,
     id: 'southern-volcanic-clinker-litter',
-    count: 300,
+    count: plainCount(300),
     seed: 4417,
-    bounds: { minX: -52, maxX: 52, minZ: -48, maxZ: 48 },
+    bounds: plain({ minX: -52, maxX: 52, minZ: -48, maxZ: 48 }),
     scale: [0.6, 1.58],
     sizeVariation: [0.82, 1.3],
     maxGrade: 1.15,
@@ -69,8 +79,8 @@ function buildSurfaceLitter() {
 
 function buildPioneerFlora() {
   const scatter = (layer, count, seed, options) => makeZoneScatter(SOUTHERN_VOLCANIC, layer, count, seed, options);
-  const pioneers = varyScatterTransforms(scatter('southern-volcanic-sesuvium', 16, 4433, {
-    minX: -50, maxX: 50, minZ: -46, maxZ: 48,
+  const pioneers = varyScatterTransforms(scatter('southern-volcanic-sesuvium', plainCount(16), 4433, {
+    ...plain({ minX: -50, maxX: 50, minZ: -46, maxZ: 48 }),
     scale: [0.66, 1.24],
     maxGrade: 0.82,
     accept: (biome, x, z) => offTrail(x, z, 2)
@@ -80,8 +90,8 @@ function buildPioneerFlora() {
   }), 4433, { width: [0.86, 1.14], height: [0.78, 1.06], depth: [0.9, 1.12], maxLean: 0.07 })
     .map(item => ({ ...item, tint: item.tone > 0.5 ? '#7d6a48' : '#5f6646' }));
 
-  const saltbush = varyScatterTransforms(scatter('southern-volcanic-saltbush', 9, 4441, {
-    minX: -48, maxX: 48, minZ: -44, maxZ: 46,
+  const saltbush = varyScatterTransforms(scatter('southern-volcanic-saltbush', plainCount(9), 4441, {
+    ...plain({ minX: -48, maxX: 48, minZ: -44, maxZ: 46 }),
     scale: [0.42, 0.74],
     maxGrade: 0.7,
     accept: (biome, x, z) => offTrail(x, z, 2.4)
@@ -91,7 +101,7 @@ function buildPioneerFlora() {
     .map(item => ({ ...item, tint: item.tone > 0.52 ? '#767a52' : '#5b6447' }));
 
   const kipuka = (layer, count, seed, options) => scatter(layer, count, seed, {
-    minX: 16, maxX: 46, minZ: -24, maxZ: -2,
+    ...onKipuka({ minX: 16, maxX: 46, minZ: -24, maxZ: -2 }),
     maxGrade: 0.5,
     ...options,
     accept: (biome, x, z) => offTrail(x, z, 2.2) && southernVolcanicKipukaMask(x, z) > (options.threshold ?? 0.45),
@@ -164,8 +174,8 @@ function buildInteractiveFlora() {
       species: LAVA_CACTUS_SPECIES,
       runtime: 'lava-cactus',
       seed: 4463,
-      count: 16,
-      bounds: { minX: -48, maxX: 48, minZ: -44, maxZ: 46 },
+      count: plainCount(16),
+      bounds: plain({ minX: -48, maxX: 48, minZ: -44, maxZ: 46 }),
       habitatAt: ({ biome, x, z }) => {
         const path = southernVolcanicPathInfo(x, z);
         const pioneer = southernVolcanicPioneerMask(x, z);
@@ -194,7 +204,7 @@ function buildInteractiveFlora() {
         };
       },
       placement: {
-        patchCount: 5,
+        patchCount: plainCount(5),
         patchRadius: [2.6, 5.4],
         minPatchSeparation: 9,
         minItemSeparation: 1.6,
@@ -211,7 +221,7 @@ function buildInteractiveFlora() {
       runtime: 'palo-santo',
       seed: 4471,
       count: 6,
-      bounds: { minX: 16, maxX: 46, minZ: -24, maxZ: -2 },
+      bounds: onKipuka({ minX: 16, maxX: 46, minZ: -24, maxZ: -2 }),
       habitatAt: ({ biome, x, z }) => {
         const kipuka = southernVolcanicKipukaMask(x, z);
         const biomeSuitability = biome === 'dry-scrub' ? 1 : 0;
@@ -251,7 +261,7 @@ function buildKipukaGrass() {
     idPrefix: 'southern-volcanic-kipuka-grass',
     count: 150,
     seed: 4481,
-    bounds: { minX: 18, maxX: 44, minZ: -22, maxZ: -4 },
+    bounds: onKipuka({ minX: 18, maxX: 44, minZ: -22, maxZ: -4 }),
     rejectBiomes: ['trail'],
     maxGrade: 0.6,
     scale: [0.6, 1.1],
@@ -309,7 +319,13 @@ export function buildSouthernVolcanicEcology() {
     birds: coastalBirds([
       { species: 'frigatebird', radiusX: 26, radiusZ: 16, height: 34, speed: 0.048, phase: 1.1, cx: 4, cz: 6, flapRate: 0.34 },
       { species: 'frigatebird', radiusX: 18, radiusZ: 12, height: 40, speed: -0.052, phase: 3.6, cx: -20, cz: 26, flapRate: 0.38 },
-    ]),
+    ].map(bird => ({
+      ...bird,
+      radiusX: bird.radiusX * S,
+      radiusZ: bird.radiusZ * S,
+      cx: bird.cx * S,
+      cz: bird.cz * S,
+    }))),
   };
 }
 

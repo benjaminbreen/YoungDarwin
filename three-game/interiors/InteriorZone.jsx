@@ -15,6 +15,20 @@ import { getInteriorDefinition } from './interiorRegistry';
 import { ReadableBookActor } from './ReadableBookActor';
 import { GabrielCaveScene } from './cave/GabrielCaveScene';
 import { HutScene } from './huts/HutScene';
+import { sceneHandleEnabled } from '../runtimeDebug';
+
+function InteriorSceneHandle() {
+  const { scene, camera, gl } = useThree();
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sceneHandleEnabled()) return undefined;
+    // SkyController publishes this outdoors, but is absent inside. Keep the
+    // same render audit and camera diagnostics available for interior QA.
+    const handle = { scene, camera, gl, THREE };
+    window.__darwinScene = handle;
+    return () => { if (window.__darwinScene === handle) delete window.__darwinScene; };
+  }, [scene, camera, gl]);
+  return null;
+}
 
 function CutawayDriver({ groupRef, enabled }) {
   const lastEnabledRef = useRef(null);
@@ -89,6 +103,7 @@ export function InteriorZone() {
   const blueprint = definition.blueprint;
   return (
     <group userData={{ renderSource: `interior:${zoneId}`, renderLabel: definition.label, renderKind: 'interior' }}>
+      <InteriorSceneHandle />
       <InteriorBackground color={definition.scene.background || '#0b1216'} lighting={definition.lighting} />
       <InteriorLightingRig definition={definition} groupRef={groupRef} />
       {definition.exteriorApron && <InteriorExteriorApron apron={definition.exteriorApron} />}

@@ -16,6 +16,48 @@ export function setCompressedTextureProvider(provider) {
 const FLOREANA_PBR_BASE = '/assets/textures/world/floreana-pbr';
 
 export const FLOREANA_PBR_TEXTURES = {
+  // Generated, height-aligned surfaces; provenance and deterministic packed
+  // map bake live in assets-src/landscape-materials. Two samplers per layer.
+  pahoehoe: {
+    albedo: '/assets/textures/world/floreana-landscape/pahoehoe-albedo.webp',
+    nrh: '/assets/textures/world/floreana-landscape/pahoehoe-nrh.webp',
+    scale: 0.4,
+    normalStrength: 0.9,
+    roughnessMix: 0.9,
+    roughnessMin: 0.64,
+    roughnessMax: 0.91,
+    fallbacks: { albedo: '#555753', normal: [128, 128, 255, 255], roughness: [230, 230, 230, 255], height: [128, 128, 128, 255] },
+  },
+  windTurf: {
+    albedo: '/assets/textures/world/floreana-landscape/wind-turf-albedo.webp',
+    nrh: '/assets/textures/world/floreana-landscape/wind-turf-nrh.webp',
+    scale: 0.4,
+    normalStrength: 0.6,
+    roughnessMix: 0.9,
+    roughnessMin: 0.86,
+    roughnessMax: 0.98,
+    fallbacks: { albedo: '#777463', normal: [128, 128, 255, 255], roughness: [230, 230, 230, 255], height: [128, 128, 128, 255] },
+  },
+  highlandLitter: {
+    albedo: '/assets/textures/world/floreana-landscape/highland-litter-albedo.webp',
+    nrh: '/assets/textures/world/floreana-landscape/highland-litter-nrh.webp',
+    scale: 0.6666666666666666,
+    normalStrength: 0.65,
+    roughnessMix: 0.9,
+    roughnessMin: 0.76,
+    roughnessMax: 0.95,
+    fallbacks: { albedo: '#514536', normal: [128, 128, 255, 255], roughness: [230, 230, 230, 255], height: [128, 128, 128, 255] },
+  },
+  weatheredScoria: {
+    albedo: '/assets/textures/world/floreana-landscape/scoria-albedo.webp',
+    nrh: '/assets/textures/world/floreana-landscape/scoria-nrh.webp',
+    scale: 0.6666666666666666,
+    normalStrength: 0.85,
+    roughnessMix: 0.9,
+    roughnessMin: 0.86,
+    roughnessMax: 0.99,
+    fallbacks: { albedo: '#51423a', normal: [128, 128, 255, 255], roughness: [230, 230, 230, 255], height: [128, 128, 128, 255] },
+  },
   sandyTuff: {
     albedo: `${FLOREANA_PBR_BASE}/sandy-tuff_albedo.webp`,
     normal: `${FLOREANA_PBR_BASE}/sandy-tuff_normal.webp`,
@@ -437,9 +479,9 @@ function applyTerrainBitmap(entry, bitmap) {
   }).catch(() => assign(bitmap));
 }
 
-function createTerrainSourceEntry(path, rgba) {
+function createTerrainSourceEntry(path, rgba, fallbackImage) {
   const entry = {
-    source: new THREE.Source(browserFallbackCanvas(rgba)),
+    source: new THREE.Source(fallbackImage || browserFallbackCanvas(rgba)),
     textures: new Set(),
     flipY: true,
     released: false,
@@ -474,10 +516,10 @@ function createTerrainSourceEntry(path, rgba) {
   return entry;
 }
 
-function loadBrowserTerrainTexture(path, rgba) {
+function loadBrowserTerrainTexture(path, rgba, fallbackImage) {
   let entry = terrainSourceCache.get(path);
   if (!entry) {
-    entry = createTerrainSourceEntry(path, rgba);
+    entry = createTerrainSourceEntry(path, rgba, fallbackImage);
     terrainSourceCache.set(path, entry);
   }
   const texture = new THREE.Texture();
@@ -517,6 +559,7 @@ export function loadRepeatingTerrainTexture(path, {
   fallback = [255, 255, 255, 255],
   colorSpace = THREE.NoColorSpace,
   anisotropy = 8,
+  fallbackImage = null,
 } = {}) {
   const rgba = typeof fallback === 'string' ? rgbaFromHex(fallback) : fallback;
   const isFallback = typeof window === 'undefined' || !path;
@@ -530,7 +573,7 @@ export function loadRepeatingTerrainTexture(path, {
 
   const texture = isFallback
     ? fallbackTexture(rgba, colorSpace)
-    : loadBrowserTerrainTexture(path, rgba);
+    : loadBrowserTerrainTexture(path, rgba, fallbackImage);
 
   texture.colorSpace = colorSpace;
   texture.wrapS = THREE.RepeatWrapping;

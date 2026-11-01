@@ -1,0 +1,52 @@
+{
+  "albedoSize": 1024,
+  "dataSize": 512,
+  "materials": [
+    {
+      "name": "daub",
+      "tileMetres": 1.8,
+      "reliefMetres": 0.018,
+      "sourceSha256": {
+        "daub-color.png": "9e125e2a07eb7cb42be79a41b32cd8e62f1cd233cba62a4955fcac92d9d19c39",
+        "daub-height.png": "6160c70b69517ec80c768b472569a25755e7fdadebec71aaf4ccf93533ea77f5"
+      },
+      "files": [
+        {
+          "file": "daub-albedo.webp",
+          "bytes": 388162
+        },
+        {
+          "file": "daub-normal.webp",
+          "bytes": 487852
+        },
+        {
+          "file": "daub-roughness.webp",
+          "bytes": 64884
+        }
+      ]
+    },
+    {
+      "name": "thatch",
+      "tileMetres": 1.6,
+      "reliefMetres": 0.028,
+      "sourceSha256": {
+        "thatch-color.png": "d99c876e6a6f9ded260193cce4a54859cfdf5951f002d5000112438f1827a7a6",
+        "thatch-height.png": "ca8b4001027c2690f88fa87b435654583d6ce680767a1f7811e3713b4b3beac2"
+      },
+      "files": [
+        {
+          "file": "thatch-albedo.webp",
+          "bytes": 432322
+        },
+        {
+          "file": "thatch-normal.webp",
+          "bytes": 654992
+        },
+        {
+          "file": "thatch-roughness.webp",
+          "bytes": 71386
+        }
+      ]
+    }
+  ]
+}

@@ -286,7 +286,7 @@ export function PressGallery({ materials }) {
           return <Ball key={i} r={0.06 + hash(i, 3) * 0.03} segments={6} material={materials.paper} scale={[1, 0.7, 1.1]} position={[x, ground(x, z) + 0.04, z]} />;
         })}
         {/* A water cask for damping, and a spare forme leaning on the wall. */}
-        <Cask height={0.7} radius={0.26} material={materials.crateWood} hoop={materials.iron} position={[-6.2, ground(-6.2, -2.0), -2.0]} />
+        <Cask headMaterial={materials.endGrain || materials.logEnd} height={0.7} radius={0.26} material={materials.crateWood} hoop={materials.iron} position={[-6.2, ground(-6.2, -2.0), -2.0]} />
         <SheetStack count={30} size={[0.5, 0.36]} materials={materials} seed={21} printed position={[7.4, ground(7.4, -1.9) + 0.02, -1.9]} rotation={[0, 0.4, 0]} />
         <SheetStack count={18} size={[0.5, 0.36]} materials={materials} seed={25} printed position={[7.45, ground(7.45, -1.9) + 0.14, -1.85]} rotation={[0, 0.1, 0]} />
       </StaticBatch>

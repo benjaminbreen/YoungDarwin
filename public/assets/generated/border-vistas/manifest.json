@@ -51,7 +51,7 @@
     },
     "MANGROVES": {
       "file": "mangroves.bin",
-      "bytes": 974672
+      "bytes": 973896
     },
     "NORTHERN_HIGHLANDS": {
       "file": "northern_highlands.bin",
@@ -67,7 +67,7 @@
     },
     "PENAL_COLONY": {
       "file": "penal_colony.bin",
-      "bytes": 1015028
+      "bytes": 1015024
     },
     "POST_OFFICE_BAY": {
       "file": "post_office_bay.bin",
@@ -83,7 +83,7 @@
     },
     "PUNTA_SUR": {
       "file": "punta_sur.bin",
-      "bytes": 657472
+      "bytes": 657476
     },
     "SE_COAST": {
       "file": "se_coast.bin",
@@ -91,7 +91,7 @@
     },
     "SE_PROMONTORY": {
       "file": "se_promontory.bin",
-      "bytes": 403572
+      "bytes": 406096
     },
     "SE_SHALLOW_SURF": {
       "file": "se_shallow_surf.bin",
@@ -107,7 +107,7 @@
     },
     "S_HUT": {
       "file": "s_hut.bin",
-      "bytes": 695168
+      "bytes": 695164
     },
     "S_INTERTIDAL": {
       "file": "s_intertidal.bin",
@@ -119,11 +119,11 @@
     },
     "S_VOLCANIC": {
       "file": "s_volcanic.bin",
-      "bytes": 947336
+      "bytes": 841896
     },
     "S_WETLANDS": {
       "file": "s_wetlands.bin",
-      "bytes": 944120
+      "bytes": 944116
     },
     "WATKINS": {
       "file": "watkins.bin",

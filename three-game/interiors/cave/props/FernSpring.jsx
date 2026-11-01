@@ -166,7 +166,7 @@ export function FernSpring({ materials, rock }) {
         <mesh geometry={PLAIN[0]} material={rock} position={[-1.9, ground(-1.9, 0.9) + 0.12, 0.9]} rotation={[0, 0.3, 0]} scale={[0.72, 0.36, 0.5]} castShadow receiveShadow />
         <Shirt materials={materials} position={[-1.9, ground(-1.9, 0.9) + 0.12 + 0.36 * 0.8, 0.9]} rotation={[0.03, 0.3, -0.02]} />
         {/* Cistern cask, lidded, with a split-cane gutter from a wall seep. */}
-        <Cask height={1.04} radius={0.46} material={materials.crateWood} hoop={materials.iron} position={[cistern[0], cisternBase, cistern[1]]} />
+        <Cask headMaterial={materials.endGrain || materials.logEnd} height={1.04} radius={0.46} material={materials.crateWood} hoop={materials.iron} position={[cistern[0], cisternBase, cistern[1]]} />
         <Cyl r={0.4} h={0.03} segments={18} material={materials.timber} position={[cistern[0], cisternBase + 1.05, cistern[1]]} />
         <group position={[cistern[0] + 0.55, cisternBase + 1.25, cistern[1] - 0.15]} rotation={[0, -0.25, 0.22]}>
           <mesh material={materials.timberRound} rotation={[0, 0, Math.PI / 2]} castShadow>

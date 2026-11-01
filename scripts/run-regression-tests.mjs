@@ -3162,6 +3162,25 @@ test('carry drop candidates start grounded beyond the player collider', () => {
   assert.equal(candidates.length, 24);
 });
 
+test('period prop UVs keep narrow wood grain and barrel staves at physical scale', () => {
+  const { BoxGeometry, CylinderGeometry } = projectRequire('three');
+  const { metricBoxUvs, metricCylinderUvs } = loadModule('three-game/world/regions/materials/periodMaterialUvs.js');
+  const box = metricBoxUvs(new BoxGeometry(0.1, 2, 0.1));
+  // Long side faces use two metres of grain and only 10 cm across it.
+  const uv = box.attributes.uv;
+  const range = (attr, from, to, axis) => {
+    const values = Array.from({ length: to - from }, (_, i) => attr.getComponent(from + i, axis));
+    return Math.max(...values) - Math.min(...values);
+  };
+  assert.ok(Math.abs(range(uv, 0, 4, 0) - 2) < 1e-6);
+  assert.ok(Math.abs(range(uv, 0, 4, 1) - 0.1) < 1e-6);
+  const cylinder = metricCylinderUvs(new CylinderGeometry(0.5, 0.5, 0.9, 14, 1), 0.5, 0.9, true);
+  assert.ok(Math.abs(range(cylinder.attributes.uv, 0, 30, 0) - 0.9) < 1e-6);
+  assert.ok(Math.abs(range(cylinder.attributes.uv, 0, 30, 1) - Math.PI) < 1e-6);
+  box.dispose();
+  cylinder.dispose();
+});
+
 test('procedural rock obstacles share visual bounds and traversal support', () => {
   const zoneIds = ['POST_OFFICE_BAY', 'ALT_POST_OFFICE_BAY', 'N_SHORE', 'NW_REEF', 'W_HIGH'];
   for (const zoneId of zoneIds) {

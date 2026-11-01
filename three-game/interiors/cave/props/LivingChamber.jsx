@@ -2,6 +2,7 @@
 
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { FabricBundle } from './primitives';
 import { GABRIEL_CAVE_QUARTERS_ZONE_ID as ZONE } from '../../blueprints/gabrielCave';
 import { makeBoulderGeometry } from '../CaveShell';
 import { wallAnchor, yawFacing } from './anchors';
@@ -192,9 +193,7 @@ function Larder({ materials, ...props }) {
         <Beam key={y} size={[2.06, 0.04, 0.62]} material={materials.timber} position={[0, y, 0]} />
       ))}
       {/* Bottom: maize sack and salt crock. */}
-      <mesh material={materials.sacking} position={[-0.55, 0.32, 0]} scale={[0.3, 0.32, 0.24]} castShadow>
-        <sphereGeometry args={[1, 12, 10]} />
-      </mesh>
+      <FabricBundle material={materials.sacking} position={[-0.55, 0.32, 0]} radii={[0.3, 0.32, 0.24]} />
       <Cyl r={0.04} h={0.12} segments={8} material={materials.sacking} position={[-0.55, 0.66, 0]} />
       <Lathe profile={[[0, 0], [0.12, 0], [0.15, 0.1], [0.14, 0.22], [0.1, 0.25], [0, 0.25]]} segments={14} material={materials.clay} position={[0.3, 0.44, 0.02]} />
       <Lathe profile={[[0, 0], [0.1, 0], [0.12, 0.08], [0.1, 0.18], [0.07, 0.2], [0, 0.2]]} segments={14} material={materials.clayDark} position={[0.7, 0.44, -0.05]} />

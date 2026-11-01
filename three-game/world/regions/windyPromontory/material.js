@@ -12,7 +12,7 @@ const f = value => Number(value).toFixed(3);
 // the base, low coastal scrub litter in the sheltered folds, weathered basalt
 // for ledges and cliff, red earth for the trodden paths and scoured soil.
 const LAYERS = {
-  coastal: { texture: FLOREANA_PBR_TEXTURES.dryGrassLitter, roughnessMin: 0.86, roughnessMax: 0.98 },
+  coastal: { texture: FLOREANA_PBR_TEXTURES.windTurf, roughnessMin: 0.86, roughnessMax: 0.98 },
   litter: { texture: FLOREANA_PBR_TEXTURES.coastalScrub, roughnessMin: 0.84, roughnessMax: 0.97 },
   basalt: { texture: FLOREANA_PBR_TEXTURES.weatheredHighlandBasalt, roughnessMin: 0.74, roughnessMax: 0.93 },
   cinder: { texture: FLOREANA_PBR_TEXTURES.redCinderDirt, roughnessMin: 0.82, roughnessMax: 0.95 },
@@ -83,12 +83,13 @@ const COLOR = /* glsl */`
   vec2 wpP = vPostScrubWorld.xz;
   float wpY = vPostScrubWorld.y;
   float wpFaceC = wpFace(wpP);
+  float wpOffshore = 1.0 - smoothstep(-1.5, 0.5, wpCoast(wpP));
   float wpExposureC = wpExposure(wpP);
   // Grass combed by the trade wind: long streaks lying southeast-northwest.
   vec2 wpWind = vec2(0.71, 0.71);
   float wpCombed = psrFbm(vec2(dot(wpP, wpWind) * 0.09, dot(wpP, vec2(-wpWind.y, wpWind.x)) * 0.9) + vec2(3.0, -7.0));
   float wpGrass = (1.0 - wpFaceC) * (1.0 - wpLedge(wpP) * 0.8);
-  diffuseColor.rgb *= mix(1.0, mix(0.84, 1.14, wpCombed), wpGrass * (0.4 + wpExposureC * 0.5));
+  diffuseColor.rgb *= mix(1.0, mix(0.9, 1.08, wpCombed), wpGrass * (0.15 + wpExposureC * 0.2));
   // Exposure bleaches the grass to straw; shelter keeps a little green.
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.04, 0.86), wpExposureC * wpGrass * 0.5);
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.86, 1.04, 0.84), (1.0 - wpExposureC) * wpGrass * 0.35);
@@ -96,14 +97,17 @@ const COLOR = /* glsl */`
   // running down from the ledges where the boobies and frigatebirds sit.
   float wpBedding = smoothstep(0.45, 0.8, psrFbm(vec2(wpP.x * 0.06 + wpP.y * 0.06, wpY * 0.9) + vec2(-4.0, 2.0)));
   float wpGuano = smoothstep(0.66, 0.84, psrFbm(vec2((wpP.x - wpP.y) * 0.55, wpY * 0.08) + vec2(9.0, 1.0)))
-    * smoothstep(2.0, 7.0, wpY) * wpFaceC;
+    * smoothstep(2.0, 7.0, wpY) * wpFaceC * (1.0 - wpOffshore);
   float wpWetFoot = wpFaceC * (1.0 - smoothstep(-0.6, 1.8, wpY));
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.74, 0.74), wpFaceC * 0.45);
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.7, 0.62), wpBedding * wpFaceC * 0.5);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.77, 0.7), wpGuano * 0.55);
   // Stack tops, offshore, whitened where the boobies roost.
-  float wpOffshore = 1.0 - smoothstep(-1.5, 0.5, wpCoast(wpP));
-  float wpRoost = wpOffshore * smoothstep(4.0, 9.0, wpY) * smoothstep(0.4, 0.7, psrFbm(wpP * 1.3 + vec2(2.0, 8.0)));
+  // Roost deposits sit on upper shelves, rather than whitening the entire
+  // stack wall into a pale pillar. Basalt remains visible between deposits.
+  float wpRoost = wpOffshore * smoothstep(4.0, 9.0, wpY)
+    * smoothstep(0.45, 0.85, normalize(vPostScrubSurfaceNormal).y)
+    * smoothstep(0.48, 0.75, psrFbm(wpP * 1.3 + vec2(2.0, 8.0)));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.8, 0.79, 0.73), wpRoost * 0.7);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.07, 0.1, 0.1), wpWetFoot * 0.72);
   // The cove beach: pale shell sand with dark cobbles at the cliff foot.
@@ -129,10 +133,12 @@ export function createWindyPromontoryTerrainMaterial() {
     pathSplatBounds: WINDY_PROMONTORY_SPLAT_BOUNDS,
     pathMinimumWidth: 1.16,
     layerConfig: LAYERS,
+    basaltTriplanar: true,
+    coastalRotation: -Math.PI / 4,
     surfaceMaskGLSL: MASKS,
     layerWeightsOverlayGLSL: WEIGHTS,
     colorOverlayGLSL: COLOR,
     roughnessOverlayGLSL: ROUGHNESS,
-    cacheKey: 'windy-promontory-pbr-v2',
+    cacheKey: 'windy-promontory-pbr-v4',
   });
 }

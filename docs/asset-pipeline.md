@@ -71,6 +71,73 @@ file if the scene bounds, rig, meshes, or animation inventory change.
 
 ## Verification
 
+### Rancho wall and thatch materials
+
+The rancho uses generated earthen daub and grass thatch, with color and aligned
+height source images in `assets-src/rancho-materials/`. These are reconstructed
+art surfaces, not historical photographs or measured material scans. The exact
+built-in ImageGen prompts are saved in `provenance.json`; `build-report.json`
+records source hashes, physical tile/relief scales, and runtime byte sizes.
+
+Run `npm run asset:rancho` to rebuild the 1024px sRGB albedos and 512px linear
+OpenGL normal/roughness maps in `public/assets/textures/interiors/rancho/`.
+The bake matches opposite edges before deriving periodic normals, uses the
+height edits rather than color brightness for relief, and keeps roughness in
+a dry 0.87–0.97 range. The building and interior share the same materials;
+wall UVs preserve horizontal cane and continue across door/window panels.
+
+### Landscape material repairs
+
+`npm run asset:landscape` rebuilds four generated surfaces: folded pāhoehoe,
+patchy wind-worn turf, decomposing highland litter, and weathered scoria. Color
+and approximate height edits, exact ImageGen prompts, source hashes and build
+reports live in `assets-src/landscape-materials/`. These are reconstructed art
+materials, not measured scans. The runtime directory is
+`public/assets/textures/world/floreana-landscape/`: 1024px sRGB WebP albedos and
+512px lossless linear NRH packs. The bake matches opposite source edges before
+taking periodic height derivatives and verifies all four packed channels survive
+encoding byte-for-byte. Region shaders remap roughness into their own ranges.
+
+Basalt Plains owns the lava/scoria terrain layers; Windy Promontory owns the turf
+rotation and preserves its color/relief alignment; Western Highlands uses litter
+under the canopy while keeping mud on the trail. `triplanarRockMaterial.js` maps
+shared boulders in metre-scaled object space instead of using the sphere's
+pinched UVs. It samples the same projections for color, roughness and normals,
+preserves instance/fracture tints and contact dust, and keeps the texture attached
+when rocks move or are carved. Default boulders use solid weathered basalt rather
+than loose-gravel imagery; scoriaceous boulders use the new scoria pack.
+The rock, formation and coastal-boulder components defer disposal through React
+effect replay so a cold image load can still mark its texture for GPU upload.
+The saved `landscape-materials` play scenario samples the coastal albedo on the
+GPU and rejects a constant placeholder, even when the CPU image has loaded.
+
+### Shared period wood, cloth and leather
+
+`npm run asset:period` builds the eight surfaces in
+`assets-src/period-materials/`: weathered timber, cut end grain, plain canvas,
+patched sailcloth, linen, wool, hemp sacking, and leather. The folder preserves
+the built-in ImageGen prompts, original color/approximate height images,
+physical scales, source hashes and byte reports. These are reconstructed art
+surfaces, not measured historical scans. Runtime albedos are 1024px sRGB WebP;
+normal and roughness maps are 512px lossless linear WebP. The bake checks data
+channels byte-for-byte. Roughness is calibrated separately for each material.
+
+`periodMaterials.js` owns the registry, fallback colors and shared loader.
+Repeating surfaces use metre-based UVs; end grain and patched sailcloth occupy
+one complete panel. `periodMaterialUvs.js` fits box panels, vertical barrel
+staves and ellipsoidal cloth bundles. The collecting case uses physical panel
+and strap UVs, and its material lifetime survives development effect replay.
+The huts and cave share the same fabric types while retaining their authored
+tints, prints and furniture layouts.
+
+The build also creates `folding-stool-period.glb`, registered as
+`beagleCabinStool` in `modelAssets.js`. It replaces the actual ship stool's
+canvas material and UVs, retaining the existing varnished oak and brass. The
+original `folding-stool.glb` remains the reproducible input. The stool report
+verifies position/normal/index data and node transforms are unchanged. Embedded
+images are reflected vertically to match the metre-based procedural UVs with
+GLTF's unflipped image loading; channel values are verified after conversion.
+
 ```bash
 npm run asset:audit
 npm run check

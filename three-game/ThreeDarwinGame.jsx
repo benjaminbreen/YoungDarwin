@@ -42,6 +42,7 @@ import { isExpeditionPaused, isGameplayInputBlocked } from './input/typingMode';
 import { ThreeScene } from './components/ThreeScene';
 import { UnderwaterPostEffect } from './components/scene/UnderwaterPostEffect';
 import { HeatHazePostEffect } from './components/scene/HeatHazePostEffect';
+import { ExhaustionPostEffect } from './components/scene/ExhaustionPostEffect';
 import { AnimalVisionPostEffect } from './components/scene/AnimalVisionPostEffect';
 import { ThreeHUD } from './ui/ThreeHUD';
 import { SoundMixerPanel } from './ui/SoundMixer';
@@ -80,6 +81,13 @@ import {
   terrainLookJson,
   terrainLookTuning,
 } from './world/terrainLook';
+import {
+  ENVIRONMENT_LOOK_DEFAULTS,
+  environmentLookTuning,
+  resetEnvironmentLookTuning,
+  setEnvironmentLookTuning,
+  subscribeEnvironmentLook,
+} from './world/environmentLook';
 import { CAMERA_DEV_DEFAULTS, cameraDev, resetCameraDev } from './camera/cameraDevRuntime';
 import { setCoverageAASupport } from './components/assets/materialStability';
 import {
@@ -2915,6 +2923,10 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
           radius={visionProfile.perceptualBloom.radius ?? 0.7}
         />
       )}
+      {/* Low health or high fatigue drains the world to grey with red rims;
+          after the grade so it reads the finished colour, before the vignette
+          so the frame edge still darkens over it. */}
+      {enabled && <ExhaustionPostEffect enabled={!visionProfile?.effect} />}
       {enabled && <primitive object={gradeFx.vignette} />}
     </EffectComposer>
   );
@@ -3354,6 +3366,40 @@ function TerrainLookSection() {
       <div className="grid grid-cols-1 gap-1.5">
         <DevSlider label="Baked AO" value={terrainLookTuning.aoStrength} min={0} max={3} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ aoStrength: value })} />
         <DevSlider label="AO on sunlight" value={terrainLookTuning.aoDirect} min={0} max={1} step={0.02} format={v => (v === 0 ? 'ambient only' : v.toFixed(2))} onChange={value => set({ aoDirect: value })} />
+      </div>
+    </div>
+  );
+}
+
+// Directional shape of the scene's sky lighting (world/environmentLook.js):
+// the glow toward the sun and the sand bounce from below. Session-only; copy
+// the numbers into ENVIRONMENT_LOOK_DEFAULTS to keep them.
+function EnvironmentLookSection() {
+  const [, setRevision] = useState(0);
+  useEffect(() => subscribeEnvironmentLook(() => setRevision(value => value + 1)), []);
+  const set = patch => setEnvironmentLookTuning(patch);
+  const isDefault = Object.keys(ENVIRONMENT_LOOK_DEFAULTS)
+    .every(key => environmentLookTuning[key] === ENVIRONMENT_LOOK_DEFAULTS[key]);
+  return (
+    <div className="mb-3 rounded border border-amber-200/20 bg-black/20 p-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Sky lighting</h3>
+        <button
+          type="button"
+          onClick={() => resetEnvironmentLookTuning()}
+          className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-100/60 hover:bg-white/10"
+        >
+          reset
+        </button>
+      </div>
+      <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
+        Shapes shaded faces on terrain, rocks, props and characters. Rebuilds the sky light on change;
+        no per-frame cost.{isDefault ? '' : ' Currently overriding the shipped defaults.'}
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Sun glow" value={environmentLookTuning.sunLobe} min={0} max={8} step={0.1} format={v => (v === 0 ? 'off' : v.toFixed(1))} onChange={value => set({ sunLobe: value })} />
+        <DevSlider label="Glow width" value={environmentLookTuning.sunLobeWidth} min={1} max={32} step={0.5} format={v => (v <= 3 ? `${v.toFixed(1)} broad` : v >= 16 ? `${v.toFixed(1)} tight` : v.toFixed(1))} onChange={value => set({ sunLobeWidth: value })} />
+        <DevSlider label="Sand bounce" value={environmentLookTuning.groundBounce} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : v.toFixed(2))} onChange={value => set({ groundBounce: value })} />
       </div>
     </div>
   );
@@ -4059,6 +4105,7 @@ function PerformancePanel({
               screens of backdrop sliders, which made them effectively
               undiscoverable. */}
           <TerrainLookSection />
+          <EnvironmentLookSection />
           <CentralPeakDiagnostics />
           <SolarDiagnostics settings={settings} set={set} />
           <CloudShadeDiagnostics />

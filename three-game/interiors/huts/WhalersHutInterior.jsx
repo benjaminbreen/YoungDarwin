@@ -2,6 +2,7 @@
 
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { FabricBundle } from '../cave/props/primitives';
 import { WHALERS_HUT as H } from '../blueprints/whalersHut';
 import { Beam, Block, Cask, Cyl, hash, Lathe, Rope, StaticBatch } from '../cave/props/primitives';
 import { moundGeometry, seeded } from './hutGeometry';
@@ -97,9 +98,7 @@ function Bunk({ materials }) {
         <Beam key={`board${i}`} size={[0.17, 0.035, 1.98]} material={materials.shipPlank} tile={1.6} position={[-0.36 + i * 0.18, 0.535, 0]} rotation={[0, (hash(i, 7) - 0.5) * 0.02, 0]} />
       ))}
       {/* Straw tick, flattened and split. */}
-      <mesh material={materials.sacking} position={[0.02, 0.6, 0.45]} scale={[0.38, 0.06, 0.62]} castShadow receiveShadow>
-        <sphereGeometry args={[1, 12, 8]} />
-      </mesh>
+      <FabricBundle material={materials.sacking} position={[0.02, 0.6, 0.45]} radii={[0.38, 0.06, 0.62]} rings={8} />
       <mesh material={materials.straw} position={[0.12, 0.6, 1.0]} scale={[0.16, 0.03, 0.1]}>
         <sphereGeometry args={[1, 8, 5]} />
       </mesh>
@@ -153,7 +152,7 @@ function EastShelf({ materials }) {
 function CaskCorner({ materials }) {
   return (
     <group position={[2.85, 0, 1.45]}>
-      <Cask height={0.86} radius={0.3} material={materials.crateWood} hoop={materials.rust} headMaterial={materials.timber} position={[0, 0.43, 0]} />
+      <Cask height={0.86} radius={0.3} material={materials.crateWood} hoop={materials.rust} headMaterial={materials.endGrain} position={[0, 0.43, 0]} />
       <Block size={[0.4, 0.03, 0.3]} material={materials.driftwood} position={[0.02, 0.88, 0]} rotation={[0, 0.3, 0]} />
     </group>
   );

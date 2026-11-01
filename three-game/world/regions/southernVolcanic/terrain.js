@@ -8,6 +8,7 @@ import {
 import {
   SOUTHERN_VOLCANIC,
   SOUTHERN_VOLCANIC_ENTRY_SPAWNS,
+  SOUTHERN_VOLCANIC_SPREAD as S,
   SPATTER_CONE,
   southernVolcanicConeInfo,
   southernVolcanicFlowAngle,
@@ -45,8 +46,8 @@ function ropeRelief(x, z) {
 export function southernVolcanicHeight(x, z, { movementSurface = false } = {}) {
   // The plain falls gently from the colony slopes in the north toward the
   // Punta Sur headland and the mangroves to the west.
-  const fall = THREE.MathUtils.clamp((-z + 52) / 104, 0, 1);
-  const westward = THREE.MathUtils.clamp((x + 56) / 112, 0, 1);
+  const fall = THREE.MathUtils.clamp((-z / S + 52) / 104, 0, 1);
+  const westward = THREE.MathUtils.clamp((x / S + 56) / 112, 0, 1);
   const broad = elevationNoise(x * 0.018 - 3.4, z * 0.02 + 6.1);
   const cross = elevationNoise(x * 0.039 + 9.7, z * 0.043 - 2.2);
   const cone = southernVolcanicConeInfo(x, z);

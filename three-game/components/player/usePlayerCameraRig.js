@@ -423,7 +423,8 @@ export function usePlayerCameraRig() {
       const wheelViewMode = useThreeGameStore.getState().viewMode;
       // Hero dollies in metres on its own value; every other mode shares the
       // historical zoom scalar (which ADS and the opening shot also read).
-      if (wheelViewMode === 'hero') {
+      const confined = cameraProfileRef.current?.confined === true;
+      if (wheelViewMode === 'hero' && !confined) {
         heroZoomRef.current = THREE.MathUtils.clamp(
           heroZoomRef.current + normalizedDelta * cameraDev.heroZoomStep,
           cameraDev.heroMinDistance,
@@ -431,10 +432,11 @@ export function usePlayerCameraRig() {
         );
         return;
       }
-      const maxZoom = wheelViewMode === 'top' ? CAMERA.topMaxZoom : CAMERA.maxZoom;
+      const maxZoom = wheelViewMode === 'top' ? CAMERA.topMaxZoom
+        : confined ? cameraProfileRef.current.maxDistance : CAMERA.maxZoom;
       zoomRef.current = THREE.MathUtils.clamp(
         zoomRef.current + normalizedDelta * 0.9,
-        CAMERA.minZoom,
+        confined ? cameraProfileRef.current.minDistance : CAMERA.minZoom,
         maxZoom,
       );
     };
@@ -1163,7 +1165,7 @@ export function usePlayerCameraRig() {
       // the muzzle rises and settles on its own without the shot permanently
       // moving where the player was aiming.
       const lookPitch = THREE.MathUtils.clamp(
-        (CAMERA.defaultPitch - pitchRef.current) * cameraDev.fpPitchScale
+        ((cameraProfile?.confined ? cameraProfile.defaultPitch : CAMERA.defaultPitch) - pitchRef.current) * cameraDev.fpPitchScale
           + recoilFade * cameraDev.fpRecoilKick,
         -pitchLimit,
         pitchLimit,
@@ -1276,7 +1278,10 @@ export function usePlayerCameraRig() {
       // Hero view: tight over-the-right-shoulder action framing. Narrow zoom
       // band, chest-high pivot, shallower default pitch, snappier follow, and
       // a slight pull-back as sprint spools so speed reads in the framing.
-      const heroMode = viewMode === 'hero' && !flightCamera;
+      // Small authored rooms use their profile's shoulder distance, side and
+      // pivot even in Follow mode. The outdoor hero dolly otherwise overrides
+      // those limits (5.9m by default) and puts the eye beyond walls/eaves.
+      const heroMode = viewMode === 'hero' && !flightCamera && !cameraProfile?.confined;
       let frameDistance = cameraDistance;
       let frameSide = side;
       if (heroMode) {

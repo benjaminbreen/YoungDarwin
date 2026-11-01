@@ -926,6 +926,12 @@ function createHarnessApi() {
       useThreeGameStore.setState({ fatigue: Math.max(0, Math.min(100, Number(value) || 0)) });
       return makeSnapshot();
     },
+    // Health-driven visuals (the exhaustion grade) need the low band without
+    // staging an injury.
+    setHealth: value => {
+      useThreeGameStore.setState({ health: Math.max(0, Math.min(100, Number(value) || 0)) });
+      return makeSnapshot();
+    },
     selectNearestSpecimen: () => {
       const nearest = findNearestSpecimen();
       if (!nearest) return null;

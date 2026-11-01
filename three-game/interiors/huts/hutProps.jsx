@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { Beam, Cyl, hash, Lathe } from '../cave/props/primitives';
+import { Beam, Cyl, hash, Lathe, FabricBundle } from '../cave/props/primitives';
 import { mergeAll, poleGeometry, seeded } from './hutGeometry';
 import { plantainGeometry } from './hutFlora';
 import { useDisposable } from './useDisposable';
@@ -11,7 +11,7 @@ import { useDisposable } from './useDisposable';
 
 // A hammock slung between two points: a cloth bed that sags in a catenary
 // and curls up at its edges, gathered into cords at each end.
-function hammockGeometry(from, to, { sag = 0.5, width = 0.72, segments = 20, across = 8 } = {}) {
+function hammockGeometry(from, to, { sag = 0.5, width = 0.72, segments = 20, across = 8, panel = false } = {}) {
   const a = new THREE.Vector3(...from);
   const b = new THREE.Vector3(...to);
   const along = b.clone().sub(a);
@@ -31,7 +31,7 @@ function hammockGeometry(from, to, { sag = 0.5, width = 0.72, segments = 20, acr
     p.addScaledVector(side, s * width * spread);
     // Edges ride up: the bed is a shallow trough.
     p.y += (s * s * 4) * 0.1 * spread;
-    return [p, [t * length, s + 0.5]];
+    return [p, panel ? [t, s + 0.5] : [t * length, (s + 0.5) * width]];
   };
   for (let i = 0; i < segments; i += 1) {
     for (let j = 0; j < across; j += 1) {
@@ -50,7 +50,9 @@ function hammockGeometry(from, to, { sag = 0.5, width = 0.72, segments = 20, acr
 }
 
 export function Hammock({ materials, from, to, sag = 0.5, cloth = 'redWool' }) {
-  const bed = useDisposable(() => hammockGeometry(from, to, { sag }), [from[0], from[1], from[2], to[0], to[1], to[2], sag]);
+  const material = materials[cloth] || materials.redWool;
+  const panel = material.userData?.periodSurface?.uvMode === 'panel';
+  const bed = useDisposable(() => hammockGeometry(from, to, { sag, panel }), [from[0], from[1], from[2], to[0], to[1], to[2], sag, panel]);
   const cords = useDisposable(() => {
     const a = new THREE.Vector3(...from);
     const b = new THREE.Vector3(...to);
@@ -69,7 +71,7 @@ export function Hammock({ materials, from, to, sag = 0.5, cloth = 'redWool' }) {
   }, [from[0], from[1], from[2], to[0], to[1], to[2], sag]);
   return (
     <group>
-      <mesh geometry={bed} material={materials[cloth] || materials.redWool} castShadow receiveShadow />
+      <mesh geometry={bed} material={material} castShadow receiveShadow />
       <mesh geometry={cords} material={materials.twine} />
     </group>
   );
@@ -283,9 +285,7 @@ export function Gourd({ materials, size = 0.12, ...props }) {
 export function Sack({ materials, size = [0.42, 0.55, 0.36], tied = true, ...props }) {
   return (
     <group {...props}>
-      <mesh material={materials.sacking} scale={[size[0] / 2, size[1] / 2, size[2] / 2]} position={[0, size[1] * 0.45, 0]} castShadow receiveShadow>
-        <sphereGeometry args={[1, 12, 10]} />
-      </mesh>
+      <FabricBundle material={materials.sacking} radii={[size[0] / 2, size[1] / 2, size[2] / 2]} position={[0, size[1] * 0.45, 0]} />
       {tied && <Cyl r={0.05} rTop={0.02} h={0.12} segments={6} material={materials.sacking} position={[0, size[1] * 0.92, 0]} />}
     </group>
   );

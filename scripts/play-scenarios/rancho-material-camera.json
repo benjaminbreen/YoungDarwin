@@ -1,0 +1,15 @@
+[
+  ["zone", "COLONIST_RANCHO"],
+  ["view", "hero"],
+  ["tp", 0, 0],
+  ["wait", 1800],
+  ["expect", "(() => { const s = window.__darwinScene; let m; s?.scene.traverse(o => { if (o.material?.name === 'HutDaub') m = o.material; }); return m?.map?.image?.width > 1 && m.map.version > 1 && m.normalMap.image.width > 1 && m.roughnessMap.image.width > 1; })()"],
+  ["expect", "api.renderAudit().ok"],
+  ["expect", "(() => { const c = window.__darwinScene.camera.position, p = api.getMotionState().position; return Math.hypot(c.x - p.x, c.z - p.z) < 2.8 && c.y - p.y < 2.3; })()"],
+  ["js", "document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', {deltaY: 1200, bubbles: true, cancelable: true}))"],
+  ["wait", 800],
+  ["expect", "(() => { const c = window.__darwinScene.camera.position, p = api.getMotionState().position; return Math.hypot(c.x - p.x, c.z - p.z) < 2.8; })()"],
+  ["view", "first"],
+  ["wait", 800],
+  ["expect", "(() => { const s = window.__darwinScene; return Math.abs(s.camera.getWorldDirection(new s.THREE.Vector3()).y) < 0.1; })()"]
+]

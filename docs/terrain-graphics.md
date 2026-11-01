@@ -88,6 +88,13 @@ Use this factory for compatible dry, path-led regions. Coastal, wetland, reef,
 or pathless materials may reuse the packed-channel loader and normal/roughness
 math without forcing themselves into these four roles.
 
+The shared factory also accepts `basaltTriplanar` for tall exposed rock faces
+and `coastalRotation` for a directional ground surface. A directional surface
+uses one color/data projection and rotates the relief back into the ground
+frame; it does not mix in a rotated color-only sample. Windy Promontory is the
+reference. The generated landscape sources and rebuild command are documented
+in `docs/asset-pipeline.md`.
+
 ## Reusable White-Sand Beach Layer
 
 Use `three-game/world/regions/materials/whiteSandBeachLayer.js` for warm pale

@@ -5,7 +5,7 @@ const RESOURCE_CACHE_LIMIT = 4;
 const GENERATED_BASE = '/assets/generated/border-vistas';
 // Bump whenever the baked border-vista buffers are regenerated, or clients
 // keep serving the previous payload from cache at the unchanged URL.
-const GENERATED_GEOMETRY_VERSION = 40;
+const GENERATED_GEOMETRY_VERSION = 41;
 const resources = new Map();
 let useCounter = 0;
 

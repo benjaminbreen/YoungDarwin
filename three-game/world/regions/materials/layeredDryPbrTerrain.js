@@ -18,6 +18,8 @@ function fragmentCommon({
   surfaceMaskGLSL = '',
   layerWeightsOverlayGLSL = '',
   slopeExposure = 1,
+  basaltTriplanar = false,
+  coastalRotation = null,
 }) {
   return /* glsl */`
         uniform sampler2D uPostScrubCoastalAlbedo;
@@ -30,6 +32,7 @@ function fragmentCommon({
         uniform sampler2D uPostScrubCinderNrh;
         varying vec3 vPostScrubWorld;
         varying float vPostScrubSlope;
+        ${basaltTriplanar ? 'varying vec3 vPostScrubSurfaceNormal;' : ''}
 
         float psrHash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -102,7 +105,7 @@ function fragmentCommon({
           out vec2 basaltUv,
           out vec2 cinderUv
         ) {
-          coastalUv = p * ${f(layerConfig.coastal.texture.scale)} + vec2(0.17, -0.31);
+          coastalUv = ${coastalRotation === null ? 'p' : `mat2(${f(Math.cos(coastalRotation))}, ${f(-Math.sin(coastalRotation))}, ${f(Math.sin(coastalRotation))}, ${f(Math.cos(coastalRotation))}) * p`} * ${f(layerConfig.coastal.texture.scale)} + vec2(0.17, -0.31);
           litterUv = p * ${f(layerConfig.litter.texture.scale)} + vec2(-0.29, 0.23);
           basaltUv = p * ${f(layerConfig.basalt.texture.scale)} + vec2(0.37, 0.11);
           // World-space like the other layers: cinder is granular, and a
@@ -114,10 +117,53 @@ function fragmentCommon({
           vec2 xy = nrh.rg * 2.0 - 1.0;
           float z = sqrt(max(1.0 - min(dot(xy, xy), 0.98), 0.02));
           return (xy / max(z, 0.18)) * strength;
-        }`;
+        }
+        ${basaltTriplanar ? triplanarBasaltGLSL(layerConfig.basalt.texture) : ''}`;
 }
 
-function colorFragment() {
+// Signed projections keep all three tangent frames right-handed. The same
+// coordinates drive albedo, roughness and normal relief, including cliff sides.
+function triplanarBasaltGLSL(texture) {
+  return /* glsl */`
+    void psrRockFrame(out vec3 n, out vec3 w, out vec3 facing, out vec2 ux, out vec2 uy, out vec2 uz) {
+      n = normalize(vPostScrubSurfaceNormal);
+      w = pow(abs(n), vec3(4.0));
+      w /= max(dot(w, vec3(1.0)), 0.0001);
+      facing = mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), n));
+      vec3 p = vPostScrubWorld * ${f(texture.scale)};
+      ux = vec2(-p.z * facing.x, p.y) + vec2(0.37, 0.11);
+      uy = vec2(p.x, -p.z * facing.y) + vec2(0.37, 0.11);
+      uz = vec2(p.x * facing.z, p.y) + vec2(0.37, 0.11);
+    }
+    vec3 psrRockAlbedo() {
+      vec3 n; vec3 w; vec3 facing; vec2 ux; vec2 uy; vec2 uz;
+      psrRockFrame(n, w, facing, ux, uy, uz);
+      return texture2D(uPostScrubBasaltAlbedo, ux).rgb * w.x
+        + texture2D(uPostScrubBasaltAlbedo, uy).rgb * w.y
+        + texture2D(uPostScrubBasaltAlbedo, uz).rgb * w.z;
+    }
+    float psrRockRoughness() {
+      vec3 n; vec3 w; vec3 facing; vec2 ux; vec2 uy; vec2 uz;
+      psrRockFrame(n, w, facing, ux, uy, uz);
+      return texture2D(uPostScrubBasaltNrh, ux).b * w.x
+        + texture2D(uPostScrubBasaltNrh, uy).b * w.y
+        + texture2D(uPostScrubBasaltNrh, uz).b * w.z;
+    }
+    vec3 psrRockPerturbation() {
+      vec3 n; vec3 w; vec3 facing; vec2 ux; vec2 uy; vec2 uz;
+      psrRockFrame(n, w, facing, ux, uy, uz);
+      vec2 sx = psrNormalSlope(texture2D(uPostScrubBasaltNrh, ux), ${f(texture.normalStrength)});
+      vec2 sy = psrNormalSlope(texture2D(uPostScrubBasaltNrh, uy), ${f(texture.normalStrength)});
+      vec2 sz = psrNormalSlope(texture2D(uPostScrubBasaltNrh, uz), ${f(texture.normalStrength)});
+      vec3 detail = vec3(0.0, sx.y, -sx.x * facing.x) * w.x
+        + vec3(sy.x, 0.0, -sy.y * facing.y) * w.y
+        + vec3(sz.x * facing.z, sz.y, 0.0) * w.z;
+      return detail - n * dot(detail, n);
+    }
+  `;
+}
+
+function colorFragment(basaltTriplanar, coastalRotation) {
   return /* glsl */`
         vec2 psrPosition = vPostScrubWorld.xz;
         vec2 psrCoastalUv;
@@ -134,17 +180,17 @@ function colorFragment() {
         // cinder are granular and hide repeats on their own.
         float psrTileBreak = smoothstep(0.32, 0.68, psrNoise(psrPosition * 0.023 + vec2(3.1, 9.4)));
         mat2 psrTileRotation = mat2(0.588, -0.809, 0.809, 0.588);
-        vec3 psrCoastal = mix(
+        vec3 psrCoastal = ${coastalRotation === null ? `mix(
           texture2D(uPostScrubCoastalAlbedo, psrCoastalUv).rgb,
           texture2D(uPostScrubCoastalAlbedo, psrTileRotation * psrCoastalUv * 0.62 + vec2(0.31, -0.17)).rgb,
           psrTileBreak * 0.85
-        ) * vec3(1.05, 1.02, 0.94);
+        )` : 'texture2D(uPostScrubCoastalAlbedo, psrCoastalUv).rgb'} * vec3(1.05, 1.02, 0.94);
         vec3 psrLitter = mix(
           texture2D(uPostScrubLitterAlbedo, psrLitterUv).rgb,
           texture2D(uPostScrubLitterAlbedo, psrTileRotation * psrLitterUv * 0.62 + vec2(-0.23, 0.37)).rgb,
           psrTileBreak * 0.85
         ) * vec3(1.04, 1.01, 0.9);
-        vec3 psrBasalt = texture2D(uPostScrubBasaltAlbedo, psrBasaltUv).rgb * vec3(1.06, 1.03, 0.98);
+        vec3 psrBasalt = ${basaltTriplanar ? 'psrRockAlbedo()' : 'texture2D(uPostScrubBasaltAlbedo, psrBasaltUv).rgb'} * vec3(1.06, 1.03, 0.98);
         vec3 psrCinder = texture2D(uPostScrubCinderAlbedo, psrCinderUv).rgb * vec3(1.08, 1.0, 0.9);
         vec4 psrPath = psrPathSplat(psrPosition);
         psrCinder *= mix(1.0, 0.78, psrPath.g * 0.72);
@@ -175,7 +221,7 @@ function colorFragment() {
         diffuseColor.rgb = clamp(psrColor, 0.0, 1.0);`;
 }
 
-function roughnessFragment(layerConfig, roughnessOverlayGLSL = '') {
+function roughnessFragment(layerConfig, roughnessOverlayGLSL = '', basaltTriplanar = false) {
   return /* glsl */`
         vec2 psrRoughPosition = vPostScrubWorld.xz;
         vec2 psrRoughCoastalUv;
@@ -203,7 +249,7 @@ function roughnessFragment(layerConfig, roughnessOverlayGLSL = '') {
         float psrBasaltRoughness = mix(
           ${f(layerConfig.basalt.roughnessMin)},
           ${f(layerConfig.basalt.roughnessMax)},
-          texture2D(uPostScrubBasaltNrh, psrRoughBasaltUv).b
+          ${basaltTriplanar ? 'psrRockRoughness()' : 'texture2D(uPostScrubBasaltNrh, psrRoughBasaltUv).b'}
         );
         float psrCinderRoughness = mix(
           ${f(layerConfig.cinder.roughnessMin)},
@@ -220,7 +266,7 @@ function roughnessFragment(layerConfig, roughnessOverlayGLSL = '') {
         ${roughnessOverlayGLSL}`;
 }
 
-function normalFragment(layerConfig) {
+function normalFragment(layerConfig, basaltTriplanar, coastalRotation) {
   return /* glsl */`
         vec2 psrNormalPosition = vPostScrubWorld.xz;
         vec2 psrNormalCoastalUv;
@@ -239,14 +285,16 @@ function normalFragment(layerConfig) {
           texture2D(uPostScrubCoastalNrh, psrNormalCoastalUv),
           ${f(layerConfig.coastal.texture.normalStrength)}
         );
+        ${coastalRotation === null ? '' : `// Rotate relief back into the ground frame, matching the directional color.
+        psrCoastalSlope = mat2(${f(Math.cos(coastalRotation))}, ${f(Math.sin(coastalRotation))}, ${f(-Math.sin(coastalRotation))}, ${f(Math.cos(coastalRotation))}) * psrCoastalSlope;`}
         vec2 psrLitterSlope = psrNormalSlope(
           texture2D(uPostScrubLitterNrh, psrNormalLitterUv),
           ${f(layerConfig.litter.texture.normalStrength)}
         );
-        vec2 psrBasaltSlope = psrNormalSlope(
+        vec2 psrBasaltSlope = ${basaltTriplanar ? 'vec2(0.0)' : `psrNormalSlope(
           texture2D(uPostScrubBasaltNrh, psrNormalBasaltUv),
           ${f(layerConfig.basalt.texture.normalStrength)}
-        );
+        )`};
         vec2 psrCinderSlope = psrNormalSlope(
           texture2D(uPostScrubCinderNrh, psrNormalCinderUv),
           ${f(layerConfig.cinder.texture.normalStrength)}
@@ -255,13 +303,15 @@ function normalFragment(layerConfig) {
         psrCinderSlope *= mix(1.0, 0.7, psrNormalPath.g);
 
         vec3 psrWorldNormal = inverseTransformDirection(normal, viewMatrix);
-        vec3 psrWorldX = normalize(vec3(1.0, 0.0, 0.0) - psrWorldNormal * psrWorldNormal.x);
+        vec3 psrWorldAxis = ${basaltTriplanar ? 'abs(psrWorldNormal.x) < 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0)' : 'vec3(1.0, 0.0, 0.0)'};
+        vec3 psrWorldX = normalize(psrWorldAxis - psrWorldNormal * dot(psrWorldAxis, psrWorldNormal));
         vec3 psrWorldZ = normalize(cross(psrWorldX, psrWorldNormal));
         vec2 psrWorldSlope = psrCoastalSlope * psrNormalWeights.x
           + psrLitterSlope * psrNormalWeights.y
           + psrBasaltSlope * psrNormalWeights.z
           + psrCinderSlope * psrNormalWeights.w;
         vec3 psrPerturbation = psrWorldX * psrWorldSlope.x + psrWorldZ * psrWorldSlope.y;
+        ${basaltTriplanar ? 'psrPerturbation += psrRockPerturbation() * psrNormalWeights.z;' : ''}
         vec3 psrMappedWorldNormal = normalize(psrWorldNormal + psrPerturbation);
         normal = normalize(mat3(viewMatrix) * psrMappedWorldNormal);`;
 }
@@ -279,6 +329,12 @@ export function createLayeredDryPbrTerrainMaterial({
   // 0..1 scale on the shared slope-driven exposed soil/rock; regions where
   // bare slopes are wrong (wetland floors) can dial it down without a shader.
   slopeExposure = 1,
+  // Opt-in for regions with tall rock faces; leaves existing ground-only
+  // materials on their original planar sampling path.
+  basaltTriplanar = false,
+  // A directional surface uses one registered color/data sample instead of
+  // the rotated color-only blend. Rotation is in radians in the x/z plane.
+  coastalRotation = null,
   cacheKey = 'layered-dry-pbr-terrain-v1',
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
@@ -334,39 +390,41 @@ export function createLayeredDryPbrTerrainMaterial({
       .replace(
         '#include <beginnormal_vertex>',
         `#include <beginnormal_vertex>
-        vPostScrubSlope = 1.0 - clamp(abs(objectNormal.y), 0.0, 1.0);`,
+        vPostScrubSlope = 1.0 - clamp(abs(objectNormal.y), 0.0, 1.0);
+        ${basaltTriplanar ? 'vPostScrubSurfaceNormal = inverseTransformDirection(normalMatrix * objectNormal, viewMatrix);' : ''}`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vPostScrubWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
       );
+    if (basaltTriplanar) shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vPostScrubSurfaceNormal;');
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
-${fragmentCommon({ layerConfig, surfaceMaskGLSL, layerWeightsOverlayGLSL, slopeExposure })}`,
+${fragmentCommon({ layerConfig, surfaceMaskGLSL, layerWeightsOverlayGLSL, slopeExposure, basaltTriplanar, coastalRotation })}`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-${colorFragment()}
+${colorFragment(basaltTriplanar, coastalRotation)}
 ${colorOverlayGLSL}`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-${roughnessFragment(layerConfig, roughnessOverlayGLSL)}`,
+${roughnessFragment(layerConfig, roughnessOverlayGLSL, basaltTriplanar)}`,
       )
       .replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
-${normalFragment(layerConfig)}`,
+${normalFragment(layerConfig, basaltTriplanar, coastalRotation)}`,
       );
   };
   // The factory suffix versions the shared GLSL independently of each
   // region's own key.
-  material.customProgramCacheKey = () => `${cacheKey}|ldpt-v3-verge`;
+  material.customProgramCacheKey = () => `${cacheKey}|ldpt-v5:${basaltTriplanar ? 'triplanar' : 'planar'}:${coastalRotation ?? 'mixed'}`;
   material.needsUpdate = true;
   return material;
 }

@@ -1,4 +1,4 @@
-import { regionMaps } from '../../game-core/regionMaps';
+import { getRegionSpread, regionMaps } from '../../game-core/regionMaps';
 
 const OPPOSITE_EDGE = {
   north: 'south',
@@ -222,11 +222,13 @@ export const SOUTHWESTERN_CLIFFS_SOUTHERN_INTERTIDAL_SEAM = createRouteSeam(
   8,
 );
 
+// Authored at the Basalt Plains' original scale; the spread keeps the seam at
+// the same relative point on Punta Sur's north edge.
 export const SOUTHERN_VOLCANIC_PUNTA_SUR_SEAM = createRouteSeam(
   'S_VOLCANIC',
   'PUNTA_SUR',
   'south',
-  -10,
+  -10 * getRegionSpread('S_VOLCANIC'),
 );
 
 export const SOUTHERN_INTERTIDAL_PUNTA_SUR_SEAM = createRouteSeam(

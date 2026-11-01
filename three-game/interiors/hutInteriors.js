@@ -30,12 +30,14 @@ const HUT_SCENE = {
 };
 
 const HUT_CAMERA = {
-  minDistance: 1.55,
-  defaultDistance: 2.35,
-  maxDistance: 3.1,
-  defaultPitch: 0.3,
-  side: 0.25,
-  pivotY: 1.25,
+  confined: true,
+  minDistance: 1.25,
+  defaultDistance: 1.85,
+  maxDistance: 2.5,
+  // Keep the chase eye below the low eaves and rafters of these small rooms.
+  defaultPitch: 0.12,
+  side: 0.18,
+  pivotY: 1.2,
   firstPersonEyeY: 1.62,
   collision: { enabled: true, padding: 0.22, minimumDistance: 0.55 },
   topHeight: 10,

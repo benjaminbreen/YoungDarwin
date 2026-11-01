@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { loadRepeatingTerrainTexture } from '../../world/regions/materials/pbrTerrainTextures';
+import { loadPeriodSurface } from '../../world/regions/materials/periodMaterials';
 import { createHutTextures } from './hutTextures';
 
 // Materials for the whalers' shore hut and the colonist's rancho. The same
@@ -10,8 +11,8 @@ import { createHutTextures } from './hutTextures';
 // candles, casks, lanterns, rope — be reused here unchanged.
 
 const LAWSON = '/assets/textures/interiors/lawson-house';
-const DECK = '/assets/textures/world/beagle-deck/Planks037A_1K-JPG';
 const PBR = '/assets/textures/world/floreana-pbr';
+const RANCHO = '/assets/textures/interiors/rancho';
 
 function loadSet(color, normal, rough, rotation = 0) {
   const map = loadRepeatingTerrainTexture(color, { fallback: '#7a5a3c', colorSpace: THREE.SRGBColorSpace });
@@ -35,6 +36,7 @@ function textured(set, { color = '#ffffff', roughness = 1, normalScale = 0.8, na
     ...extra,
   });
   if (name) material.name = name;
+  if (set.periodSurface) material.userData.periodSurface = set.periodSurface;
   return material;
 }
 
@@ -47,11 +49,16 @@ function canvasMaterial(map, extra = {}) {
 }
 
 export function createHutMaterials() {
-  const deck = loadSet(`${DECK}_Color.jpg`, `${DECK}_NormalGL.jpg`, `${DECK}_Roughness.jpg`);
+  const deck = loadPeriodSurface('weatheredWood');
   const fine = loadSet(`${LAWSON}/fine-wood-diff-2k.jpg`, `${LAWSON}/fine-wood-normal-2k.jpg`, `${LAWSON}/fine-wood-rough-2k.jpg`);
   const fineRound = loadSet(`${LAWSON}/fine-wood-diff-2k.jpg`, `${LAWSON}/fine-wood-normal-2k.jpg`, `${LAWSON}/fine-wood-rough-2k.jpg`, Math.PI / 2);
-  const planks = loadSet(`${LAWSON}/wood-planks-diff-1k.jpg`, `${LAWSON}/wood-planks-normal-1k.jpg`, `${LAWSON}/wood-planks-rough-1k.jpg`);
-  const fabric = loadSet(`${LAWSON}/woven-fabric-diff-2k.jpg`, `${LAWSON}/woven-fabric-normal-2k.jpg`, `${LAWSON}/woven-fabric-rough-2k.jpg`);
+  const planks = loadPeriodSurface('weatheredWood', { offset: [0.37, 0.21] });
+  const wool = loadPeriodSurface('wool');
+  const linen = loadPeriodSurface('linen');
+  const sacking = loadPeriodSurface('sacking');
+  const sailcloth = loadPeriodSurface('patchedCanvas');
+  const leather = loadPeriodSurface('leather');
+  const endGrain = loadPeriodSurface('endGrain');
   const basalt = loadSet(
     `${PBR}/weathered_highland_basalt_albedo_1024.webp`,
     `${PBR}/weathered_highland_basalt_normal_opengl_1024.webp`,
@@ -59,6 +66,10 @@ export function createHutMaterials() {
   );
   const sand = loadSet(`${PBR}/white-sand-beach_albedo.webp`, `${PBR}/galapagos-sand_normal.webp`, `${PBR}/galapagos-sand_roughness.webp`);
   const loam = loadSet(`${PBR}/loam_albedo.webp`, `${PBR}/loam_normal.webp`, `${PBR}/loam_roughness.webp`);
+  // Generated material sources and registered height edits are archived under
+  // assets-src/rancho-materials; npm run asset:rancho bakes their periodic PBR maps.
+  const thatch = loadSet(`${RANCHO}/thatch-albedo.webp`, `${RANCHO}/thatch-normal.webp`, `${RANCHO}/thatch-roughness.webp`);
+  const daub = loadSet(`${RANCHO}/daub-albedo.webp`, `${RANCHO}/daub-normal.webp`, `${RANCHO}/daub-roughness.webp`);
   const t = createHutTextures();
 
   const materials = {
@@ -80,11 +91,12 @@ export function createHutMaterials() {
     // Swept, trodden house floor: the same earth, packed pale and dusty.
     earthFloor: textured(loam, { color: '#e8d2b0', normalScale: 0.5, name: 'HutEarthFloor' }),
     // Vernacular surfaces drawn in hutTextures.js.
-    thatch: canvasMaterial(t.thatch, { side: THREE.DoubleSide, name: 'HutThatch' }),
-    thatchUnder: canvasMaterial(t.thatchDark, { color: '#8a7c64', side: THREE.DoubleSide, name: 'HutThatchUnder' }),
-    daub: canvasMaterial(t.daub, { name: 'HutDaub' }),
+    thatch: textured(thatch, { roughness: 1, normalScale: 0.85, side: THREE.DoubleSide, name: 'HutThatch' }),
+    thatchUnder: textured(thatch, { color: '#8d8374', roughness: 1, normalScale: 0.65, side: THREE.DoubleSide, name: 'HutThatchUnder' }),
+    daub: textured(daub, { roughness: 1, normalScale: 0.85, name: 'HutDaub' }),
     cane: canvasMaterial(t.cane, { roughness: 0.75, side: THREE.DoubleSide, name: 'HutCane' }),
-    sailcloth: canvasMaterial(t.sailcloth, { side: THREE.DoubleSide, name: 'HutSailcloth' }),
+    sailcloth: textured(sailcloth, { normalScale: 0.6, side: THREE.DoubleSide, name: 'HutSailcloth' }),
+    endGrain: textured(endGrain, { normalScale: 0.5, name: 'HutEndGrain' }),
     petate: canvasMaterial(t.petate, { side: THREE.DoubleSide, name: 'HutPetate' }),
     carapace: canvasMaterial(t.carapace, { roughness: 0.55, name: 'HutCarapace' }),
     carvedPlank: canvasMaterial(t.carvedPlank, { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, name: 'HutCarving' }),
@@ -97,15 +109,15 @@ export function createHutMaterials() {
     brass: plain('#9a7a3e', 0.36, 0.9),
     glass: new THREE.MeshStandardMaterial({ color: '#d8d2b8', roughness: 0.12, transparent: true, opacity: 0.32, depthWrite: false }),
     bottleGlass: new THREE.MeshStandardMaterial({ color: '#2f4a2a', roughness: 0.15, transparent: true, opacity: 0.78 }),
-    wool: textured(fabric, { color: '#77706a', normalScale: 0.6, name: 'HutWool' }),
-    redWool: textured(fabric, { color: '#8a2a20', normalScale: 0.6, name: 'HutRedWool' }),
-    ponchoWool: textured(fabric, { color: '#5a3424', normalScale: 0.6, name: 'HutPoncho' }),
-    linen: textured(fabric, { color: '#d7cdb6', normalScale: 0.5, name: 'HutLinen' }),
-    sacking: textured(fabric, { color: '#a08860', normalScale: 0.9, name: 'HutSacking' }),
-    coat: textured(fabric, { color: '#3e3a36', normalScale: 0.5, name: 'HutCoat' }),
+    wool: textured(wool, { color: '#b6b2ab', normalScale: 0.6, name: 'HutWool' }),
+    redWool: textured(wool, { color: '#8a2a20', normalScale: 0.6, name: 'HutRedWool' }),
+    ponchoWool: textured(wool, { color: '#5a3424', normalScale: 0.6, name: 'HutPoncho' }),
+    linen: textured(linen, { color: '#eee8da', normalScale: 0.5, name: 'HutLinen' }),
+    sacking: textured(sacking, { color: '#e1d2b7', normalScale: 0.9, name: 'HutSacking' }),
+    coat: textured(wool, { color: '#3e3a36', normalScale: 0.5, name: 'HutCoat' }),
     straw: plain('#a48c56', 1),
     tick: plain('#8e7a54', 1),
-    leather: plain('#4b2f1e', 0.62),
+    leather: textured(leather, { color: '#c4ae94', normalScale: 0.45, name: 'HutLeather' }),
     hide: plain('#8f7052', 0.92, 0, { side: THREE.DoubleSide }),
     bone: plain('#ddd2b8', 0.7),
     ivory: plain('#e8dcc0', 0.35),
@@ -140,7 +152,7 @@ export function createHutMaterials() {
     plastron: plain('#b8a476', 0.7),
     tooth: plain('#e9dfc8', 0.3),
   };
-  materials.__textures = [deck, fine, fineRound, planks, fabric, basalt, sand, loam]
+  materials.__textures = [deck, fine, fineRound, planks, wool, linen, sacking, sailcloth, leather, endGrain, basalt, sand, loam, thatch, daub]
     .flatMap(set => Object.values(set))
     .concat(Object.values(t));
   return materials;
@@ -148,12 +160,24 @@ export function createHutMaterials() {
 
 export function useHutMaterials() {
   const materials = useMemo(() => createHutMaterials(), []);
-  useEffect(() => () => {
-    for (const [key, value] of Object.entries(materials)) {
-      if (key === '__textures') continue;
-      value?.dispose?.();
-    }
-    for (const texture of materials.__textures || []) texture?.dispose?.();
+  const disposalTimers = useRef(new Map());
+  useEffect(() => {
+    // React's development effect replay cleans up then reuses the SAME memo.
+    // Disposing immediately removes the textures from the async loader's live
+    // set: late images then never bump their versions and stay flat fallback
+    // brown on the GPU. Cancel a pending release when that resource remounts.
+    const timers = disposalTimers.current;
+    clearTimeout(timers.get(materials));
+    timers.delete(materials);
+    return () => {
+      timers.set(materials, setTimeout(() => {
+        timers.delete(materials);
+        for (const [key, value] of Object.entries(materials)) {
+          if (key !== '__textures') value?.dispose?.();
+        }
+        for (const texture of materials.__textures || []) texture?.dispose?.();
+      }, 0));
+    };
   }, [materials]);
   return materials;
 }

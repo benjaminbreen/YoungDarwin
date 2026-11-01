@@ -1,0 +1,91 @@
+{
+  "albedoSize": 1024,
+  "dataSize": 512,
+  "packing": "R normal X, G normal Y (OpenGL), B roughness variation, A height; linear lossless data",
+  "materials": [
+    {
+      "name": "pahoehoe",
+      "source": "pahoehoe",
+      "tileMetres": 2.5,
+      "reliefMetres": 0.065,
+      "sourceSha256": {
+        "pahoehoe-color.png": "5024f85921fefae15d733ea497c2b1ebbe9e3c66a1c133ac1b812e84bd03f9c2",
+        "pahoehoe-height.png": "4f383302f7283d269d9cfd3762e2b0429754612b6be757b2d7553a0453a5ba45"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "pahoehoe-albedo.webp",
+          "bytes": 415982
+        },
+        {
+          "file": "pahoehoe-nrh.webp",
+          "bytes": 721974
+        }
+      ]
+    },
+    {
+      "name": "wind-turf",
+      "source": "windTurf",
+      "tileMetres": 2.5,
+      "reliefMetres": 0.014,
+      "sourceSha256": {
+        "windTurf-color.png": "48e02922f81fae21642244cbaa81730d6c91ffed834128dbb09e29f3668a4118",
+        "windTurf-height.png": "7de2d18f38d73a766f8231ae3237d95bf8358a79e85590b864cd9d6d5823039c"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "wind-turf-albedo.webp",
+          "bytes": 547464
+        },
+        {
+          "file": "wind-turf-nrh.webp",
+          "bytes": 745732
+        }
+      ]
+    },
+    {
+      "name": "highland-litter",
+      "source": "highlandLitter",
+      "tileMetres": 1.5,
+      "reliefMetres": 0.018,
+      "sourceSha256": {
+        "highlandLitter-color.png": "bd6fd39565464255aee8931062007dcf833107f6a3450019b61e9a95e0a2d728",
+        "highlandLitter-height.png": "e1872f9ffd7c2df2251743784e0179990e50b0b897035ad6846493a72281fd4b"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "highland-litter-albedo.webp",
+          "bytes": 508554
+        },
+        {
+          "file": "highland-litter-nrh.webp",
+          "bytes": 794388
+        }
+      ]
+    },
+    {
+      "name": "scoria",
+      "source": "scoria",
+      "tileMetres": 1.5,
+      "reliefMetres": 0.035,
+      "sourceSha256": {
+        "scoria-color.png": "d4fccfcc50732c087dc09096fe989e493f86c6ec77fe642a7a691206c4ede18c",
+        "scoria-height.png": "8a737971d86ac1784f0f8b9c4a235d3c981f80f9c509a92e576f5920f180c73b"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "scoria-albedo.webp",
+          "bytes": 504702
+        },
+        {
+          "file": "scoria-nrh.webp",
+          "bytes": 808526
+        }
+      ]
+    }
+  ]
+}

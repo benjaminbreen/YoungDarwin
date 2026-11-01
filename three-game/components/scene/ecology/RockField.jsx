@@ -5,11 +5,8 @@ import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { rockRenderTransform, rockVisualBounds } from '../../../world/proceduralRocks';
-import {
-  FLOREANA_PBR_TEXTURES,
-  disposePbrTerrainSet,
-  loadPbrTerrainSet,
-} from '../../../world/regions/materials/pbrTerrainTextures';
+import { createTriplanarRockMaterial } from '../../../world/regions/materials/triplanarRockMaterial';
+import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 import { ContactShadowField } from '../ContactShadow';
 
 // Instanced craggy rocks. Rock items come from a zone layout module (which
@@ -24,7 +21,7 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
 const ROCK_MATERIAL_PROFILES = {
   darkBasaltGravel: {
-    textureKey: 'darkBasaltGravel',
+    textureKey: 'weatheredHighlandBasalt',
     normalScale: 0.42,
     roughness: 0.9,
   },
@@ -34,8 +31,9 @@ const ROCK_MATERIAL_PROFILES = {
     roughness: 0.94,
   },
   oxidizedScoriaceousBasalt: {
-    textureKey: 'oxidizedScoriaceousBasalt',
-    normalScale: 0.58,
+    textureKey: 'weatheredScoria',
+    textureScale: 2 / 3,
+    normalScale: 0.85,
     roughness: 0.96,
   },
 };
@@ -123,54 +121,14 @@ function rockGeometryIndex(rock, index) {
   return rockFootprint(rock) >= HERO_FOOTPRINT ? 3 + (index % 2) : index % 3;
 }
 
-function configureRockTexture(texture, repeat = 2.6) {
-  if (!texture) return;
-  texture.repeat.set(repeat, repeat);
-}
-
 function createProceduralRockMaterial(materialKey, dust = null) {
   const profile = ROCK_MATERIAL_PROFILES[materialKey] || ROCK_MATERIAL_PROFILES.darkBasaltGravel;
-  const basalt = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES[profile.textureKey]);
-  configureRockTexture(basalt.albedo, 2.2);
-  configureRockTexture(basalt.normal, 2.2);
-  configureRockTexture(basalt.roughness, 2.2);
-  const material = new THREE.MeshStandardMaterial({
-    map: basalt.albedo,
-    normalMap: basalt.normal,
-    normalScale: new THREE.Vector2(profile.normalScale, profile.normalScale),
-    roughnessMap: basalt.roughness,
-    vertexColors: true,
-    color: '#ffffff',
-    roughness: profile.roughness,
-    metalness: 0,
-    flatShading: true,
-  });
-  if (dust?.color) {
-    // Blown-sand band at the terrain contact so rocks read as embedded. Band
-    // is in local unit-sphere space: rocks only yaw, so local y is vertical,
-    // and the band scales with the rock.
-    const dustColor = new THREE.Color(dust.color);
-    const dustStrength = dust.strength ?? 0.4;
-    material.onBeforeCompile = shader => {
-      shader.uniforms.rockDustColor = { value: dustColor };
-      shader.uniforms.rockDustStrength = { value: dustStrength };
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying float vRockDust;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvRockDust = 1.0 - smoothstep(-0.92, -0.18, position.y);');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vRockDust;\nuniform vec3 rockDustColor;\nuniform float rockDustStrength;')
-        .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb = mix(diffuseColor.rgb, rockDustColor, vRockDust * rockDustStrength);');
-    };
-    material.customProgramCacheKey = () => `rock-dust:${dust.color}:${dustStrength}`;
-  }
-  material.userData.pbrTextures = basalt;
-  return material;
+  return createTriplanarRockMaterial(profile, dust);
 }
 
-function disposeProceduralRockMaterial(material) {
-  disposePbrTerrainSet(material?.userData?.pbrTextures);
-  material?.dispose();
-}
+const disposeGeometry = geometry => geometry.dispose();
+const disposeGeometries = geometries => geometries.forEach(disposeGeometry);
+const disposeMaterials = materials => Object.values(materials).forEach(material => material.dispose());
 
 // Carves hammer-strike bites out of a rock's craggy base geometry. Bites are
 // world-space spheres centered just outside the struck face; vertices inside a
@@ -229,7 +187,7 @@ function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
     () => carveDamagedRockGeometry(baseGeometry, item, bites),
     [baseGeometry, item, bites],
   );
-  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  useDeferredDisposal(geometry, disposeGeometry);
   const transform = rockRenderTransform(item);
   return (
     <mesh
@@ -385,10 +343,8 @@ export function RockField({ rocks, dust = null, sourceId = 'ecology-rocks', sour
   // only when the ecology source itself changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [materialKeySignature]);
-  useLayoutEffect(() => () => {
-    geometries.forEach(g => g.dispose());
-    Object.values(materials).forEach(disposeProceduralRockMaterial);
-  }, [geometries, materials]);
+  useDeferredDisposal(geometries, disposeGeometries);
+  useDeferredDisposal(materials, disposeMaterials);
   return (
     <group>
       {buckets.map((bucket, index) => (

@@ -1,0 +1,17 @@
+{
+  "source": "public/assets/models/props/beagle-cabin/folding-stool.glb",
+  "sourceSha256": "9a5adaeb4237715cb5112616ad18f245896d6461a902ace90f192189945216ab",
+  "output": "public/assets/models/props/beagle-cabin/folding-stool-period.glb",
+  "outputBytes": 2479656,
+  "changedPrimitives": 1,
+  "geometryAndTransformsUnchanged": true,
+  "geometrySha256": "fc1c5845e44c41c11afdfd005514f6c0cf17dd4a64f5a081371e9c2b859ba0b1",
+  "preservedMaterials": [
+    "CabinVarnishedOak",
+    "CabinPolishedBrass"
+  ],
+  "changedMaterial": "CabinCanvas",
+  "textureTileMetres": 0.2,
+  "embeddedImagesFlippedY": true,
+  "embeddedChannelValuesVerified": true
+}

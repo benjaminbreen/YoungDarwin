@@ -1,0 +1,90 @@
+[
+  [
+    "zone",
+    "POST_OFFICE_BAY"
+  ],
+  [
+    "wait",
+    2000
+  ],
+  [
+    "expect",
+    "(() => { const s=window.__darwinScene,T=s.THREE; let texture; s.scene.traverse(o=>{if(o.userData?.renderKind==='obstacle-boulder')texture=o.material.map;}); if(!texture||texture.image.width<2)return false; const target=new T.WebGLRenderTarget(64,64), geometry=new T.PlaneGeometry(2,2), material=new T.ShaderMaterial({uniforms:{t:{value:texture}},vertexShader:'varying vec2 texUv; void main(){texUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}',fragmentShader:'uniform sampler2D t; varying vec2 texUv; void main(){gl_FragColor=vec4(texture2D(t,texUv).rgb,1.0);}'}), scene=new T.Scene(), camera=new T.Camera(), previous=s.gl.getRenderTarget(), pixels=new Uint8Array(64*64*4); scene.add(new T.Mesh(geometry,material)); try{s.gl.setRenderTarget(target);s.gl.render(scene,camera);s.gl.readRenderTargetPixels(target,0,0,64,64,pixels);const lo=[255,255,255],hi=[0,0,0];for(let i=0;i<pixels.length;i+=4)for(let c=0;c<3;c++){lo[c]=Math.min(lo[c],pixels[i+c]);hi[c]=Math.max(hi[c],pixels[i+c]);}return Math.max(...hi.map((v,i)=>v-lo[i]))>2;}finally{s.gl.setRenderTarget(previous);target.dispose();material.dispose();geometry.dispose();} })()"
+  ],
+  [
+    "zone",
+    "S_VOLCANIC"
+  ],
+  [
+    "wait",
+    2000
+  ],
+  [
+    "expect",
+    "api.renderAudit().ok"
+  ],
+  [
+    "expect",
+    "(() => { let u; window.__darwinScene.scene.traverse(o => { if(o.userData?.renderKind === 'terrain') u=o.material?.userData?.shader?.uniforms; }); const c=u?.uSvDarkAlbedo?.value, d=u?.uSvDarkNrh?.value; return c?.image?.width === 1024 && d?.image?.width === 512 && c.colorSpace === 'srgb' && d.colorSpace === ''; })()"
+  ],
+  [
+    "expect",
+    "(() => { let u; window.__darwinScene.scene.traverse(o => { if(o.userData?.renderKind === 'terrain') u=o.material?.userData?.shader?.uniforms; }); const c=u?.uSvScoriaAlbedo?.value, d=u?.uSvScoriaNrh?.value; return c?.image?.width === 1024 && d?.image?.width === 512 && c.colorSpace === 'srgb' && d.colorSpace === ''; })()"
+  ],
+  [
+    "expect",
+    "(() => { const s=window.__darwinScene, materials=new Set(); s.scene.traverse(o => { if(o.userData?.renderKind === 'ecology-rocks' && o.material?.userData?.shader) materials.add(o.material); }); return materials.size > 0 && [...materials].every(m => { const t=m.userData.pbrTextures; return t.albedo.image.width > 1 && t.nrh.image.width > 1 && s.gl.properties.get(t.albedo).__version === t.albedo.version && s.gl.properties.get(t.nrh).__version === t.nrh.version; }); })()"
+  ],
+  [
+    "zone",
+    "SE_PROMONTORY"
+  ],
+  [
+    "wait",
+    2000
+  ],
+  [
+    "expect",
+    "api.renderAudit().ok"
+  ],
+  [
+    "expect",
+    "(() => { let u; window.__darwinScene.scene.traverse(o => { if(o.userData?.renderKind === 'terrain') u=o.material?.userData?.shader?.uniforms; }); const c=u?.uPostScrubCoastalAlbedo?.value, d=u?.uPostScrubCoastalNrh?.value; return c?.image?.width === 1024 && d?.image?.width === 512 && c.colorSpace === 'srgb' && d.colorSpace === ''; })()"
+  ],
+  [
+    "tp",
+    16,
+    -6
+  ],
+  [
+    "eval",
+    "api.setCameraYaw(0)"
+  ],
+  [
+    "wait",
+    800
+  ],
+  [
+    "expect",
+    "(() => { let m; window.__darwinScene.scene.traverse(o => { if(o.userData?.renderSource?.endsWith(':crown-east-ledge')) m=o.material; }); return m?.name.startsWith('TriplanarRock:') && m.userData.pbrTextures.nrh.image.width > 1; })()"
+  ],
+  [
+    "zone",
+    "W_HIGH"
+  ],
+  [
+    "wait",
+    2000
+  ],
+  [
+    "expect",
+    "api.renderAudit().ok"
+  ],
+  [
+    "expect",
+    "(() => { let u; window.__darwinScene.scene.traverse(o => { if(o.userData?.renderKind === 'terrain') u=o.material?.userData?.shader?.uniforms; }); const c=u?.uWhLoamAlbedo?.value, d=u?.uWhLoamNrh?.value; return c?.image?.width === 1024 && d?.image?.width === 512 && c.colorSpace === 'srgb' && d.colorSpace === ''; })()"
+  ],
+  [
+    "errors"
+  ]
+]

@@ -38,6 +38,21 @@ desktop.ini
 # kept local unless explicitly promoted with git add -f and a manifest note.
 /assets-src/**
 !/assets-src/
+!/assets-src/rancho-materials/
+!/assets-src/rancho-materials/*.png
+!/assets-src/rancho-materials/*.json
+!/assets-src/landscape-materials/
+!/assets-src/landscape-materials/*.png
+!/assets-src/landscape-materials/*.json
+!/assets-src/period-materials/
+!/assets-src/period-materials/*.png
+!/assets-src/period-materials/*.json
+!/assets-src/nature-materials/
+!/assets-src/nature-materials/*.png
+!/assets-src/nature-materials/*.json
+!/assets-src/nature-materials/guides/
+!/assets-src/nature-materials/guides/*.png
+!/assets-src/nature-materials/guides/*.json
 !/assets-src/.gitkeep
 !/assets-src/raw/
 !/assets-src/raw/.gitkeep

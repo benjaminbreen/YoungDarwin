@@ -41,6 +41,7 @@ export const VARIANTS = {
   'no-post': { params: { noPost: '1' }, note: 'entire post chain off' },
   'no-reflections': { params: { noReflections: '1' }, note: 'water planar reflection off' },
   'no-terrain-ao': { params: { noTerrainAo: '1' }, note: 'baked terrain occlusion off' },
+  'no-sky-shape': { params: { noSkyShape: '1' }, note: 'sun glow and sand bounce off in the sky light' },
   'dpr-1': { params: { dpr: '1x' }, note: 'render at 1x instead of native' },
   'dpr-1.25': { params: { dpr: '1.25x' }, note: 'render at 1.25x' },
   'dpr-1.5': { params: { dpr: '1.5x' }, note: 'render at 1.5x' },

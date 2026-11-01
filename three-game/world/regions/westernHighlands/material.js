@@ -8,13 +8,12 @@ import {
 // Western Highlands cloud-forest floor.
 //
 // Four packed PBR layers (albedo + normal/roughness/height), weighted by the
-// same masks terrain.js uses for the biome: photographed grass for the fern
-// clearings, loam for the leaf-litter floor under the scalesia, weathered
+// same masks terrain.js uses for the biome: grass for the fern clearings,
+// generated decomposing litter under the scalesia, weathered
 // basalt where the garua stream and the ridge shoulders break through, and
-// brackish mud for the churned trail. A moss grade and a leaf-litter grade
-// are laid over the photographs so the canopy floor reads green-brown and
-// wet rather than as one smeared tone, and the packed normals carry the
-// relief that the previous procedural bump only hinted at.
+// basalt and brackish mud for the churned trail. A restrained moss grade
+// preserves the leaves and twigs, with packed relief derived from a height
+// edit rather than painted noise spots standing in for leaves.
 //
 // The trail, clearing and wet-hollow masks mirror terrain.js
 // (WESTERN_HIGHLANDS_TRAIL, westernHighlandsClearingMask,
@@ -22,14 +21,14 @@ import {
 
 const LAYERS = {
   grass: FLOREANA_PBR_TEXTURES.grass,
-  loam: FLOREANA_PBR_TEXTURES.loam,
+  loam: FLOREANA_PBR_TEXTURES.highlandLitter,
   basalt: FLOREANA_PBR_TEXTURES.weatheredHighlandBasalt,
   mud: FLOREANA_PBR_TEXTURES.brackishMud,
 };
 
 const SCALE = {
   grass: LAYERS.grass.scale * 2.0,
-  loam: LAYERS.loam.scale * 1.3,
+  loam: LAYERS.loam.scale,
   basalt: LAYERS.basalt.scale * 1.1,
   mud: LAYERS.mud.scale * 1.2,
 };
@@ -176,26 +175,19 @@ function colorFragment() {
         float whTrailMask = 1.0 - smoothstep(1.1, 3.6, whTrailDistance(whP));
         float whCanopy = clamp((0.72 + (whFbm(whP * 0.24) - 0.5) * 0.34) * (1.0 - whTrailMask * 0.75) * (1.0 - whClear * 0.82), 0.0, 1.0);
 
-        // Leaf litter: the loam photograph warmed and speckled with fallen
-        // scalesia leaves, brown and olive.
-        float whLeafSpot = smoothstep(0.55, 0.8, whNoise(whP * 5.3)) * (0.6 + whNoise(whP * 1.7) * 0.4);
-        vec3 whLitter = whLoam * vec3(1.08, 0.98, 0.78);
-        whLitter = mix(whLitter, vec3(0.32, 0.25, 0.12), whLeafSpot * 0.45);
+        vec3 whLitter = whLoam;
         // Moss: a cushion grade over litter and stone where the garua
         // keeps things wet and shaded.
         float whMossField = smoothstep(0.22, 0.86, whFbm(whP * 0.38 + vec2(-4.0, 2.0)) * 0.7 + whNoise(whP * 2.1) * 0.3);
-        float whMossAmount = clamp(whMossField * (whCanopy * 0.75 + whWetMask * 0.6) + whWetMask * 0.2, 0.0, 0.9);
+        float whMossAmount = clamp(whMossField * (whCanopy * 0.35 + whWetMask * 0.4) + whWetMask * 0.12, 0.0, 0.65);
         vec3 whMossTint = mix(vec3(0.2, 0.34, 0.13), vec3(0.38, 0.5, 0.2), whNoise(whP * 2.4));
-        whLitter = mix(whLitter, whLitter * 0.5 + whMossTint * 0.62, whMossAmount * 0.8);
+        whLitter = mix(whLitter, whLitter * 0.75 + whMossTint * 0.25, whMossAmount * 0.4);
         vec3 whStone = mix(whBasalt * vec3(0.86, 0.94, 0.88), whBasalt * 0.4 + whMossTint * 0.6, whMossAmount * 0.85);
         vec3 whMeadow = whGrass * mix(vec3(0.92, 1.1, 0.78), vec3(0.78, 1.0, 0.66), whNoise(whP * 0.11));
-        vec3 whTrail = mix(whMud, whLoam, 0.35) * vec3(1.22, 1.1, 0.95);
+        vec3 whTrail = whMud * vec3(1.22, 1.1, 0.95);
 
         vec3 whColor = whMeadow * whWeights.x + whLitter * whWeights.y + whStone * whWeights.z + whTrail * whWeights.w;
 
-        // Scalesia roots snaking across the floor near trunks.
-        float whRoots = smoothstep(0.035, 0.0, abs(sin(whP.x * 0.34 + sin(whP.y * 0.19) * 1.7)) - 0.035) * whCanopy * (1.0 - whTrailMask);
-        whColor = mix(whColor, vec3(0.12, 0.085, 0.055), whRoots * 0.45);
         // Canopy shade and the cool garua lift in openings.
         whColor *= mix(1.0, 0.8, whCanopy * 0.5);
         whColor *= 0.92 + whFbm(whP * 0.05) * 0.16;
@@ -273,7 +265,7 @@ ${normalFragment()}`)
         outgoingLight += uMistGreen * forestRim * uRimIntensity;
         #include <dithering_fragment>`);
   };
-  material.customProgramCacheKey = () => 'western-highlands-packed-pbr-v5';
+  material.customProgramCacheKey = () => 'western-highlands-packed-pbr-v6';
   material.needsUpdate = true;
   return material;
 }

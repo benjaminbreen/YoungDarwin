@@ -225,7 +225,7 @@ export function MouthGallery({ materials, rock }) {
         <mesh geometry={boulders[3]} material={rock} position={[2.5, ground(2.5, 10.9) + 0.06, 10.9]} rotation={[0, 2.2, 0]} scale={[0.26, 0.2, 0.3]} castShadow receiveShadow />
         <Woodpile materials={materials} position={[-4.75, ground(-4.75, 6.5), 6.5]} rotation={[0, 0.12, 0]} />
         {/* Ship's cask under the seep, with a tin cup on a nail. */}
-        <Cask height={0.9} radius={0.33} material={materials.crateWood} hoop={materials.iron} open position={[BARREL[0], barrelBase, BARREL[1]]} />
+        <Cask headMaterial={materials.endGrain || materials.logEnd} height={0.9} radius={0.33} material={materials.crateWood} hoop={materials.iron} open position={[BARREL[0], barrelBase, BARREL[1]]} />
         <group position={[BARREL[0] + 0.3, barrelBase + 0.82, BARREL[1] + 0.06]}>
           <Cyl r={0.004} h={0.06} segments={4} material={materials.iron} rotation={[0, 0, Math.PI / 2]} />
           <Cyl rTop={0.04} rBottom={0.034} h={0.08} segments={12} material={materials.tin} position={[0.05, -0.06, 0]} open />

@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { floorAt } from './anchors';
 import { woodBoxGeometry } from './caveMaterials';
+import { metricBoxUvs, metricCylinderUvs, metricEllipsoidUvs } from '../../../world/regions/materials/periodMaterialUvs';
+import { useDeferredDisposal } from '../../../components/assets/useDeferredDisposal';
 
 // Small building blocks for the cave's furnishings. Props are authored as
 // ordinary JSX and then flattened by <StaticBatch> into one mesh per
@@ -22,24 +24,40 @@ export function useGround(zoneId) {
 
 // A timber member: box with world-scaled grain.
 export function Beam({ size, material, tile = 0.9, ...props }) {
-  const geometry = woodBoxGeometry(size[0], size[1], size[2], tile);
+  const geometry = woodBoxGeometry(size[0], size[1], size[2], material?.userData?.periodSurface?.uvMode === 'metres' ? 1 : tile);
   return <mesh geometry={geometry} material={material} castShadow receiveShadow {...props} />;
 }
 
 export function Block({ size, material, ...props }) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BoxGeometry(...size);
+    return material?.userData?.periodSurface?.uvMode === 'metres' ? metricBoxUvs(geo) : geo;
+  }, [size[0], size[1], size[2], material]);
+  useDeferredDisposal(geometry, disposeGeometry);
   return (
-    <mesh material={material} castShadow receiveShadow {...props}>
-      <boxGeometry args={size} />
-    </mesh>
+    <mesh geometry={geometry} material={material} castShadow receiveShadow {...props} />
   );
 }
 
 export function Cyl({ r = 0.05, rTop, rBottom, h = 1, segments = 10, material, open = false, ...props }) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.CylinderGeometry(rTop ?? r, rBottom ?? r, h, segments, 1, open);
+    const surface = material?.userData?.periodSurface;
+    return surface?.uvMode === 'metres'
+      ? metricCylinderUvs(geo, ((rTop ?? r) + (rBottom ?? r)) / 2, h, surface.key === 'weatheredWood' && !surface.rotation)
+      : geo;
+  }, [r, rTop, rBottom, h, segments, open, material]);
+  useDeferredDisposal(geometry, disposeGeometry);
   return (
-    <mesh material={material} castShadow receiveShadow {...props}>
-      <cylinderGeometry args={[rTop ?? r, rBottom ?? r, h, segments, 1, open]} />
-    </mesh>
+    <mesh geometry={geometry} material={material} castShadow receiveShadow {...props} />
   );
+}
+
+const disposeGeometry = geometry => geometry.dispose();
+export function FabricBundle({ radii, material, rings = 10, ...props }) {
+  const geometry = useMemo(() => metricEllipsoidUvs(new THREE.SphereGeometry(1, 12, rings), radii), [radii[0], radii[1], radii[2], rings]);
+  useDeferredDisposal(geometry, disposeGeometry);
+  return <mesh geometry={geometry} material={material} scale={radii} castShadow receiveShadow {...props} />;
 }
 
 export function Ball({ r = 0.1, material, segments = 10, ...props }) {
@@ -52,16 +70,26 @@ export function Ball({ r = 0.1, material, segments = 10, ...props }) {
 
 // Lathe from a radius profile [[r, y], ...].
 const latheCache = new Map();
-export function latheGeometry(profile, segments = 16) {
-  const key = `${segments}:${profile.map(p => p.join(',')).join(';')}`;
+export function latheGeometry(profile, segments = 16, metric = false, verticalGrain = false) {
+  const key = `${segments}:${metric}:${verticalGrain}:${profile.map(p => p.join(',')).join(';')}`;
   if (latheCache.has(key)) return latheCache.get(key);
   const geometry = new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), segments);
+  if (metric) {
+    const circumference = 2 * Math.PI * Math.max(...profile.map(([r]) => r));
+    const length = profile.slice(1).reduce((sum, point, i) => sum + Math.hypot(point[0] - profile[i][0], point[1] - profile[i][1]), 0);
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i += 1) {
+      const u = uv.getX(i) * circumference, v = uv.getY(i) * length;
+      uv.setXY(i, verticalGrain ? v : u, verticalGrain ? u : v);
+    }
+  }
   latheCache.set(key, geometry);
   return geometry;
 }
 
 export function Lathe({ profile, segments = 16, material, ...props }) {
-  return <mesh geometry={latheGeometry(profile, segments)} material={material} castShadow receiveShadow {...props} />;
+  const surface = material?.userData?.periodSurface;
+  return <mesh geometry={latheGeometry(profile, segments, surface?.uvMode === 'metres', surface?.key === 'weatheredWood' && !surface.rotation)} material={material} castShadow receiveShadow {...props} />;
 }
 
 // A ship's cask: bulged staves with iron hoops. `open` leaves the head off.

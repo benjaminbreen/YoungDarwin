@@ -211,7 +211,7 @@ export function WhalersHutYard({ materials, groundAt }) {
           <Beam size={[0.2, 0.28, 0.015]} material={materials.rust} position={[0, 0.02, 0]} />
           <Cyl r={0.018} h={0.55} segments={6} material={materials.driftwood} position={[0, 0.42, 0]} />
         </group>
-        <Cask height={0.82} radius={0.3} material={materials.crateWood} hoop={materials.rust} position={[garden.x + 3.7, groundAt(garden.x + 3.7, garden.z - 2.0), garden.z - 2.0]} rotation={[0, 0.7, 0]} />
+        <Cask headMaterial={materials.endGrain || materials.logEnd} height={0.82} radius={0.3} material={materials.crateWood} hoop={materials.rust} position={[garden.x + 3.7, groundAt(garden.x + 3.7, garden.z - 2.0), garden.z - 2.0]} rotation={[0, 0.7, 0]} />
         <Beam size={[0.09, 0.8, 0.02]} material={materials.crateWood} position={[garden.x + 3.4, groundAt(garden.x + 3.4, garden.z - 1.6) + 0.04, garden.z - 1.6]} rotation={[Math.PI / 2 - 0.1, 0.8, 0]} />
         {[0, 1, 2].map(i => (
           <mesh key={i} material={materials.rust} position={[garden.x + 3.1 + i * 0.25, groundAt(garden.x + 3.1, garden.z - 2.4) + 0.02, garden.z - 2.4 - hash(i, 3) * 0.2]} rotation={[Math.PI / 2 + hash(i, 1) * 0.3, 0, 0]}>

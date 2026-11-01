@@ -1,0 +1,241 @@
+{
+  "albedoSize": 1024,
+  "dataSize": 512,
+  "normalConvention": "OpenGL +Y; derivatives from height, not color",
+  "materials": [
+    {
+      "key": "weatheredWood",
+      "name": "weathered-wood",
+      "tileMetres": 0.9,
+      "reliefMetres": 0.003,
+      "roughness": [
+        0.82,
+        0.97
+      ],
+      "sourceSha256": {
+        "weatheredWood-color.png": "7a2311070118e7bdd9f0f1b03eeb82d9ea97f0173c7e8b6a5a5aec61634bac72",
+        "weatheredWood-height.png": "cf24e39d3e8312b5be405f4aa697f46d93d4951b15948e8d6231513c107065a3"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "weathered-wood-albedo.webp",
+          "bytes": 388528
+        },
+        {
+          "file": "weathered-wood-normal.webp",
+          "bytes": 265430
+        },
+        {
+          "file": "weathered-wood-roughness.webp",
+          "bytes": 62342
+        }
+      ]
+    },
+    {
+      "key": "endGrain",
+      "name": "end-grain",
+      "tileMetres": 0.5,
+      "reliefMetres": 0.0015,
+      "roughness": [
+        0.84,
+        0.97
+      ],
+      "periodic": false,
+      "sourceSha256": {
+        "endGrain-color.png": "887595926dd9c10b8f4aafe50a34e7cc1ca26deaabfb750818732ea527f07fc7",
+        "endGrain-height.png": "67376a1498c369b53155f3beb54649e9aef9c6489e455755bf0c6602c57475f0"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "end-grain-albedo.webp",
+          "bytes": 413798
+        },
+        {
+          "file": "end-grain-normal.webp",
+          "bytes": 268304
+        },
+        {
+          "file": "end-grain-roughness.webp",
+          "bytes": 64470
+        }
+      ]
+    },
+    {
+      "key": "canvas",
+      "name": "canvas",
+      "tileMetres": 0.2,
+      "reliefMetres": 0.0005,
+      "roughness": [
+        0.88,
+        0.98
+      ],
+      "sourceSha256": {
+        "canvas-color.png": "cf9654c74ffc3e0f2ab87b1a35628595f370d6df51df1320bd3d831aaa82c7b5",
+        "canvas-height.png": "cca584aa8d3029a89b714c417d9eeffe6efb59d772c8e94466ec3b2fe2fb7320"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "canvas-albedo.webp",
+          "bytes": 448010
+        },
+        {
+          "file": "canvas-normal.webp",
+          "bytes": 402398
+        },
+        {
+          "file": "canvas-roughness.webp",
+          "bytes": 91012
+        }
+      ]
+    },
+    {
+      "key": "patchedCanvas",
+      "name": "patched-canvas",
+      "tileMetres": 1.6,
+      "reliefMetres": 0.0015,
+      "roughness": [
+        0.88,
+        0.98
+      ],
+      "periodic": false,
+      "sourceSha256": {
+        "patchedCanvas-color.png": "5f25cd07c43ff95b4cfdee572f2cafb0bc991a6fb1e64fe97504359c71b10b2b",
+        "patchedCanvas-height.png": "e0cca8fd9dc0d6dcdbff018eaec18dcfbff0036f4877ef2e0c21aca58e4b642f"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "patched-canvas-albedo.webp",
+          "bytes": 416340
+        },
+        {
+          "file": "patched-canvas-normal.webp",
+          "bytes": 81430
+        },
+        {
+          "file": "patched-canvas-roughness.webp",
+          "bytes": 29666
+        }
+      ]
+    },
+    {
+      "key": "linen",
+      "name": "linen",
+      "tileMetres": 0.15,
+      "reliefMetres": 0.00035,
+      "roughness": [
+        0.84,
+        0.96
+      ],
+      "sourceSha256": {
+        "linen-color.png": "8d6871acaea3506354f4929f60dbaf74c88e9612e64342820f420435da24b32d",
+        "linen-height.png": "3a5c0559f129883fcd6ac982dbe6b979cb2ec2e720574aff14317e6452fdcdb2"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "linen-albedo.webp",
+          "bytes": 446330
+        },
+        {
+          "file": "linen-normal.webp",
+          "bytes": 330284
+        },
+        {
+          "file": "linen-roughness.webp",
+          "bytes": 83404
+        }
+      ]
+    },
+    {
+      "key": "wool",
+      "name": "wool",
+      "tileMetres": 0.18,
+      "reliefMetres": 0.0006,
+      "roughness": [
+        0.94,
+        0.995
+      ],
+      "sourceSha256": {
+        "wool-color.png": "eaa4b55037e70805f41e3daa7259f7a2d3db4b93641254be579009322fcf8710",
+        "wool-height.png": "02dc9d3c886f1a126be73d8a1bcbf4c7830fb84635a433dc52e9100025112487"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "wool-albedo.webp",
+          "bytes": 421626
+        },
+        {
+          "file": "wool-normal.webp",
+          "bytes": 362274
+        },
+        {
+          "file": "wool-roughness.webp",
+          "bytes": 65198
+        }
+      ]
+    },
+    {
+      "key": "sacking",
+      "name": "sacking",
+      "tileMetres": 0.25,
+      "reliefMetres": 0.0012,
+      "roughness": [
+        0.91,
+        0.99
+      ],
+      "sourceSha256": {
+        "sacking-color.png": "e4c8b967b9570723aeb6a5dd74a7eea61663cce3556e8ac20c78640f78bfb836",
+        "sacking-height.png": "05db0be6373bae3ec1aa704b952603087e239186043f38fc214eb2f380f7b913"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "sacking-albedo.webp",
+          "bytes": 483990
+        },
+        {
+          "file": "sacking-normal.webp",
+          "bytes": 428202
+        },
+        {
+          "file": "sacking-roughness.webp",
+          "bytes": 68812
+        }
+      ]
+    },
+    {
+      "key": "leather",
+      "name": "leather",
+      "tileMetres": 0.25,
+      "reliefMetres": 0.00035,
+      "roughness": [
+        0.56,
+        0.84
+      ],
+      "sourceSha256": {
+        "leather-color.png": "b1d3977b1b218592614f8e402dd6c10218d81f1a9951920e9f5e22b8f1605351",
+        "leather-height.png": "89802d6c12aa8a70d5c5a46fca2da50e6721a76e84882e4e661b9a1428a303a9"
+      },
+      "losslessDataVerified": true,
+      "files": [
+        {
+          "file": "leather-albedo.webp",
+          "bytes": 377002
+        },
+        {
+          "file": "leather-normal.webp",
+          "bytes": 175054
+        },
+        {
+          "file": "leather-roughness.webp",
+          "bytes": 88956
+        }
+      ]
+    }
+  ]
+}

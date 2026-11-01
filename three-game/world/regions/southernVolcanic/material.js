@@ -15,15 +15,17 @@ import {
   OLIVINE_POCKET,
   SCORIA_FIELD,
   SOUTHERN_VOLCANIC_PATH_POINTS,
+  SOUTHERN_VOLCANIC_SPREAD,
   SPATTER_CONE,
 } from './path';
 
+// Covers the whole map at its spread size, at the original ~0.22 m per texel.
 export const SOUTHERN_VOLCANIC_SPLAT_BOUNDS = {
-  originX: -56,
-  originZ: -52,
-  width: 112,
-  depth: 104,
-  size: 512,
+  originX: -56 * SOUTHERN_VOLCANIC_SPREAD,
+  originZ: -52 * SOUTHERN_VOLCANIC_SPREAD,
+  width: 112 * SOUTHERN_VOLCANIC_SPREAD,
+  depth: 104 * SOUTHERN_VOLCANIC_SPREAD,
+  size: Math.round(512 * SOUTHERN_VOLCANIC_SPREAD),
 };
 
 const f = value => Number(value).toFixed(3);
@@ -32,7 +34,7 @@ const v2 = (x, z) => `vec2(${f(x)}, ${f(z)})`;
 // Four packed layers: fresh dark pāhoehoe, its older weathered skin, red
 // scoria from the cone, and green olivine sand in the scoured pocket. The
 // sulphur crust round the vents and the kīpuka soil are tints over those,
-// since neither has a photographed surface of its own.
+// with folded lava and scoria supplied by the generated landscape material set.
 const SV_COMMON = /* glsl */`
         uniform sampler2D uSvDarkAlbedo;
         uniform sampler2D uSvDarkNrh;
@@ -124,17 +126,10 @@ ${FUMAROLES.map(vent => `          mask = max(mask, (1.0 - smoothstep(0.3, ${f(1
           float contourB = abs(svFbm(svRotate(p, 0.68) * 0.2 + vec2(-5.0, 3.0)) - 0.48);
           return max(1.0 - smoothstep(0.024, 0.08, contourA), (1.0 - smoothstep(0.018, 0.062, contourB)) * 0.62);
         }
-        // Ropy pāhoehoe: fine folds across the flow, bending round the toes.
-        float svRopes(vec2 p) {
-          float angle = mix(0.18 + p.y * 0.004, -0.12 + p.x * 0.003, smoothstep(-14.0, 6.0, p.x));
-          vec2 q = svRotate(p, angle);
-          float bend = sin(q.x * 0.55) * 0.9 + (svFbm(p * 0.3) - 0.5) * 2.4;
-          return 0.5 + 0.5 * sin((q.y + bend) * 4.6);
-        }
         vec4 svLayerWeights(vec2 p) {
           vec4 path = svPathSplat(p);
           float olivine = svOlivine(p) * 0.92;
-          float scoria = svScoria(p) * 0.62 * (1.0 - olivine);
+          float scoria = max(svScoria(p) * 0.68, svConeBody(p) * 0.95) * (1.0 - olivine);
           float weathered = svFlowAge(p) * (1.0 - scoria * 0.5) * (1.0 - olivine);
           weathered = clamp(weathered + path.r * 0.1 + path.a * 0.05, 0.0, 0.8);
           float dark = max(0.0, 1.0 - weathered - scoria - olivine);
@@ -160,16 +155,16 @@ ${FUMAROLES.map(vent => `          mask = max(mask, (1.0 - smoothstep(0.3, ${f(1
 
 const T = FLOREANA_PBR_TEXTURES;
 const UV = /* glsl */`
-        vec2 svDarkUv = svP * ${f(T.darkBasaltGravel.scale)} + vec2(0.17, -0.31);
+        vec2 svDarkUv = svP * ${f(T.pahoehoe.scale)} + vec2(0.17, -0.31);
         vec2 svWeatheredUv = svRotate(svP, -0.19) * ${f(T.weatheredHighlandBasalt.scale)} + vec2(-0.23, 0.11);
-        vec2 svScoriaUv = svRotate(svP, 0.34) * ${f(T.oxidizedScoriaceousBasalt.scale)} + vec2(0.29, 0.37);
+        vec2 svScoriaUv = svRotate(svP, 0.34) * ${f(T.weatheredScoria.scale)} + vec2(0.29, 0.37);
         vec2 svOlivineUv = svRotate(svP, 0.61) * ${f(T.olivineBeach.scale)} + vec2(-0.41, 0.13);
         vec4 svWeights = svLayerWeights(svP);`;
 
 export function createSouthernVolcanicTerrainMaterial() {
-  const dark = loadPackedPbrTerrainSet(T.darkBasaltGravel);
+  const dark = loadPackedPbrTerrainSet(T.pahoehoe);
   const weathered = loadPackedPbrTerrainSet(T.weatheredHighlandBasalt);
-  const scoria = loadPackedPbrTerrainSet(T.oxidizedScoriaceousBasalt);
+  const scoria = loadPackedPbrTerrainSet(T.weatheredScoria);
   const olivine = loadPackedPbrTerrainSet(T.olivineBeach);
   const pathSplat = resolveStandardFootPathSplatTexture({
     bake: 'southern-volcanic',
@@ -237,18 +232,14 @@ ${UV}
         vec4 svWeatheredSurface = texture2D(uSvWeatheredNrh, svWeatheredUv);
         vec4 svScoriaSurface = texture2D(uSvScoriaNrh, svScoriaUv);
         vec4 svOlivineSurface = texture2D(uSvOlivineNrh, svOlivineUv);
-        vec3 svDark = svAlbedoPair(uSvDarkAlbedo, svDarkUv, 0.73, 0.55) * vec3(0.66, 0.65, 0.61);
+        vec3 svDark = texture2D(uSvDarkAlbedo, svDarkUv).rgb;
         vec3 svWeathered = svAlbedoPair(uSvWeatheredAlbedo, svWeatheredUv, -0.61, 0.57) * vec3(0.74, 0.7, 0.62);
-        vec3 svScoriaRaw = svAlbedoPair(uSvScoriaAlbedo, svScoriaUv, 0.52, 0.56) * vec3(0.62, 0.46, 0.36);
-        vec3 svScoriaColor = mix(svDark, svScoriaRaw, 0.78);
+        vec3 svScoriaRaw = texture2D(uSvScoriaAlbedo, svScoriaUv).rgb;
+        vec3 svScoriaColor = svScoriaRaw;
         vec3 svOlivineColor = svAlbedoPair(uSvOlivineAlbedo, svOlivineUv, 0.4, 0.6) * vec3(0.66, 0.7, 0.5);
         vec3 svColor = svDark * svWeights.x + svWeathered * svWeights.y + svScoriaColor * svWeights.z + svOlivineColor * svWeights.w;
         float svRelief = dot(svWeights, vec4(svDarkSurface.a, svWeatheredSurface.a, svScoriaSurface.a, svOlivineSurface.a));
         svColor *= mix(0.9, 1.07, smoothstep(0.08, 0.9, svRelief));
-        // Ropes catch the light along their crests, sheen-glazed where fresh.
-        float svFresh = (svWeights.x + svWeights.y * 0.45) * (1.0 - svScoria(svP)) * (1.0 - svKipuka(svP));
-        float svRope = svRopes(svP);
-        svColor *= mix(1.0, mix(0.7, 1.22, svRope), svFresh * 0.75);
         // Kīpuka soil: windblown ash gone brown under the scrub.
         float svKip = svKipuka(svP);
         vec3 svSoil = mix(vec3(0.27, 0.21, 0.15), vec3(0.37, 0.3, 0.21), svFbm(svP * 0.55 + vec2(3.0, 1.0)));
@@ -285,8 +276,8 @@ ${UV}
           float svScoriaRough = mix(0.9, 0.995, texture2D(uSvScoriaNrh, svScoriaUv).b);
           float svOlivineRough = mix(0.8, 0.95, texture2D(uSvOlivineNrh, svOlivineUv).b);
           float svMapped = dot(svWeights, vec4(svDarkRough, svWeatheredRough, svScoriaRough, svOlivineRough));
-          // Fresh glassy rinds on the ropes are a little glossier.
-          svMapped -= svRopes(svP) * svWeights.x * 0.08;
+          // Fresh crests use the same relief as the color and normal maps.
+          svMapped -= texture2D(uSvDarkNrh, svDarkUv).a * svWeights.x * 0.06;
           svMapped = mix(svMapped, 0.97, svPathSplat(svP).r * 0.35 + svKipuka(svP) * 0.4);
           roughnessFactor = mix(roughnessFactor, svMapped, 0.96);
         }`,
@@ -299,7 +290,7 @@ ${UV}
 ${UV}
           vec2 svSlope = svPackedNormalSlope(texture2D(uSvDarkNrh, svDarkUv), 0.7) * svWeights.x
             + svPackedNormalSlope(texture2D(uSvWeatheredNrh, svWeatheredUv), 0.92) * svWeights.y
-            + svPackedNormalSlope(texture2D(uSvScoriaNrh, svScoriaUv), 0.84) * svWeights.z
+            + svRotate(svPackedNormalSlope(texture2D(uSvScoriaNrh, svScoriaUv), 0.84), -0.34) * svWeights.z
             + svPackedNormalSlope(texture2D(uSvOlivineNrh, svOlivineUv), 0.6) * svWeights.w;
           vec3 svWorldNormal = inverseTransformDirection(normal, viewMatrix);
           vec3 svWorldX = normalize(vec3(1.0, 0.0, 0.0) - svWorldNormal * svWorldNormal.x);
@@ -310,7 +301,7 @@ ${UV}
       );
   };
 
-  material.customProgramCacheKey = () => 'southern-volcanic-packed-pbr-v3';
+  material.customProgramCacheKey = () => 'southern-volcanic-packed-pbr-v4';
   material.needsUpdate = true;
   return material;
 }

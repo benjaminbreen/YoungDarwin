@@ -1,15 +1,12 @@
 'use client';
 
-import React, { useLayoutEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { terrainHeight } from '../../../world/terrain';
-import {
-  FLOREANA_PBR_TEXTURES,
-  disposePbrTerrainSet,
-  loadPbrTerrainSet,
-} from '../../../world/regions/materials/pbrTerrainTextures';
+import { createTriplanarRockMaterial } from '../../../world/regions/materials/triplanarRockMaterial';
+import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 
 const FORMATION_MATERIAL_PROFILES = {
   caveWeatheredBasalt: {
@@ -27,7 +24,7 @@ const FORMATION_MATERIAL_PROFILES = {
     tint: '#e5e2d9',
   },
   oxidizedScoriaceousBasalt: {
-    textureKey: 'oxidizedScoriaceousBasalt',
+    textureKey: 'weatheredScoria',
     normalScale: 0.6,
     roughness: 0.97,
     uvDensity: 0.46,
@@ -445,26 +442,11 @@ function makeFormationGeometry(formation) {
 
 function createFormationMaterial(materialKey) {
   const profile = FORMATION_MATERIAL_PROFILES[materialKey];
-  const textures = loadPbrTerrainSet(FLOREANA_PBR_TEXTURES[profile.textureKey]);
-  const material = new THREE.MeshStandardMaterial({
-    map: textures.albedo,
-    normalMap: textures.normal,
-    normalScale: new THREE.Vector2(profile.normalScale, profile.normalScale),
-    roughnessMap: textures.roughness,
-    color: profile.tint,
-    vertexColors: true,
-    roughness: profile.roughness,
-    metalness: 0,
-    flatShading: false,
-  });
-  material.userData.pbrTextures = textures;
-  return material;
+  return createTriplanarRockMaterial({ ...profile, textureScale: profile.uvDensity, flatShading: false });
 }
 
-function disposeFormationMaterial(material) {
-  disposePbrTerrainSet(material?.userData?.pbrTextures);
-  material?.dispose();
-}
+const disposeGeometry = geometry => geometry.dispose();
+const disposeMaterials = materials => Object.values(materials).forEach(material => material.dispose());
 
 function VolcanicFormation({ formation, material, zoneId, sourceId }) {
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
@@ -474,7 +456,7 @@ function VolcanicFormation({ formation, material, zoneId, sourceId }) {
     terrainHeight(formation.x, formation.z, zoneId) + (formation.yOffset || 0) - (formation.sink || 0),
     formation.z,
   ], [formation, zoneId]);
-  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  useDeferredDisposal(geometry, disposeGeometry);
 
   return (
     <mesh
@@ -508,9 +490,7 @@ export function VolcanicFormationField({ layer, zoneId }) {
   const materials = useMemo(() => Object.fromEntries(
     materialKeys.map(key => [key, createFormationMaterial(key)]),
   ), [materialKeys]);
-  useLayoutEffect(() => () => {
-    Object.values(materials).forEach(disposeFormationMaterial);
-  }, [materials]);
+  useDeferredDisposal(materials, disposeMaterials);
   const sourceId = `ecology:${zoneId}:${layer.id}`;
 
   return formations.map(formation => (

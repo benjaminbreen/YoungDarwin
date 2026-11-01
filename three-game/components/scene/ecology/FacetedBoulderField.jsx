@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../../store';
 import { terrainHeight } from '../../../world/terrain';
@@ -13,6 +13,7 @@ import {
 } from '../../../world/facetedBoulders';
 import { rockSampleKey } from '../../../physics/props/rockSampling';
 import { catalogToInspectable } from '../../../world/inspectables';
+import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 import {
   FLOREANA_PBR_TEXTURES,
   disposePbrTerrainSet,
@@ -413,6 +414,12 @@ function makeBoulderMaterial() {
   return material;
 }
 
+const disposeGeometry = geometry => geometry.dispose();
+const disposeMaterial = material => {
+  disposePbrTerrainSet(material.userData.pbrTextures);
+  material.dispose();
+};
+
 function FacetedBoulder({ obstacle, material, currentZoneId, bites }) {
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const geometry = useMemo(() => makeFacetedBoulderGeometry(obstacle, bites), [bites, obstacle]);
@@ -428,7 +435,7 @@ function FacetedBoulder({ obstacle, material, currentZoneId, bites }) {
     renderPath: null,
   }), [currentZoneId, obstacle.id]);
 
-  useLayoutEffect(() => () => geometry.dispose(), [geometry]);
+  useDeferredDisposal(geometry, disposeGeometry);
 
   return (
     <mesh
@@ -453,10 +460,7 @@ export function FacetedBoulderField({ obstacles, currentZoneId }) {
   const rockDamage = useThreeGameStore(state => state.rockDamage);
   const material = useMemo(() => makeBoulderMaterial(), []);
 
-  useLayoutEffect(() => () => {
-    disposePbrTerrainSet(material.userData.pbrTextures);
-    material.dispose();
-  }, [material]);
+  useDeferredDisposal(material, disposeMaterial);
 
   return obstacles.map(obstacle => (
     <FacetedBoulder

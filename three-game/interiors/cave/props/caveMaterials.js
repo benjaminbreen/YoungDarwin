@@ -1,13 +1,14 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import * as THREE from 'three';
 import { loadRepeatingTerrainTexture } from '../../../world/regions/materials/pbrTerrainTextures';
+import { loadPeriodSurface } from '../../../world/regions/materials/periodMaterials';
+import { useDeferredDisposal } from '../../../components/assets/useDeferredDisposal';
 import { createPrintTextures } from './printTextures';
 
 // Shared materials for the furnishings of Gabriel's cave. Everything Gabriel
 // owns is either salvaged (iron, brass, glass, paper) or made on the island
 // (adzed timber, goatskin, straw, clay), and the materials say which.
 
-const LAWSON = '/assets/textures/interiors/lawson-house';
 const BEAGLE = '/assets/textures/interiors/beagle-cabin';
 
 function loadSet(base, { color, normal, rough }, rotation = 0) {
@@ -30,6 +31,7 @@ function texturedMaterial(set, { color = '#ffffff', roughness = 1, normalScale =
     normalScale: new THREE.Vector2(normalScale, normalScale),
   });
   if (name) material.name = name;
+  if (set.periodSurface) material.userData.periodSurface = set.periodSurface;
   return material;
 }
 
@@ -38,11 +40,15 @@ function plain(color, roughness = 0.85, metalness = 0, extra = {}) {
 }
 
 export function createCaveMaterials() {
-  const fine = loadSet(LAWSON, { color: 'fine-wood-diff-2k.jpg', normal: 'fine-wood-normal-2k.jpg', rough: 'fine-wood-rough-2k.jpg' });
-  const fineRound = loadSet(LAWSON, { color: 'fine-wood-diff-2k.jpg', normal: 'fine-wood-normal-2k.jpg', rough: 'fine-wood-rough-2k.jpg' }, Math.PI / 2);
-  const planks = loadSet(LAWSON, { color: 'wood-planks-diff-1k.jpg', normal: 'wood-planks-normal-1k.jpg', rough: 'wood-planks-rough-1k.jpg' });
+  const fine = loadPeriodSurface('weatheredWood');
+  const fineRound = loadPeriodSurface('weatheredWood', { offset: [0.12, 0.28] });
+  const planks = loadPeriodSurface('weatheredWood', { offset: [0.37, 0.21] });
   const oak = loadSet(BEAGLE, { color: 'varnished-oak-diff-1k.jpg', normal: 'varnished-oak-normal-1k.jpg', rough: 'varnished-oak-rough-1k.jpg' });
-  const fabric = loadSet(LAWSON, { color: 'woven-fabric-diff-2k.jpg', normal: 'woven-fabric-normal-2k.jpg', rough: 'woven-fabric-rough-2k.jpg' });
+  const wool = loadPeriodSurface('wool');
+  const linen = loadPeriodSurface('linen');
+  const sacking = loadPeriodSurface('sacking');
+  const leather = loadPeriodSurface('leather');
+  const endGrain = loadPeriodSurface('endGrain');
   const prints = createPrintTextures();
 
   const materials = {
@@ -53,22 +59,22 @@ export function createCaveMaterials() {
     pressWood: texturedMaterial(oak, { color: '#8c725c', roughness: 0.82, normalScale: 0.9, name: 'CavePressWood' }),
     crateWood: texturedMaterial(planks, { color: '#a8927a', normalScale: 0.9, name: 'CaveCrateWood' }),
     bark: plain('#3b3026', 1),
-    logEnd: plain('#a68a66', 0.95),
+    logEnd: texturedMaterial(endGrain, { name: 'CaveEndGrain', normalScale: 0.5 }),
     iron: plain('#2b2927', 0.55, 0.75),
     rust: plain('#5a3b28', 0.85, 0.35),
     brass: plain('#9a7a3e', 0.36, 0.9),
     tin: plain('#9a9a96', 0.42, 0.85),
     typeMetal: plain('#55565a', 0.42, 0.8),
     glass: new THREE.MeshStandardMaterial({ color: '#d8d2b8', roughness: 0.12, metalness: 0, transparent: true, opacity: 0.32, depthWrite: false }),
-    wool: texturedMaterial(fabric, { color: '#77706a', normalScale: 0.6, name: 'CaveWool' }),
-    redWool: texturedMaterial(fabric, { color: '#8a2a20', normalScale: 0.6, name: 'CaveRedWool' }),
-    linen: texturedMaterial(fabric, { color: '#d7cdb6', normalScale: 0.5, name: 'CaveLinen' }),
-    sacking: texturedMaterial(fabric, { color: '#a08860', normalScale: 0.9, name: 'CaveSacking' }),
-    coat: texturedMaterial(fabric, { color: '#3e3a36', normalScale: 0.5, name: 'CaveCoat' }),
+    wool: texturedMaterial(wool, { color: '#b6b2ab', normalScale: 0.6, name: 'CaveWool' }),
+    redWool: texturedMaterial(wool, { color: '#8a2a20', normalScale: 0.6, name: 'CaveRedWool' }),
+    linen: texturedMaterial(linen, { color: '#eee8da', normalScale: 0.5, name: 'CaveLinen' }),
+    sacking: texturedMaterial(sacking, { color: '#e1d2b7', normalScale: 0.9, name: 'CaveSacking' }),
+    coat: texturedMaterial(wool, { color: '#3e3a36', normalScale: 0.5, name: 'CaveCoat' }),
     straw: plain('#a48c56', 1),
     tick: plain('#8e7a54', 1),
     strawDark: plain('#7c6a40', 1),
-    leather: plain('#4b2f1e', 0.62),
+    leather: texturedMaterial(leather, { color: '#c4ae94', normalScale: 0.45, name: 'CaveLeather' }),
     hide: plain('#8f7052', 0.92, 0, { side: THREE.DoubleSide }),
     hideDark: plain('#5e4632', 0.95, 0, { side: THREE.DoubleSide }),
     horn: plain('#cfc2a4', 0.6),
@@ -108,13 +114,13 @@ export function createCaveMaterials() {
     tally: new THREE.MeshStandardMaterial({ map: prints.tally, transparent: true, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, name: 'CaveTally' }),
     chalk: new THREE.MeshStandardMaterial({ map: prints.chalk, transparent: true, roughness: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, name: 'CaveChalk' }),
     slate: plain('#2b2a29', 0.48),
-    bookCover: plain('#4a2a1c', 0.7),
+    bookCover: texturedMaterial(leather, { color: '#a99076', normalScale: 0.4, name: 'CaveBookCover' }),
     bookPages: plain('#dccfae', 0.9),
   };
   materials.sheetHanging = createSwayingSheetMaterial(prints.sheets);
   materials.herbHanging = createSwayingSheetMaterial(prints.herb, '#ffffff', { alphaTest: 0.5, name: 'CaveHangingHerb' });
   materials.meatHanging = createSwayingSheetMaterial(null, '#3e1c14', { name: 'CaveHangingMeat' });
-  materials.__textures = [fine, fineRound, planks, oak, fabric].flatMap(set => Object.values(set)).concat(Object.values(prints));
+  materials.__textures = [fine, fineRound, planks, oak, wool, linen, sacking, leather, endGrain].flatMap(set => Object.values(set)).concat(Object.values(prints));
   return materials;
 }
 
@@ -153,15 +159,14 @@ export function tickCaveMaterials(materials, time) {
   }
 }
 
+const disposeCaveMaterials = materials => {
+  for (const [key, value] of Object.entries(materials)) if (key !== '__textures') value?.dispose?.();
+  for (const texture of materials.__textures || []) texture?.dispose?.();
+};
+
 export function useCaveMaterials() {
   const materials = useMemo(() => createCaveMaterials(), []);
-  useEffect(() => () => {
-    for (const [key, value] of Object.entries(materials)) {
-      if (key === '__textures') continue;
-      value?.dispose?.();
-    }
-    for (const texture of materials.__textures || []) texture?.dispose?.();
-  }, [materials]);
+  useDeferredDisposal(materials, disposeCaveMaterials);
   return materials;
 }
 

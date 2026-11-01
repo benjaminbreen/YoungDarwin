@@ -12,6 +12,10 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../../store';
 import { emitPropEvent, onPropEvent } from '../../physics/props/propEvents';
 import { mergeStaticParts } from '../assets/mergeMeshParts';
 
+import { createPeriodMaterial } from '../../world/regions/materials/periodMaterials';
+import { metricBoxUvs } from '../../world/regions/materials/periodMaterialUvs';
+import { useDeferredDisposal } from '../assets/useDeferredDisposal';
+
 const INTERACTION_DISTANCE = 2.35;
 const PROMPT_POLL_SECONDS = 0.12;
 const OPEN_ANGLE = -1.72;
@@ -27,71 +31,19 @@ const LID_PIVOT_Z = -0.31;
 
 function useDisposableGeometry(factory) {
   const geometry = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => geometry.dispose(), [geometry]);
+  useDeferredDisposal(geometry, disposeGeometry);
   return geometry;
 }
 
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => material.dispose(), [material]);
+  useDeferredDisposal(material, disposeMaterial);
   return material;
 }
 
-function makeCanvasTexture() {
-  const size = 128;
-  const data = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const index = (y * size + x) * 4;
-      const hash = (x * 37 + y * 61 + ((x * y) % 29) * 7) % 23;
-      // Two interleaved thread runs read as woven cloth rather than a grid:
-      // warp is darker in its troughs, weft brighter on its crowns.
-      const warp = Math.cos((x / size) * Math.PI * 2 * 32) * 5.5;
-      const weft = Math.cos((y / size) * Math.PI * 2 * 26) * 4.2;
-      const slub = ((x * 7 + y * 13) % 97) < 3 ? -9 : 0;
-      const lowerStain = Math.max(0, y - 92) * 0.42;
-      const shade = warp + weft + slub - lowerStain + hash * 0.5;
-      data[index] = Math.max(0, Math.min(255, 152 + shade));
-      data[index + 1] = Math.max(0, Math.min(255, 112 + shade * 0.86));
-      data[index + 2] = Math.max(0, Math.min(255, 68 + shade * 0.6));
-      data[index + 3] = 255;
-    }
-  }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3.4, 2.2);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-// A grain-only map for the leather straps and corner caps: the same tint as the
-// base colour, so it adds relief without shifting hue.
-function makeLeatherTexture() {
-  const size = 64;
-  const data = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const index = (y * size + x) * 4;
-      const grain = ((x * 29 + y * 53 + ((x + y) % 17) * 11) % 31) - 15;
-      const crease = Math.abs(Math.sin((x * 0.21) + (y * 0.13))) > 0.94 ? -12 : 0;
-      const shade = grain * 0.55 + crease;
-      data[index] = Math.max(0, Math.min(255, 96 + shade));
-      data[index + 1] = Math.max(0, Math.min(255, 60 + shade * 0.8));
-      data[index + 2] = Math.max(0, Math.min(255, 38 + shade * 0.6));
-      data[index + 3] = 255;
-    }
-  }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2.4, 2.4);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return texture;
-}
+const disposeGeometry = geometry => geometry.dispose();
+const disposeMaterial = material => material.dispose();
+const caseBox = (...args) => metricBoxUvs(new RoundedBoxGeometry(...args));
 
 function makeBuckleGeometry() {
   const shape = new THREE.Shape();
@@ -164,36 +116,10 @@ void main() {`,
 }
 
 function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, offsetY = 0 }) {
-  const canvasTexture = useMemo(makeCanvasTexture, []);
-  useEffect(() => () => canvasTexture.dispose(), [canvasTexture]);
-  const leatherTexture = useMemo(makeLeatherTexture, []);
-  useEffect(() => () => leatherTexture.dispose(), [leatherTexture]);
-  const canvas = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    map: canvasTexture,
-    color: '#c6a47b',
-    roughness: 0.96,
-    metalness: 0,
-  }));
-  // The lid reads as a separate panel only if it is not the identical tone as
-  // the body; a shade darker is enough at gameplay distance.
-  const canvasLid = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    map: canvasTexture,
-    color: '#bb9770',
-    roughness: 0.95,
-    metalness: 0,
-  }));
-  const leather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    map: leatherTexture,
-    color: '#7c5535',
-    roughness: 0.72,
-    metalness: 0.01,
-  }));
-  const darkLeather = useDisposableMaterial(() => new THREE.MeshStandardMaterial({
-    map: leatherTexture,
-    color: '#573620',
-    roughness: 0.8,
-    metalness: 0.01,
-  }));
+  const canvas = useDisposableMaterial(() => createPeriodMaterial('canvas', { color: '#d4c1a2', name: 'CaseCanvas' }));
+  const canvasLid = useDisposableMaterial(() => createPeriodMaterial('canvas', { color: '#c5b08f', name: 'CaseCanvasLid' }));
+  const leather = useDisposableMaterial(() => createPeriodMaterial('leather', { color: '#e4d1b5', name: 'CaseLeather' }));
+  const darkLeather = useDisposableMaterial(() => createPeriodMaterial('leather', { color: '#a88d73', name: 'CaseLeatherDark' }));
   const brass = useDisposableMaterial(() => applyDirectSpecularGlint(new THREE.MeshPhysicalMaterial({
     color: '#c79835',
     roughness: 0.18,
@@ -223,27 +149,27 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, off
     metalness: 0.04,
   }));
 
-  const skid = useDisposableGeometry(() => new RoundedBoxGeometry(1.12, SKID_TOP, 0.1, 2, 0.02));
-  const body = useDisposableGeometry(() => new RoundedBoxGeometry(1.18, WELL_FLOOR - SKID_TOP, 0.6, 3, 0.055));
-  const wellWallLong = useDisposableGeometry(() => new RoundedBoxGeometry(1.18, BODY_TOP - WELL_FLOOR, 0.06, 2, 0.02));
-  const wellWallEnd = useDisposableGeometry(() => new RoundedBoxGeometry(0.06, BODY_TOP - WELL_FLOOR, 0.6, 2, 0.02));
-  const lid = useDisposableGeometry(() => new RoundedBoxGeometry(1.2, 0.1, 0.62, 2, 0.042));
-  const sidePatch = useDisposableGeometry(() => new RoundedBoxGeometry(0.075, 0.3, 0.54, 2, 0.025));
-  const cornerCap = useDisposableGeometry(() => new RoundedBoxGeometry(0.12, 0.13, 0.12, 2, 0.03));
-  const edgeBand = useDisposableGeometry(() => new RoundedBoxGeometry(1.19, 0.045, 0.045, 2, 0.018));
-  const frontStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.4, 0.035, 2, 0.018));
-  const lidStrap = useDisposableGeometry(() => new RoundedBoxGeometry(0.1, 0.035, 0.6, 2, 0.015));
+  const skid = useDisposableGeometry(() => caseBox(1.12, SKID_TOP, 0.1, 2, 0.02));
+  const body = useDisposableGeometry(() => caseBox(1.18, WELL_FLOOR - SKID_TOP, 0.6, 3, 0.055));
+  const wellWallLong = useDisposableGeometry(() => caseBox(1.18, BODY_TOP - WELL_FLOOR, 0.06, 2, 0.02));
+  const wellWallEnd = useDisposableGeometry(() => caseBox(0.06, BODY_TOP - WELL_FLOOR, 0.6, 2, 0.02));
+  const lid = useDisposableGeometry(() => caseBox(1.2, 0.1, 0.62, 2, 0.042));
+  const sidePatch = useDisposableGeometry(() => caseBox(0.075, 0.3, 0.54, 2, 0.025));
+  const cornerCap = useDisposableGeometry(() => caseBox(0.12, 0.13, 0.12, 2, 0.03));
+  const edgeBand = useDisposableGeometry(() => caseBox(1.19, 0.045, 0.045, 2, 0.018));
+  const frontStrap = useDisposableGeometry(() => caseBox(0.1, 0.4, 0.035, 2, 0.018));
+  const lidStrap = useDisposableGeometry(() => caseBox(0.1, 0.035, 0.6, 2, 0.015));
   const buckle = useDisposableGeometry(makeBuckleGeometry);
-  const hinge = useDisposableGeometry(() => new RoundedBoxGeometry(0.11, 0.025, 0.13, 2, 0.01));
-  const plaque = useDisposableGeometry(() => new RoundedBoxGeometry(0.2, 0.012, 0.09, 2, 0.006));
-  const tag = useDisposableGeometry(() => new RoundedBoxGeometry(0.25, 0.13, 0.018, 2, 0.012));
+  const hinge = useDisposableGeometry(() => caseBox(0.11, 0.025, 0.13, 2, 0.01));
+  const plaque = useDisposableGeometry(() => caseBox(0.2, 0.012, 0.09, 2, 0.006));
+  const tag = useDisposableGeometry(() => caseBox(0.25, 0.13, 0.018, 2, 0.012));
   const inkLine = useDisposableGeometry(() => new THREE.BoxGeometry(0.16, 0.008, 0.006));
-  const caseLining = useDisposableGeometry(() => new RoundedBoxGeometry(1.06, 0.025, 0.48, 2, 0.02));
+  const caseLining = useDisposableGeometry(() => caseBox(1.06, 0.025, 0.48, 2, 0.02));
   const divider = useDisposableGeometry(() => new THREE.BoxGeometry(0.016, 0.1, 0.48));
-  const paperPacket = useDisposableGeometry(() => new RoundedBoxGeometry(0.29, 0.05, 0.21, 2, 0.016));
+  const paperPacket = useDisposableGeometry(() => caseBox(0.29, 0.05, 0.21, 2, 0.016));
   const pillBox = useDisposableGeometry(() => new THREE.CylinderGeometry(0.078, 0.078, 0.075, 12));
   const bottle = useDisposableGeometry(() => new THREE.CylinderGeometry(0.048, 0.058, 0.24, 10));
-  const clothBundle = useDisposableGeometry(() => new RoundedBoxGeometry(0.28, 0.1, 0.19, 2, 0.038));
+  const clothBundle = useDisposableGeometry(() => caseBox(0.28, 0.1, 0.19, 2, 0.038));
   const handle = useDisposableGeometry(() => {
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(-0.18, 0, 0),
@@ -252,7 +178,10 @@ function CollectingCaseVisual({ contentsRef, lidRef, onToggle, worldRootRef, off
       new THREE.Vector3(0.14, -0.1, 0.055),
       new THREE.Vector3(0.18, 0, 0),
     ], false, 'centripetal', 0.35);
-    return new THREE.TubeGeometry(curve, 18, 0.024, 7, false);
+    const geometry = new THREE.TubeGeometry(curve, 18, 0.024, 7, false);
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i += 1) uv.setXY(i, uv.getX(i) * curve.getLength(), uv.getY(i) * 2 * Math.PI * 0.024);
+    return geometry;
   });
 
   const bodyCentre = (SKID_TOP + WELL_FLOOR) * 0.5;

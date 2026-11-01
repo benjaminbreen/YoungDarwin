@@ -12,6 +12,9 @@ import {
   disposePbrTerrainSet,
   loadPbrTerrainSet,
 } from '../../world/regions/materials/pbrTerrainTextures';
+import { createPeriodMaterial } from '../../world/regions/materials/periodMaterials';
+import { metricBoxUvs, metricCylinderUvs } from '../../world/regions/materials/periodMaterialUvs';
+import { useDeferredDisposal } from '../../components/assets/useDeferredDisposal';
 import { createTimberMaterial } from '../../world/regions/materials/timberMaterial';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { cachedGpuResource, retainGpuResource } from '../../world/gpuResourceCache';
@@ -21,9 +24,11 @@ import { makeLooseStoneGeometry } from './rockDebrisGeometry';
 import { SymsFieldCaseVisual } from '../../components/world/SymsFieldCase';
 import { mergeStaticParts } from '../../components/assets/mergeMeshParts';
 
+const disposePropMaterial = material => material.dispose();
+
 function useDisposableMaterial(factory) {
   const material = useMemo(factory, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => material.dispose(), [material]);
+  useDeferredDisposal(material, disposePropMaterial);
   return material;
 }
 
@@ -60,6 +65,7 @@ function useSingleMaterialGeometry(factory) {
     // Three renders BufferGeometry groups as separate draw calls even when a
     // mesh uses one material. These procedural props never need material
     // groups, so strip them at creation time.
+    if (result.type === 'BoxGeometry') metricBoxUvs(result);
     result.clearGroups();
     return result;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,10 +83,10 @@ export const PROP_PALETTE = {
 };
 
 function BarrelVisual() {
-  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelWood, roughness: 0.86, metalness: 0.02 }));
+  const wood = useSharedMaterial(() => createPeriodMaterial('weatheredWood', { color: '#c8b79b', name: 'PropBarrelWood' }));
   const band = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelBand, roughness: 0.72, metalness: 0.18 }));
-  const end = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: PROP_PALETTE.barrelEnd, roughness: 0.9, metalness: 0.01 }));
-  const bodyGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.48, 0.48, 0.9, 14, 1));
+  const end = useSharedMaterial(() => createPeriodMaterial('endGrain', { color: '#c8b79b', name: 'PropBarrelEndGrain' }));
+  const bodyGeometry = useSingleMaterialGeometry(() => metricCylinderUvs(new THREE.CylinderGeometry(0.48, 0.48, 0.9, 14, 1), 0.48, 0.9, true));
   const bandGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.505, 0.505, 0.055, 14, 1, true));
   const endGeometry = useSingleMaterialGeometry(() => new THREE.CylinderGeometry(0.43, 0.43, 0.035, 14));
   const partsRef = useMergedStaticParts();
@@ -206,7 +212,7 @@ function ToothVisual() {
 }
 
 function BookVisual() {
-  const leather = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#4c3623', roughness: 0.85, metalness: 0.01 }));
+  const leather = useSharedMaterial(() => createPeriodMaterial('leather', { color: '#b49a7c', name: 'PropBookLeather' }));
   const pages = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#c9bd9c', roughness: 0.95, metalness: 0 }));
   const coverGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.32, 0.09, 0.24));
   const pageGeometry = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.295, 0.06, 0.215));
@@ -307,7 +313,7 @@ function LooseBoardVisual() {
 }
 
 function CabinChairVisual() {
-  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#5a321c', roughness: 0.76 }));
+  const wood = useSharedMaterial(() => createPeriodMaterial('weatheredWood', { color: '#b6a08b', name: 'PropChairWood' }));
   const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.82, 0.12, 0.78));
   const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.1, 0.72, 0.1));
   const rail = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.72, 0.1, 0.1));
@@ -325,8 +331,8 @@ function CabinChairVisual() {
 }
 
 function CabinStoolVisual() {
-  const wood = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#704727', roughness: 0.82 }));
-  const canvas = useSharedMaterial(() => new THREE.MeshStandardMaterial({ color: '#b6aa88', roughness: 0.94 }));
+  const wood = useSharedMaterial(() => createPeriodMaterial('weatheredWood', { color: '#cab49a', name: 'PropStoolWood' }));
+  const canvas = useSharedMaterial(() => createPeriodMaterial('canvas', { color: '#e2d4b8', name: 'PropStoolCanvas' }));
   const seat = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.64, 0.1, 0.55));
   const leg = useSingleMaterialGeometry(() => new THREE.BoxGeometry(0.09, 0.72, 0.09));
   return (

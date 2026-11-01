@@ -37,7 +37,7 @@ export function noise2(x, z, seed = 0) {
 
 // UVs from each vertex's world position, projected along the dominant axis of
 // its normal, so stones and planks keep one texel density however they sit.
-function projectUVs(geometry, tile, offset = [0, 0]) {
+export function projectUVs(geometry, tile, offset = [0, 0]) {
   const position = geometry.attributes.position;
   const normal = geometry.attributes.normal;
   const uv = new Float32Array(position.count * 2);

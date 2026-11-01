@@ -53,7 +53,7 @@ function KegRow({ materials, chalk, ground }) {
     const base = ground(x, z);
     return (
       <group key={i} position={[x, base, z]} rotation={[0, KEGS.yaw + hash(i, 3) * 0.5, 0]}>
-        <Cask height={0.62} radius={0.235} material={materials.crateWood} hoop={materials.iron} />
+        <Cask headMaterial={materials.endGrain || materials.logEnd} height={0.62} radius={0.235} material={materials.crateWood} hoop={materials.iron} />
         {/* Initials chalked on the head. */}
         <Block size={[0.11, 0.004, 0.035]} material={chalk} position={[-0.03, 0.605, -0.02]} rotation={[0, 0.2, 0]} />
         <Block size={[0.08, 0.004, 0.03]} material={chalk} position={[0.05, 0.605, 0.04]} rotation={[0, -0.3, 0]} />
@@ -139,7 +139,7 @@ export function SeaGallery({ materials, rock }) {
         {/* The twelfth keg, apart, on its side, the initials scored out. */}
         <group position={[twelfth[0], twelfthBase + 0.235, twelfth[1]]} rotation={[0, 0.6, Math.PI / 2]}>
           <group position={[0, -0.31, 0]}>
-            <Cask height={0.62} radius={0.235} material={materials.crateWood} hoop={materials.iron} />
+            <Cask headMaterial={materials.endGrain || materials.logEnd} height={0.62} radius={0.235} material={materials.crateWood} hoop={materials.iron} />
           </group>
         </group>
         <RopeLadder materials={materials} ground={ground} />

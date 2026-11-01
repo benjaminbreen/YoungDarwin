@@ -15,6 +15,7 @@ import { warmGateRuntime } from '../../world/warmGateRuntime';
 import { constrainSourceResolution } from './sharedTextureSources';
 import { CONSTRAINED_HERO_TEXTURE_MAX_DIM, isConstrainedMemoryDevice } from '../../world/constrainedDevice';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
+import { environmentLookTuning, getEnvironmentLookRevision } from '../../world/environmentLook';
 import { worldTime } from '../../world/worldTime';
 import { applyFoliageMotion } from '../scene/ecology/foliageMotion';
 import {
@@ -446,6 +447,13 @@ function buildSkyGradientEnvScene() {
       uTop: { value: new THREE.Color('#a3bcd8') },     // cool skylight
       uHorizon: { value: new THREE.Color('#dccfb2') },  // neutral-warm horizon
       uBottom: { value: new THREE.Color('#a68a64') },   // sunlit-sand ground bounce
+      // Directional terms (world/environmentLook.js). Zero until the scene's
+      // SceneEnvironment drives them, so the player's fallback map is the
+      // plain gradient it always was.
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uSunColor: { value: new THREE.Color(0, 0, 0) },
+      uSunWidth: { value: 5 },
+      uBounceColor: { value: new THREE.Color(0, 0, 0) },
     },
     vertexShader: `
       varying vec3 vDir;
@@ -457,11 +465,23 @@ function buildSkyGradientEnvScene() {
     fragmentShader: `
       varying vec3 vDir;
       uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uBottom;
+      uniform vec3 uSunDir; uniform vec3 uSunColor; uniform float uSunWidth;
+      uniform vec3 uBounceColor;
       void main() {
-        float h = vDir.y;
+        vec3 dir = normalize(vDir);
+        float h = dir.y;
         vec3 col = h >= 0.0
           ? mix(uHorizon, uTop, pow(clamp(h, 0.0, 1.0), 0.6))
           : mix(uHorizon, uBottom, pow(clamp(-h, 0.0, 1.0), 0.5));
+        // Circumsolar sky: brightest toward the sun, so a shaded face turned
+        // sunward reads lighter than one turned away.
+        col += uSunColor * pow(max(dot(dir, uSunDir), 0.0), uSunWidth);
+        // Sunlit sand below, a little stronger on the sun's side where the
+        // ground is not in the object's own shadow.
+        vec2 sunFlat = uSunDir.xz / max(length(uSunDir.xz), 1e-4);
+        vec2 dirFlat = dir.xz / max(length(dir.xz), 1e-4);
+        float sunSide = 0.5 + 0.5 * dot(dirFlat, sunFlat);
+        col += uBounceColor * smoothstep(0.0, 0.45, -h) * mix(0.55, 1.0, sunSide);
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -500,6 +520,9 @@ const ENV_NIGHT_TOP = new THREE.Color('#263752');
 const ENV_NIGHT_HORIZON = new THREE.Color('#1d2a40');
 const ENV_NIGHT_GROUND = new THREE.Color('#242b34');
 const ENV_GOLDEN_HORIZON = new THREE.Color('#e2b37c');
+const ENV_SUN_NOON = new THREE.Color('#fff1d6');
+const ENV_SUN_GOLDEN = new THREE.Color('#ffc07a');
+const ENV_SAND_BOUNCE = new THREE.Color('#d9b27c');
 
 function environmentPalette(timeOfDay, day) {
   const sky = skyState(timeOfDay, day || 1);
@@ -524,16 +547,42 @@ function environmentPalette(timeOfDay, day) {
   const intensity = THREE.MathUtils.lerp(0.1, 0.25, daylight)
     * (1 - closure * 0.34)
     * (1 - weatherEnv.lightDim * 0.18);
-  return { top, horizon, ground, intensity };
+  // Directional terms fade with cloud (an overcast sky has no sun side) and
+  // with the sun's height above the horizon.
+  const sunUp = THREE.MathUtils.smoothstep(sky.elevation, -0.03, 0.15);
+  const clear = (1 - closure) * sunUp * daylight;
+  const sunDir = new THREE.Vector3(sky.sun[0], Math.max(sky.sun[1], 0.02), sky.sun[2]).normalize();
+  const sunColor = ENV_SUN_NOON.clone()
+    .lerp(ENV_SUN_GOLDEN, sky.golden)
+    .multiplyScalar(environmentLookTuning.sunLobe * clear);
+  const bounce = ENV_SAND_BOUNCE.clone()
+    .multiplyScalar(environmentLookTuning.groundBounce * clear * (0.35 + 0.65 * Math.min(1, Math.max(0, sky.elevation) * 2)));
+  return {
+    top,
+    horizon,
+    ground,
+    intensity,
+    sunDir,
+    sunColor,
+    sunWidth: environmentLookTuning.sunLobeWidth,
+    bounce,
+    lookRevision: getEnvironmentLookRevision(),
+  };
 }
 
 function paletteDistance(a, b) {
   if (typeof a?.top?.distanceTo !== 'function' || typeof a?.horizon?.distanceTo !== 'function' || typeof a?.ground?.distanceTo !== 'function') return Infinity;
   if (typeof b?.top?.distanceTo !== 'function' || typeof b?.horizon?.distanceTo !== 'function' || typeof b?.ground?.distanceTo !== 'function') return Infinity;
+  // A dial change in the dev panel must rebuild at once, however small.
+  if (a.lookRevision !== b.lookRevision) return Infinity;
   return Math.max(
     a.top.distanceTo(b.top),
     a.horizon.distanceTo(b.horizon),
     a.ground.distanceTo(b.ground),
+    // Scaled so roughly 3.5 degrees of sun travel counts as a change.
+    (a.sunDir && b.sunDir ? a.sunDir.distanceTo(b.sunDir) : 0),
+    a.sunColor && b.sunColor ? a.sunColor.distanceTo(b.sunColor) * 0.25 : 0,
+    a.bounce && b.bounce ? a.bounce.distanceTo(b.bounce) : 0,
   );
 }
 
@@ -582,6 +631,10 @@ export function SceneEnvironment({ intensity = 0.25 }) {
     material.uniforms.uTop.value.copy(target.top);
     material.uniforms.uHorizon.value.copy(target.horizon);
     material.uniforms.uBottom.value.copy(target.ground);
+    material.uniforms.uSunDir.value.copy(target.sunDir);
+    material.uniforms.uSunColor.value.copy(target.sunColor);
+    material.uniforms.uSunWidth.value = target.sunWidth;
+    material.uniforms.uBounceColor.value.copy(target.bounce);
     const nextTarget = state.pmrem.fromScene(state.sourceScene, 0.04, 0.1, 100, { size: 128 });
     replacePlayerEnvironment(nextTarget);
     scene.environment = cachedPlayerEnv;

@@ -84,8 +84,9 @@ const AUTHORED_REGION_TERRAIN = {
   WATKINS_CREEK: { preset: 'highland-creek-fork', segments: 248 },
   LAVA_FLATS: { preset: 'authored-lava-flats', segments: 248 },
   // The spatter cone and tumuli are broad forms; packed relief and the
-  // render-only ropes carry the close pāhoehoe texture.
-  S_VOLCANIC: { preset: 'southern-basalt-plains', segments: 248 },
+  // render-only ropes carry the close pāhoehoe texture. Spread 1.5 is the
+  // larger-maps pilot: see REGION_SPREAD below.
+  S_VOLCANIC: { preset: 'southern-basalt-plains', segments: 248, spread: 1.5 },
   // Sheer east and south faces and the sea stacks need the finer grid.
   SE_PROMONTORY: { preset: 'windy-promontory-sea-cliffs', segments: 288 },
   N_SHORE: { preset: 'floreana-north-shore', segments: 192 },
@@ -119,6 +120,15 @@ const AUTHORED_REGION_TERRAIN = {
   S_WETLANDS: { preset: 'southern-wetlands-forest', segments: 264 },
 };
 
+// A region with `spread` is drawn on a map that many times wider and deeper
+// than its type's size. Its authored module still writes landmarks in metres at
+// the original scale and passes positions through `three-game/world/
+// regionSpread.js`, which moves them apart without changing their size, so a
+// spread of 1 reproduces the original map exactly.
+export function getRegionSpread(regionId) {
+  return AUTHORED_REGION_TERRAIN[regionId]?.spread || 1;
+}
+
 function humanDirection(edge) {
   return edge.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, char => char.toUpperCase());
 }
@@ -126,8 +136,9 @@ function humanDirection(edge) {
 function regionDimensions(cell) {
   const authored = AUTHORED_REGION_TERRAIN[cell.id];
   const [typeWidth, typeDepth] = REGION_SIZE_BY_TYPE[cell.type] || [96, 86];
-  const width = authored?.width || typeWidth;
-  const depth = authored?.depth || typeDepth;
+  const spread = authored?.spread || 1;
+  const width = (authored?.width || typeWidth) * spread;
+  const depth = (authored?.depth || typeDepth) * spread;
   const segments = authored?.segments || 140;
   return { width, depth, segments };
 }
@@ -253,8 +264,30 @@ function scatterAuthoredSpawn(seedSpawn, specimenId, zoneId) {
   ];
 }
 
-function normalizeSpawn(seedSpawn, zoneId = '') {
-  if (!seedSpawn || typeof seedSpawn !== 'object') return null;
+function spreadSeedSpawn(seedSpawn, spread) {
+  if (spread === 1 || !Array.isArray(seedSpawn.position)) return seedSpawn;
+  const [x, y, z] = seedSpawn.position;
+  const scatter = seedSpawn.spawnScatter;
+  const bounds = scatter?.bounds;
+  return {
+    ...seedSpawn,
+    position: [x * spread, y, z * spread],
+    ...(seedSpawn.habitatRadiusX ? { habitatRadiusX: seedSpawn.habitatRadiusX * spread } : {}),
+    ...(seedSpawn.habitatRadiusZ ? { habitatRadiusZ: seedSpawn.habitatRadiusZ * spread } : {}),
+    spawnScatter: scatter && {
+      ...scatter,
+      radiusX: (Number(scatter.radiusX) || 0) * spread,
+      radiusZ: (Number(scatter.radiusZ) || 0) * spread,
+      bounds: bounds && Object.fromEntries(
+        Object.entries(bounds).map(([key, value]) => [key, value * spread]),
+      ),
+    },
+  };
+}
+
+function normalizeSpawn(rawSeedSpawn, zoneId = '') {
+  if (!rawSeedSpawn || typeof rawSeedSpawn !== 'object') return null;
+  const seedSpawn = spreadSeedSpawn(rawSeedSpawn, getRegionSpread(zoneId));
   const specimenId = canonicalizeSpecimenIds([seedSpawn.specimenId])[0];
   if (!specimenId) return null;
   const rawPosition = scatterAuthoredSpawn(seedSpawn, specimenId, zoneId);

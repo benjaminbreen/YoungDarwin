@@ -5,6 +5,9 @@ import {
 } from './waterTextureManifest';
 
 const ASSET_ROOT = '/assets/textures/world/water-bakes';
+// Terrain-derived maps changed with the authored hut sites and southern coast.
+// Keep cached deployments from reusing the former shoreline and depth data.
+const WATER_BAKE_VERSION = 2;
 const resourceCache = new Map();
 const textureRecords = new Map();
 const WATER_RESOURCE_CACHE_LIMIT = 6;
@@ -141,14 +144,14 @@ function startWaterTextureResource(zoneId, bakeRes, openOceanOnly, contactRes) {
   entry.promise = Promise.all([
     openOceanOnly
       ? Promise.resolve(placeholderTexture())
-      : loadRetained(`${ASSET_ROOT}/${stem}-seafloor-${bakeRes}.png`, 'packed'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-seafloor-${bakeRes}.png?v=${WATER_BAKE_VERSION}`, 'packed'),
     openOceanOnly
       ? Promise.resolve(placeholderTexture())
-      : loadRetained(`${ASSET_ROOT}/${stem}-standing-water-${bakeRes}.png`, 'packed'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-standing-water-${bakeRes}.png?v=${WATER_BAKE_VERSION}`, 'packed'),
     loadRetained(rippleUrl, 'ripple'),
     openOceanOnly || contactRes <= 1
       ? Promise.resolve(contactPlaceholderTexture())
-      : loadRetained(`${ASSET_ROOT}/${stem}-water-contact-${contactRes}.png`, 'packed'),
+      : loadRetained(`${ASSET_ROOT}/${stem}-water-contact-${contactRes}.png?v=${WATER_BAKE_VERSION}`, 'packed'),
   ]).then(([seafloor, standingWaterMask, rippleNormal, waterContact]) => {
     entry.status = 'ready';
     entry.value = { seafloor, standingWaterMask, rippleNormal, waterContact };
