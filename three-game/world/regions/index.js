@@ -60,6 +60,7 @@ import {
   gabrielCaveMouthRegion,
   gabrielCavePressRegion,
   gabrielCaveQuartersRegion,
+  gabrielCaveSeaRegion,
   gabrielCaveSpringRegion,
 } from './gabrielCave/terrain';
 import { createGabrielCaveTerrainMaterial } from './gabrielCave/material';
@@ -124,6 +125,7 @@ const authoredRegions = [
   { ...gabrielCaveQuartersRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...gabrielCavePressRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...gabrielCaveSpringRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
+  { ...gabrielCaveSeaRegion, createTerrainMaterial: createGabrielCaveTerrainMaterial },
   { ...whalersHutRegion, createTerrainMaterial: createHutInteriorTerrainMaterial },
   { ...colonistRanchoRegion, createTerrainMaterial: createHutInteriorTerrainMaterial },
   { ...watkinsCampRegion, createTerrainMaterial: createWatkinsCampTerrainMaterial },

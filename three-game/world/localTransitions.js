@@ -1,4 +1,6 @@
 import { ROCKY_CLEARING, ROCKY_CLEARING_CAVE } from './regions/rockyClearing/path';
+import { ASILO_SPRING, ASILO_SPRING_SINKHOLE } from './regions/asiloSpring/path';
+import { POST_OFFICE_BAY_SEA_TUBE } from './regions/postOfficeBay/seaTube';
 import { POOP_BREAK } from './regions/beagleDeck/hull';
 import {
   BEAGLE_CABIN_ZONE_ID,
@@ -27,6 +29,36 @@ const LOCAL_TRANSITIONS = {
       closeRadius: 2.75,
       facing: { x: 0, z: -1 },
       routeLabel: 'Cave mouth',
+    },
+  ],
+  [ASILO_SPRING]: [
+    {
+      id: 'asilo-spring-sinkhole-to-gabriels-spring',
+      zoneId: ASILO_SPRING,
+      toRegionId: ASILO_SPRING_SINKHOLE.destinationZoneId,
+      label: 'Climb down into the sinkhole',
+      description: 'Someone has staked a knotted rope at the lip. Roots and the rope go down into cool dark air.',
+      entryEdge: 'from-asilo-sinkhole',
+      position: { x: ASILO_SPRING_SINKHOLE.promptX, z: ASILO_SPRING_SINKHOLE.promptZ },
+      radius: 2.6,
+      closeRadius: 1.6,
+      facing: { x: -0.97, z: 0.24 },
+      routeLabel: 'Sinkhole',
+    },
+  ],
+  POST_OFFICE_BAY: [
+    {
+      id: 'post-office-bay-sea-tube-to-gabriels-cave',
+      zoneId: 'POST_OFFICE_BAY',
+      toRegionId: POST_OFFICE_BAY_SEA_TUBE.destinationZoneId,
+      label: 'Crawl into the low opening',
+      description: 'Behind the talus a hole in the lava, chest-high, breathes cool air that smells of the sea and of tar.',
+      entryEdge: 'from-post-office-bay',
+      position: { x: POST_OFFICE_BAY_SEA_TUBE.promptX, z: POST_OFFICE_BAY_SEA_TUBE.promptZ },
+      radius: 2.2,
+      closeRadius: 1.4,
+      facing: { x: 0.71, z: 0.71 },
+      routeLabel: 'Tube mouth',
     },
   ],
   BEAGLE: [

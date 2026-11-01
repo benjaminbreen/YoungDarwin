@@ -15,6 +15,7 @@ const PRESS = 'GABRIEL_PRESS';
 const QUARTERS = 'GABRIEL_QUARTERS';
 const MOUTH = 'CAVE_ENTRANCE';
 const SPRING = 'GABRIEL_SPRING';
+const SEA = 'GABRIEL_SEA_GALLERY';
 
 function doc(entry) {
   // A paper on the wall is anchored at its middle; one on a table at the
@@ -305,7 +306,7 @@ export const GABRIEL_CAVE_DOCUMENTS = [
     name: 'Map on a Goat Hide',
     subtitle: 'pegged to the wall above the table',
     description: 'A map of the island’s south and west drawn in charcoal and ink on a scraped goat hide: hills hatched, springs circled, the settlement a square, a cross for this cave, and a small barrel at the bay. Dotted paths carry hours beside them.',
-    details: ['The guards’ beats are marked with the hours they walk them', 'The cave is marked; the route to the bay avoids every dotted path', 'Written legend along the lower edge'],
+    details: ['The guards’ beats are marked with the hours they walk them', 'The cave is marked; the route to the bay avoids every dotted path', 'A dashed line runs under the hills from the cave to the bay', 'Written legend along the lower edge'],
     frameHint: { height: 0.8, radius: 0.6 },
     zoneId: QUARTERS,
     worldPlacement: { x: 1.0, z: -3.4, wall: { y: 1.55, dir: [0, -1] }, prop: 'none' },
@@ -322,6 +323,8 @@ export const GABRIEL_CAVE_DOCUMENTS = [
           '··· — rondes. A les 6 i a les 12 pel camí de la Badia; a les 18 només fins a la font.',
           'Després de les 18 ningú no surt del presidi. Lawson tanca la porta i beu.',
           'Camí dels porcs: dues hores fins al barril, sense passar per cap ronda.',
+          '◎ vora la font de dalt — l’avenc. La corda és nostra.',
+          '- - - sota terra — el tub, de la impremta fins al turó negre de la Badia. Surt sobre l’aigua.',
         ],
         translation: [
           '✚ — the cave',
@@ -330,9 +333,11 @@ export const GABRIEL_CAVE_DOCUMENTS = [
           '··· — patrols. At 6 and at 12 along the Bay road; at 18 only as far as the spring.',
           'After 18 no one leaves the settlement. Lawson shuts the door and drinks.',
           'The pig track: two hours to the barrel, crossing no patrol.',
+          '◎ by the upper spring — the sinkhole. The rope is ours.',
+          '- - - underground — the tube, from the press to the black hill at the Bay. It comes out above the water.',
         ],
       }],
-      gloss: 'A route from the settlement to the post barrel that misses every patrol, walked after six in the evening. It is not a map for living here. It is a map for leaving.',
+      gloss: 'A route from the settlement to the post barrel that misses every patrol, walked after six in the evening; a rope down a hole by the upper spring; and, dashed in under the hills, a road that needs no road at all, from the press to the sea. It is not a map for living here. It is a map for leaving.',
     },
   }),
   doc({
@@ -636,6 +641,77 @@ export const GABRIEL_CAVE_DOCUMENTS = [
         },
       ],
       gloss: 'Eleven convicts by name and trade, and the passage money short by half. "I am not counted": the printer means to stay behind with his press. Mr. Lawson would give a good deal for this paper. So, I think, would the eleven.',
+    },
+  }),
+
+  // ---- The sea gallery ---------------------------------------------------
+  doc({
+    typeId: 'cave_tide_slate',
+    name: 'Tide Slate',
+    subtitle: 'propped against the rock over a candle stub',
+    description: 'A roofing slate, chipped at one corner, propped against the wall of the landing and written over in chalk, rubbed out and written over again. The newest lines are the clearest.',
+    details: ['Tide times reckoned against the moon', 'One line struck out and corrected', 'A question added below in another hand'],
+    uncertainties: ['Whoever reckoned these tides has watched this water for a long time.'],
+    frameHint: { height: 0.44, radius: 0.36 },
+    zoneId: SEA,
+    worldPlacement: { x: 3.0, z: -4.3, wall: { y: 1.2, dir: [0.25, -1] }, prop: 'none' },
+    readable: {
+      form: 'slate',
+      pages: [{
+        hand: 'chalk',
+        language: 'Catalan',
+        lines: [
+          '# Marees',
+          'Plenamar: cada dia tres quarts d’hora més tard que l’anterior.',
+          'A la lluna nova, baixamar cap a mitjanit.',
+          'Amb plenamar el mar puja pel tub fins a la ratlla de les pegellides. Amb baixamar l’escala toca la roca.',
+          '~Dos cops de fanal.~ Tres cops de fanal. Si no en veu tres, la barca no ve.',
+          'Onze bótes. En Coffin no en vol més.',
+          '> ¿Y la duodécima? — R.',
+        ],
+        translation: [
+          '# Tides',
+          'High water: each day three quarters of an hour later than the last.',
+          'At the new moon, low water toward midnight.',
+          'At high water the sea comes up the tube to the line of limpets. At low water the ladder reaches the rock.',
+          '~Two flashes of the lantern.~ Three flashes. If he does not see three, the boat does not come.',
+          'Eleven kegs. Coffin will take no more.',
+          '> And the twelfth? — R.',
+        ],
+      }],
+      gloss: 'Low water at midnight on the night of the new moon, so that the dark and the tide are both on their side: three flashes from the mouth, a boat from the Sophronia, eleven kegs down the ladder. Ruiz has written the question I should have asked.',
+    },
+  }),
+  doc({
+    typeId: 'cave_keg_marks',
+    name: 'Marks on the Kegs',
+    subtitle: 'chalked on the keg heads',
+    description: 'Eleven small water kegs, iron-hooped, bunged and full, stand in two ranks on the landing. Each head is chalked with initials. A twelfth lies on its side a little apart.',
+    details: ['Ship’s kegs, not island-made', 'Eleven sets of initials', 'The twelfth set has been scored out with a knife'],
+    frameHint: { height: 0.3, radius: 0.4 },
+    zoneId: SEA,
+    worldPlacement: { x: -2.2, z: -1.2, surface: 'cave', lift: 0.64, prop: 'none' },
+    readable: {
+      form: 'kegs',
+      pages: [
+        {
+          caption: 'The eleven, rank by rank',
+          hand: 'chalk',
+          lines: [
+            'J. R. · M. Q. · D. C. · J. V. · P. V. · T. A.',
+            'A. Ch. · F. C. · I. T. · R. M. · L. B.',
+          ],
+        },
+        {
+          caption: 'The twelfth, on its side',
+          hand: 'scratched',
+          lines: [
+            '~G. P. i F.~',
+            '[The initials were chalked, then cut through with a knife point hard enough to splinter the stave, as if chalk could not be trusted to stay rubbed out.]',
+          ],
+        },
+      ],
+      gloss: 'The initials answer the folded list in the spring, man for man: Ruiz first, the two Villón brothers side by side. The twelfth keg is the printer’s. He has unmade his own place in the boat, and taken some trouble to make sure of it.',
     },
   }),
 ];

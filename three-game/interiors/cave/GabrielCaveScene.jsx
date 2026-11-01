@@ -6,6 +6,7 @@ import {
   GABRIEL_CAVE_MOUTH_ZONE_ID,
   GABRIEL_CAVE_PRESS_ZONE_ID,
   GABRIEL_CAVE_QUARTERS_ZONE_ID,
+  GABRIEL_CAVE_SEA_ZONE_ID,
   GABRIEL_CAVE_SPRING_ZONE_ID,
 } from '../blueprints/gabrielCave';
 import { CaveShell, useCaveRockMaterial } from './CaveShell';
@@ -14,12 +15,14 @@ import { FernSpring } from './props/FernSpring';
 import { LivingChamber } from './props/LivingChamber';
 import { MouthGallery } from './props/MouthGallery';
 import { PressGallery } from './props/PressGallery';
+import { SeaGallery } from './props/SeaGallery';
 
 const FURNISHINGS = {
   [GABRIEL_CAVE_MOUTH_ZONE_ID]: MouthGallery,
   [GABRIEL_CAVE_QUARTERS_ZONE_ID]: LivingChamber,
   [GABRIEL_CAVE_PRESS_ZONE_ID]: PressGallery,
   [GABRIEL_CAVE_SPRING_ZONE_ID]: FernSpring,
+  [GABRIEL_CAVE_SEA_ZONE_ID]: SeaGallery,
 };
 
 function MaterialClock({ materials }) {

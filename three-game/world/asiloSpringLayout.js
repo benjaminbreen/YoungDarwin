@@ -50,6 +50,10 @@ const HERO_ROCKS = [
   makeRock({ id: 'cleft-gatepost-west', x: -3.2, z: -18.5, radiusX: 1.6, radiusY: 1.9, radiusZ: 1.3, yaw: 0.6, sink: 0.22, color: '#74624a', collide: true }),
   makeRock({ id: 'cleft-gatepost-east', x: 4.6, z: -19.8, radiusX: 1.5, radiusY: 1.7, radiusZ: 1.2, yaw: -0.4, sink: 0.22, color: '#68583f', collide: true }),
   makeRock({ id: 'pool-west-boulder', x: -21.5, z: -6.8, radiusX: 1.7, radiusY: 1.0, radiusZ: 1.3, yaw: 1.1, sink: 0.18, color: '#5a4e3f', collide: true }),
+  // Broken tuff round the sinkhole's far rim; the trail side stays open.
+  makeRock({ id: 'sinkhole-west-lip', x: -41.6, z: -3.2, radiusX: 0.9, radiusY: 0.55, radiusZ: 0.7, yaw: 0.9, sink: 0.14, color: '#66563f', collide: true }),
+  makeRock({ id: 'sinkhole-north-lip', x: -39.6, z: -6.5, radiusX: 1.1, radiusY: 0.6, radiusZ: 0.75, yaw: -0.3, sink: 0.16, color: '#5d4f3c', collide: true }),
+  makeRock({ id: 'sinkhole-south-lip', x: -38.8, z: -1.4, radiusX: 0.7, radiusY: 0.42, radiusZ: 0.6, yaw: 1.7, sink: 0.12, color: '#6e5d45', collide: true }),
   makeRock({ id: 'brook-east-shoulder', x: 21, z: -0.6, radiusX: 1.4, radiusY: 0.7, radiusZ: 1.0, yaw: -0.3, sink: 0.16, color: '#4f4b44', collide: true }),
 ];
 

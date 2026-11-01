@@ -172,8 +172,8 @@ function interiorEnvironmentalAudioTargets({ zone, weather = {}, timeOfDay = 12,
   }
   if (zone?.type === 'caveInterior') {
     // Rock overhead: the island's weather arrives only as a draught at the
-    // mouth and the skylit spring, and as rain on the fern pool.
-    const open = zone.id === 'CAVE_ENTRANCE' || zone.id === 'GABRIEL_SPRING';
+    // mouths, the skylit spring and the sea tube, and as rain on the fern pool.
+    const open = zone.id === 'CAVE_ENTRANCE' || zone.id === 'GABRIEL_SPRING' || zone.id === 'GABRIEL_SEA_GALLERY';
     return {
       surf: 0,
       wind: open ? (0.004 + windStrength * 0.02) * Math.max(0.75, Number(gust) || 1) : 0.002,

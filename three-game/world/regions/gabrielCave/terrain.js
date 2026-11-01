@@ -3,6 +3,7 @@ import {
   GABRIEL_CAVE_MOUTH_ZONE_ID,
   GABRIEL_CAVE_PRESS_ZONE_ID,
   GABRIEL_CAVE_QUARTERS_ZONE_ID,
+  GABRIEL_CAVE_SEA_ZONE_ID,
   GABRIEL_CAVE_SPRING_ZONE_ID,
   getGabrielCaveBlueprint,
 } from '../../../interiors/blueprints/gabrielCave';
@@ -39,3 +40,4 @@ export const gabrielCaveMouthRegion = makeCaveRegion(GABRIEL_CAVE_MOUTH_ZONE_ID,
 export const gabrielCaveQuartersRegion = makeCaveRegion(GABRIEL_CAVE_QUARTERS_ZONE_ID, ['gabriel-cave-quarters']);
 export const gabrielCavePressRegion = makeCaveRegion(GABRIEL_CAVE_PRESS_ZONE_ID, ['gabriel-cave-press']);
 export const gabrielCaveSpringRegion = makeCaveRegion(GABRIEL_CAVE_SPRING_ZONE_ID, ['gabriel-cave-spring']);
+export const gabrielCaveSeaRegion = makeCaveRegion(GABRIEL_CAVE_SEA_ZONE_ID, ['gabriel-cave-sea-gallery']);

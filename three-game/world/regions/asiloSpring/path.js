@@ -21,6 +21,31 @@ export const ASILO_SPRING_FORD = Object.freeze({ x: 4.2, z: 1.1 });
 export const ASILO_SPRING_NORTH_JUNCTION = Object.freeze({ x: 0.5, z: -8.5 });
 export const ASILO_SPRING_SOUTH_JUNCTION = Object.freeze({ x: -6, z: 9 });
 
+// Where the roof of the lava tube under these highlands has fallen in: the
+// top of the skylight over Gabriel's fern spring. Roots and a knotted rope go
+// down it. It lies a stone's throw off the western trail, in open grass, and
+// is easy to walk past. The prompt stands on the trail side of the rim.
+export const ASILO_SPRING_SINKHOLE = Object.freeze({
+  id: 'asilo-spring-sinkhole',
+  x: -39,
+  z: -4,
+  r: 2.0,
+  depth: 5.6,
+  promptX: -35.6,
+  promptZ: -4.6,
+  destinationZoneId: 'GABRIEL_SPRING',
+});
+
+// Distance from the sinkhole's centre, measured against a ragged outline, in
+// units of its radius: below 1 is the hole.
+export function asiloSpringSinkholeReach(x, z) {
+  const dx = x - ASILO_SPRING_SINKHOLE.x;
+  const dz = z - ASILO_SPRING_SINKHOLE.z;
+  const angle = Math.atan2(dz, dx);
+  const ragged = 1 + Math.sin(angle * 3 + 0.7) * 0.12 + Math.sin(angle * 7 - 1.1) * 0.06;
+  return Math.hypot(dx, dz) / (ASILO_SPRING_SINKHOLE.r * ragged);
+}
+
 // [x, z, wet half-width]. The first wide segments are the spring pool.
 export const ASILO_SPRING_CHANNELS = [
   [

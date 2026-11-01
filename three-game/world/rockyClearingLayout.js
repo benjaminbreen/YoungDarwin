@@ -1,4 +1,5 @@
 import { buildRockObstacles } from './proceduralRocks';
+import { caveCliffObstacle } from './caveCliffObstacle';
 import { seededRandom } from './scatter';
 import {
   ROCKY_CLEARING,
@@ -171,54 +172,7 @@ export function getRockyClearingRockObstacles() {
 }
 
 function formationObstacle(formation) {
-  if (formation.form === 'cave-cliff') {
-    const [outerHalfWidth, outerHeight, depth] = formation.radii;
-    const [openingWidth = 7.6, openingHeight = 3.15] = formation.opening || [];
-    const openingHalfWidth = openingWidth * 0.5;
-    const sideWidth = Math.max(0.8, outerHalfWidth - openingHalfWidth);
-    const topHeight = Math.max(0.8, outerHeight - openingHeight);
-    const yBase = -(formation.sink || 0);
-    const shapes = [
-      {
-        type: 'box',
-        size: [sideWidth, outerHeight, depth * 1.15],
-        offset: [-(openingHalfWidth + sideWidth * 0.5), yBase + outerHeight * 0.5, -depth * 0.42],
-      },
-      {
-        type: 'box',
-        size: [sideWidth, outerHeight, depth * 1.15],
-        offset: [openingHalfWidth + sideWidth * 0.5, yBase + outerHeight * 0.5, -depth * 0.42],
-      },
-      {
-        type: 'box',
-        size: [openingWidth, topHeight, depth * 1.15],
-        offset: [0, yBase + openingHeight + topHeight * 0.5, -depth * 0.42],
-      },
-    ];
-    return {
-      id: `rocky-clearing-formation-${formation.id}`,
-      kind: 'ledge',
-      path: null,
-      x: formation.x,
-      z: formation.z,
-      radius: outerHalfWidth,
-      height: outerHeight,
-      colliderTop: yBase + outerHeight,
-      colliderBottom: yBase,
-      scale: 1,
-      yaw: formation.yaw || 0,
-      jumpable: false,
-      climbable: false,
-      edgeRisk: false,
-      pushable: false,
-      pushMass: 1,
-      pushFriction: 0.96,
-      traversal: null,
-      definition: { collider: { type: 'compound', shapes } },
-      zoneId: ROCKY_CLEARING,
-      shapes,
-    };
-  }
+  if (formation.form === 'cave-cliff') return caveCliffObstacle(formation, { zoneId: ROCKY_CLEARING, idPrefix: 'rocky-clearing' });
   const [radiusX, radiusY, radiusZ] = formation.radii;
   const collisionScale = formation.collisionScale || 0.76;
   const segments = 10;

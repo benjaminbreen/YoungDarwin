@@ -14,6 +14,8 @@ import {
   asiloSpringMoisture,
   asiloSpringPathInfo,
   asiloSpringRidgeInfo,
+  asiloSpringSinkholeReach,
+  ASILO_SPRING_SINKHOLE,
   asiloSpringStandingWaterMask,
   asiloSpringStandingWaterSuppressionMask,
 } from './path';
@@ -70,7 +72,16 @@ export function asiloSpringHeight(x, z, { movementSurface = false } = {}) {
   }
 
   y -= path.tread * (0.09 + brook.valley * 0.02) + path.center * 0.03;
-  return y;
+  return y + sinkholeRelief(x, z);
+}
+
+// A low lip of broken tuff, then sheer sides down into the dark.
+function sinkholeRelief(x, z) {
+  const reach = asiloSpringSinkholeReach(x, z);
+  if (reach > 1.8) return 0;
+  const lip = THREE.MathUtils.smoothstep(reach, 0.92, 1.12) * (1 - THREE.MathUtils.smoothstep(reach, 1.2, 1.8)) * 0.28;
+  const drop = (1 - THREE.MathUtils.smoothstep(reach, 0.62, 1.0)) * ASILO_SPRING_SINKHOLE.depth;
+  return lip - drop;
 }
 
 export function asiloSpringBiomeAt(x, z, y = asiloSpringHeight(x, z)) {
@@ -78,6 +89,7 @@ export function asiloSpringBiomeAt(x, z, y = asiloSpringHeight(x, z)) {
   const path = asiloSpringPathInfo(x, z);
   const ridge = asiloSpringRidgeInfo(x, z);
   const moisture = asiloSpringMoisture(x, z);
+  if (asiloSpringSinkholeReach(x, z) < 1.15) return 'tube-sinkhole';
   if (brook.water > 0.45 && y < WATER_LEVEL - 0.03) return brook.pool > 0.4 ? 'spring-pool' : 'spring-brook';
   if (brook.mud > 0.42) return 'spring-mud';
   if (brook.gravel > 0.38) return 'brook-gravel-bank';
@@ -91,6 +103,7 @@ export function asiloSpringBiomeAt(x, z, y = asiloSpringHeight(x, z)) {
 }
 
 const BIOME_COLORS = {
+  'tube-sinkhole': '#2a2620',
   'spring-pool': '#253b37',
   'spring-brook': '#3d5849',
   'spring-mud': '#40463a',
@@ -119,6 +132,7 @@ export function asiloSpringColor(x, z, y) {
 export function isAsiloSpringWalkable(x, z, config) {
   const margin = 1.35;
   if (Math.abs(x) > config.width * 0.5 - margin || Math.abs(z) > config.depth * 0.5 - margin) return false;
+  if (asiloSpringSinkholeReach(x, z) < 1.3) return false;
   const y = asiloSpringHeight(x, z, { movementSurface: true });
   if (y <= WATER_LEVEL - WADE_DEPTH + 0.05) return false;
   const path = asiloSpringPathInfo(x, z);
@@ -160,12 +174,15 @@ export const asiloSpringRegion = {
       east: [53.5, 0, 2.4],
       south: [-4.3, 0, 46.5],
       west: [-53.5, 0, -34.5],
+      // Climbing out of Gabriel's fern spring by the roots and the rope.
+      'from-gabriels-cave': [ASILO_SPRING_SINKHOLE.promptX + 3.4, 0, ASILO_SPRING_SINKHOLE.promptZ - 0.7],
     },
     entryFacings: {
       north: [0, 0, 1],
       east: [-1, 0, -0.05],
       south: [0.05, 0, -1],
       west: [0.7, 0, 0.7],
+      'from-gabriels-cave': [0.97, 0, -0.2],
     },
   },
 };

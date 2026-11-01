@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isInsidePostOfficeSeaTubeRock } from './seaTube';
 import {
   WATER_LEVEL,
   crackNoise,
@@ -458,6 +459,7 @@ export function isPostOfficeRegion(regionId) {
 }
 
 export function isPostOfficeWalkable(x, z) {
+  if (isInsidePostOfficeSeaTubeRock(x, z)) return false;
   const y = postOfficeTerrainHeight(x, z, { movementSurface: true });
   const mask = islandMask(x, z);
   const cove = coveWaterMask(x, z);
@@ -496,9 +498,12 @@ export const postOfficeBayRegion = {
     defaultCameraFacing: [0.96, 0, -0.29],
     entrySpawns: {
       south: [-7, 0, 53],
+      // Out of the sea tube onto the ledge above the cove.
+      'from-gabriels-cave': [-28.4, 0, 1.4],
     },
     entryFacings: {
       south: [0, 0, -1],
+      'from-gabriels-cave': [-0.71, 0, -0.71],
     },
   },
 };

@@ -2520,6 +2520,34 @@ export const locations = [
     educationalNote: 'Light, not soil, sets the limits of life in a cave: the sharp edge between green rock and bare rock follows the edge of the sunlit patch.'
   }
 },
+{
+  id: 'GABRIEL_SEA_GALLERY',
+  name: "Gabriel's Cave: Sea Gallery",
+  description: 'The seaward run of the lava tube, from behind the press down to a hidden mouth above the cove at Post Office Bay.',
+  x: 992,
+  y: 990,
+  color: '#2f3a3c',
+  type: 'caveInterior',
+  validMoves: [],
+  playerStart: null,
+  specimens: [],
+  npcs: [],
+  boundaries: {},
+  discoveries: [
+    'Eleven water kegs stand ready on a landing, each chalked with initials; a twelfth stands apart.',
+    'A side branch of the tube holds seawater that rises and falls with the tide.'
+  ],
+  notableFeatures: [
+    'A coiled rope ladder of the kind whalers hang over the side for their boats.',
+    'A dark lantern in a niche that sees only the sea.'
+  ],
+  narration: {
+    weather: 'misty',
+    sounds: ['the sea breathing in the tube', 'a drop striking still water', 'wind at the mouth'],
+    loadingNote: 'The tube runs down toward the sea.',
+    educationalNote: 'Lava tubes often run to the coast, because the lava that made them was running there; where the coast has sunk or the sea risen, their lower ends fill with the tide.'
+  }
+},
 
 {
   id: 'GOVERNORS_HOUSE_OFFICE',

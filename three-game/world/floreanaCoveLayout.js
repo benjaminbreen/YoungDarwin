@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { terrainBiomeAt, terrainHeight, terrainSlopeAt, terrainSurfaceNoise } from './terrain';
 import { POST_OFFICE_BAY_TRAIL, coveWaterMask, islandMask, postOfficeTrailInfluence } from './regions/postOfficeBay/terrain';
 import { buildRockObstacles } from './proceduralRocks';
+import { caveCliffObstacle } from './caveCliffObstacle';
+import { POST_OFFICE_BAY_SEA_TUBE, postOfficeSeaTubeWorld } from './regions/postOfficeBay/seaTube';
 
 function seeded(index, salt = 0) {
   const x = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453;
@@ -86,6 +88,8 @@ const COVE_BOULDER_CLEARANCES = [
   [8.8, 8.2, 3.1],
   [-15.4, 6.8, 3.3],
   [18.6, 21.4, 3.7],
+  // The sea-tube mouth on the lava mound and the ledge in front of it.
+  [-26.0, 3.8, 2.6],
 ];
 
 function insideCoveBoulder(x, z) {
@@ -192,8 +196,60 @@ export function getPostOfficeBayBasaltBlocks() {
     radiusZ: item.scale * 0.9,
     centerLift: item.scale * 0.34,
     sink: item.scale * 0.08,
-  }));
+  })).concat(SEA_TUBE_TALUS.map(seaTubeTalusBlock));
   return postOfficeBayBasaltBlocks;
+}
+
+// Fallen blocks heaped round the sea-tube mouth, so that from the shore it
+// reads as a dark gap in a rubble slope rather than a doorway. The cheeks sit
+// clear of the opening; one block lies on the slope above it.
+const SEA_TUBE_TALUS = [
+  { id: 'sea-tube-talus-west', across: -2.05, outward: 0.25, scale: 0.92, yaw: 0.6, tone: 0.3 },
+  { id: 'sea-tube-talus-east', across: 2.1, outward: 0.05, scale: 0.85, yaw: 2.2, tone: 0.7 },
+  { id: 'sea-tube-talus-over', across: 0.5, outward: -2.6, scale: 1.1, yaw: 1.1, tone: 0.45 },
+  { id: 'sea-tube-talus-fore', across: 1.95, outward: 1.95, scale: 0.6, yaw: 0.3, tone: 0.62 },
+];
+
+function seaTubeTalusBlock(block) {
+  const { x, z } = postOfficeSeaTubeWorld(block.across, block.outward);
+  return {
+    id: block.id,
+    x,
+    y: terrainHeight(x, z),
+    z,
+    scale: block.scale,
+    yaw: block.yaw,
+    variant: 1,
+    tone: block.tone,
+    color: block.tone > 0.58 ? '#5b564b' : '#4f4a42',
+    radiusX: block.scale * 1.25,
+    radiusY: block.scale * 0.6,
+    radiusZ: block.scale * 0.95,
+    centerLift: block.scale * 0.3,
+    sink: block.scale * 0.12,
+    // Bedded in the slope: pushing one would close the mouth.
+    fixed: true,
+  };
+}
+
+// The low cliff the sea tube opens from. Its back runs into the mound.
+const SEA_TUBE_FORMATIONS = [
+  {
+    id: 'gabriels-sea-tube-cliff', label: 'Low lava cliff over a tube mouth',
+    x: POST_OFFICE_BAY_SEA_TUBE.x, z: POST_OFFICE_BAY_SEA_TUBE.z, yaw: POST_OFFICE_BAY_SEA_TUBE.yaw,
+    radii: [2.3, 2.2, 2.2], opening: [1.9, 1.55], sink: 0.32,
+    form: 'cave-cliff', detail: 4, irregularity: 0.22, uvDensity: 0.42,
+    tint: '#76716a', lichenTint: '#a3a48c', lichenStrength: 0.3,
+    materialKey: 'caveWeatheredBasalt', obstacle: true,
+  },
+];
+
+export function getPostOfficeBaySeaTubeFormations() {
+  return SEA_TUBE_FORMATIONS;
+}
+
+export function getPostOfficeBaySeaTubeObstacles() {
+  return SEA_TUBE_FORMATIONS.map(formation => caveCliffObstacle(formation, { zoneId: 'POST_OFFICE_BAY', idPrefix: 'post-office-bay' }));
 }
 
 export function getPostOfficeBayRockObstacles() {
@@ -203,5 +259,6 @@ export function getPostOfficeBayRockObstacles() {
     radiusScale: 0.78,
     colliderShape: 'cylinder',
     filter: rock => rock.radiusY * 2 - rock.sink > 0.26,
+    extra: rock => (rock.fixed ? { mobility: { mode: 'fixed' } } : null),
   });
 }

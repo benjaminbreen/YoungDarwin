@@ -23,6 +23,8 @@ const FORM_LABELS = {
   journal: 'Daybook',
   board: 'Burned into a board',
   list: 'Folded list',
+  slate: 'Chalked on slate',
+  kegs: 'Chalked on the keg heads',
 };
 
 const RENDERING_NOTES = {

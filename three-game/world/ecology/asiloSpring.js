@@ -8,6 +8,8 @@ import {
   asiloSpringMoisture,
   asiloSpringPathInfo,
   asiloSpringRidgeInfo,
+  asiloSpringSinkholeReach,
+  ASILO_SPRING_SINKHOLE,
 } from '../regions/asiloSpring/path';
 import { WATER_LEVEL, terrainSurfaceNoise } from '../terrainShared';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
@@ -30,6 +32,7 @@ function clearOfTrailAndWater(biome, x, z, pathMultiplier = 1.6) {
   const path = asiloSpringPathInfo(x, z);
   const brook = asiloSpringChannelInfo(x, z);
   return path.distance > path.width * pathMultiplier
+    && asiloSpringSinkholeReach(x, z) > 1.5
     && brook.water < 0.08
     && biome !== 'highland-cinder-path'
     && biome !== 'muddy-ford-path';
@@ -78,6 +81,7 @@ function buildGrass() {
       const brook = asiloSpringChannelInfo(x, z);
       if (brook.water > 0.04 || brook.shoreDistance < 4.6) return false;
       if (asiloSpringRidgeInfo(x, z).face > 0.4) return false;
+      if (asiloSpringSinkholeReach(x, z) < 1.2) return false;
       return path.distance > path.width * 1.12;
     },
     drynessAt: ({ x, z, tone, path }) => clamp01(
@@ -214,7 +218,8 @@ function buildSurfaceLitter() {
       accept: (biome, x, z) => {
         const ridge = asiloSpringRidgeInfo(x, z);
         const path = asiloSpringPathInfo(x, z);
-        return path.tread < 0.18 && (ridge.face > 0.25 || ridge.cleft > 0.3 || ridge.top > 0.5);
+        const sinkholeRim = asiloSpringSinkholeReach(x, z);
+        return path.tread < 0.18 && (ridge.face > 0.25 || ridge.cleft > 0.3 || ridge.top > 0.5 || (sinkholeRim > 1.15 && sinkholeRim < 2.2));
       },
     }),
   ];
@@ -267,6 +272,7 @@ export function buildAsiloSpringEcology() {
     rocks: getAsiloSpringRocks(),
     surfaceLitter: buildSurfaceLitter(),
     props: [],
+    caveEntrances: [{ ...ASILO_SPRING_SINKHOLE, kind: 'sinkhole' }],
     footprintBiomes: [
       'highland-cinder-path',
       'muddy-ford-path',

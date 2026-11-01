@@ -3968,7 +3968,7 @@ test('Beach with Hut south land route stays above water and walkable', () => {
 
 test('Gabriel cave papers are readable, rendered in English, and read rather than examined', () => {
   const { GABRIEL_CAVE_DOCUMENTS } = loadModule('three-game/examine/gabrielCaveDocuments.js');
-  const caveZones = ['CAVE_ENTRANCE', 'GABRIEL_QUARTERS', 'GABRIEL_PRESS', 'GABRIEL_SPRING'];
+  const caveZones = ['CAVE_ENTRANCE', 'GABRIEL_QUARTERS', 'GABRIEL_PRESS', 'GABRIEL_SPRING', 'GABRIEL_SEA_GALLERY'];
   assert.ok(GABRIEL_CAVE_DOCUMENTS.length >= 12);
   for (const zoneId of caveZones) {
     assert.ok(GABRIEL_CAVE_DOCUMENTS.some(item => item.zoneId === zoneId && item.worldPlacement), `${zoneId} has something to read`);
@@ -3981,7 +3981,8 @@ test('Gabriel cave papers are readable, rendered in English, and read rather tha
     assert.ok(item.readable.pages.length > 0, `${item.typeId} has pages`);
     for (const page of item.readable.pages) {
       assert.ok(page.lines.length > 0, `${item.typeId} page has text`);
-      if (page.language !== 'English') {
+      // Pages with no language (initials, tallies) have nothing to render.
+      if (page.language && page.language !== 'English') {
         assert.equal(page.translation?.length, page.lines.length, `${item.typeId} renders each ${page.language} line into English`);
       }
     }
@@ -7133,7 +7134,7 @@ test('Gabriel cave chambers form a connected loop whose doors never catch an arr
   const { isCaveWalkable, caveMovementHeight } = loadModule('three-game/interiors/cave/caveRuntime.js');
   const caveRegions = loadModule('three-game/world/regions/gabrielCave/terrain.js');
   const regionByZone = Object.fromEntries(Object.values(caveRegions).map(region => [region.id, region]));
-  assert.equal(GABRIEL_CAVE_ZONE_IDS.length, 4);
+  assert.equal(GABRIEL_CAVE_ZONE_IDS.length, 5);
 
   const edges = new Set();
   for (const zoneId of GABRIEL_CAVE_ZONE_IDS) {
@@ -7175,6 +7176,10 @@ test('Gabriel cave chambers form a connected loop whose doors never catch an arr
     ['GABRIEL_PRESS', 'GABRIEL_QUARTERS'],
     ['GABRIEL_SPRING', 'GABRIEL_PRESS'],
     [GABRIEL_CAVE_MOUTH_ZONE_ID, 'GABRIEL_SPRING'],
+    ['GABRIEL_PRESS', 'GABRIEL_SEA_GALLERY'],
+    ['GABRIEL_SEA_GALLERY', 'GABRIEL_PRESS'],
+    ['GABRIEL_SEA_GALLERY', 'POST_OFFICE_BAY'],
+    ['GABRIEL_SPRING', 'ASILO_SPRING'],
   ]) {
     if (a === 'E_MID') {
       assert.ok(getLocalTransitions('E_MID').some(item => item.toRegionId === b), 'Rocky Clearing leads into the cave');
@@ -7182,6 +7187,46 @@ test('Gabriel cave chambers form a connected loop whose doors never catch an arr
       assert.ok(edges.has(`${a}>${b}`), `${a} connects to ${b}`);
     }
   }
+});
+
+test('Gabriel cave has hidden ways in from Asilo Spring and Post Office Bay', () => {
+  const { getGabrielCaveBlueprint } = loadModule('three-game/interiors/blueprints/gabrielCave.js');
+  const { getPostOfficeBaySeaTubeObstacles } = loadModule('three-game/world/floreanaCoveLayout.js');
+  const { asiloSpringRegion } = loadModule('three-game/world/regions/asiloSpring/terrain.js');
+  const { postOfficeBayRegion } = loadModule('three-game/world/regions/postOfficeBay/terrain.js');
+  const outdoors = [
+    { zoneId: 'ASILO_SPRING', region: asiloSpringRegion, chamber: 'GABRIEL_SPRING', obstacles: [] },
+    { zoneId: 'POST_OFFICE_BAY', region: postOfficeBayRegion, chamber: 'GABRIEL_SEA_GALLERY', obstacles: getPostOfficeBaySeaTubeObstacles() },
+  ];
+  for (const { zoneId, region, chamber, obstacles } of outdoors) {
+    const entry = getLocalTransitions(zoneId).find(item => item.toRegionId === chamber);
+    assert.ok(entry, `${zoneId} leads into ${chamber}`);
+    assert.ok(isWalkableTerrain(entry.position.x, entry.position.z, zoneId), `${zoneId} cave prompt stands on open ground`);
+    const arrivalInside = getGabrielCaveBlueprint(chamber).navigation.entrySpawns[entry.entryEdge];
+    assert.ok(arrivalInside, `${chamber} defines the ${entry.entryEdge} arrival`);
+    const exit = getLocalTransitions(chamber).find(item => item.toRegionId === zoneId);
+    assert.ok(exit, `${chamber} leads back out to ${zoneId}`);
+    assert.ok(Math.hypot(exit.position.x - arrivalInside[0], exit.position.z - arrivalInside[2]) > exit.radius, `${chamber} exit does not catch the arrival`);
+    const [ox, , oz] = region.terrain.entrySpawns[exit.entryEdge];
+    assert.ok(isWalkableTerrain(ox, oz, zoneId), `${zoneId} arrival from the cave is walkable`);
+    assert.ok(Math.hypot(entry.position.x - ox, entry.position.z - oz) > entry.radius, `${zoneId} cave entrance does not catch the arrival`);
+    for (const obstacle of obstacles) {
+      for (const shape of obstacle.shapes) {
+        const cos = Math.cos(obstacle.yaw || 0);
+        const sin = Math.sin(obstacle.yaw || 0);
+        for (const [x, z] of [[ox, oz], [entry.position.x, entry.position.z]]) {
+          const dx = x - obstacle.x;
+          const dz = z - obstacle.z;
+          const lx = dx * cos - dz * sin - shape.offset[0];
+          const lz = dx * sin + dz * cos - shape.offset[2];
+          assert.ok(Math.abs(lx) > shape.size[0] / 2 + 0.25 || Math.abs(lz) > shape.size[2] / 2 + 0.25, `${zoneId} (${x.toFixed(1)}, ${z.toFixed(1)}) is clear of ${obstacle.id}`);
+        }
+      }
+    }
+  }
+  // The sinkhole is a hole: nobody stands in it.
+  const { ASILO_SPRING_SINKHOLE } = loadModule('three-game/world/regions/asiloSpring/path.js');
+  assert.equal(isWalkableTerrain(ASILO_SPRING_SINKHOLE.x, ASILO_SPRING_SINKHOLE.z, 'ASILO_SPRING'), false);
 });
 
 test('hut interiors connect to their buildings without catching arrivals or standing in walls', () => {

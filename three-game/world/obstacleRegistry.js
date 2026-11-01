@@ -5,7 +5,7 @@ import { getDesolateOutcropRockObstacles } from './desolateOutcropLayout';
 import { getDevilsCrownRockObstacles } from './devilsCrownLayout';
 import { getNorthwestReefRockObstacles } from './nwReefLayout';
 import { getBeachWithHutObstacles } from './beachWithHutLayout';
-import { getPostOfficeBayRockObstacles } from './floreanaCoveLayout';
+import { getPostOfficeBayRockObstacles, getPostOfficeBaySeaTubeObstacles } from './floreanaCoveLayout';
 import { getAltPostOfficeBayRockObstacles } from './altPostOfficeBayLayout';
 import { getWesternHighlandsRockObstacles } from './westernHighlandsLayout';
 import { getRockyClearingCaveObstacles, getRockyClearingRockObstacles } from './rockyClearingLayout';
@@ -41,7 +41,7 @@ import { getSouthernWetlandsObstacles } from './southernWetlandsLayout';
  * @type {Readonly<Record<string, readonly ObstacleSource[]>>}
  */
 export const REGION_OBSTACLE_SOURCES = Object.freeze({
-  POST_OFFICE_BAY: [getPostOfficeBayRockObstacles],
+  POST_OFFICE_BAY: [getPostOfficeBayRockObstacles, getPostOfficeBaySeaTubeObstacles],
   ALT_POST_OFFICE_BAY: [getAltPostOfficeBayRockObstacles],
   N_SHORE: [getNorthShoreRockObstacles],
   N_OUTCROP: [getDesolateOutcropRockObstacles],
@@ -59,6 +59,7 @@ export const REGION_OBSTACLE_SOURCES = Object.freeze({
   GABRIEL_QUARTERS: [() => getGabrielCaveObstacles('GABRIEL_QUARTERS')],
   GABRIEL_PRESS: [() => getGabrielCaveObstacles('GABRIEL_PRESS')],
   GABRIEL_SPRING: [() => getGabrielCaveObstacles('GABRIEL_SPRING')],
+  GABRIEL_SEA_GALLERY: [() => getGabrielCaveObstacles('GABRIEL_SEA_GALLERY')],
   WHALERS_HUT_INTERIOR: [() => getHutInteriorObstacles('WHALERS_HUT_INTERIOR')],
   COLONIST_RANCHO: [() => getHutInteriorObstacles('COLONIST_RANCHO')],
   WATKINS: [getWatkinsCampObstacles],

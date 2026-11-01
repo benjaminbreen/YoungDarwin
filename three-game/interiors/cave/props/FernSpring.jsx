@@ -5,12 +5,13 @@ import * as THREE from 'three';
 import {
   GABRIEL_CAVE_SPRING_ZONE_ID as ZONE,
   GABRIEL_SPRING_POOL as POOL,
+  GABRIEL_SPRING_ROPE as ROPE,
   GABRIEL_SPRING_SKYLIGHT as SKY,
 } from '../../blueprints/gabrielCave';
 import { makeBoulderGeometry } from '../CaveShell';
 import { ceilingAt, floorAt, wallAnchor, yawFacing } from './anchors';
 import { CavePlants } from './CavePlants';
-import { Ball, Beam, Block, Candle, Cask, Cyl, hash, StaticBatch, useGround } from './primitives';
+import { Ball, Beam, Block, Candle, Cask, Cyl, hash, Rope, StaticBatch, useGround } from './primitives';
 import { Drips, useWaterMaterial, WaterSurface } from './Water';
 
 // The fern spring: a high chamber whose roof has fallen in. Daylight comes
@@ -180,6 +181,16 @@ export function FernSpring({ materials, rock }) {
           </group>
         )}
         <Roots material={materials.bark} />
+        {/* The knotted rope down from the highland stake, its tail coiled. */}
+        <Rope points={[[ROPE.rim[0], SKY.from + 2.4, ROPE.rim[1]], [ROPE.rim[0] - 0.1, SKY.from - 0.2, ROPE.rim[1] - 0.05], [ROPE.foot[0], ground(ROPE.foot[0], ROPE.foot[1]) + 0.3, ROPE.foot[1]]]} sag={0} radius={0.022} material={materials.rope} />
+        {[0.9, 1.5, 2.1, 2.7, 3.3, 3.9].map(height => (
+          <Ball key={height} r={0.045} material={materials.rope} scale={[1, 1.3, 1]} position={[ROPE.rim[0] - 0.1 + (ROPE.foot[0] - ROPE.rim[0] + 0.1) * (1 - height / (SKY.from - 0.2)), ground(ROPE.foot[0], ROPE.foot[1]) + height, ROPE.rim[1] - 0.05 + (ROPE.foot[1] - ROPE.rim[1] + 0.05) * (1 - height / (SKY.from - 0.2))]} />
+        ))}
+        {[0, 1, 2].map(turn => (
+          <mesh key={turn} material={materials.rope} position={[ROPE.foot[0] - 0.15, ground(ROPE.foot[0], ROPE.foot[1]) + 0.025 + turn * 0.035, ROPE.foot[1] - 0.1]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+            <torusGeometry args={[0.2 - turn * 0.035, 0.02, 5, 18]} />
+          </mesh>
+        ))}
       </StaticBatch>
       <WaterSurface outline={POOL.outline} y={POOL.surfaceY} material={poolWater} grow={0.4} name="Spring_PoolWater" />
       <Drips drips={drips} waterMaterials={[poolWater]} />

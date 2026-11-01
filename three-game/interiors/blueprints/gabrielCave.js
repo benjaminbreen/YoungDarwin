@@ -1,4 +1,4 @@
-// Gabriel's cave: four linked chambers of one highland lava tube.
+// Gabriel's cave: five linked chambers of one lava tube.
 //
 // Each blueprint has the same shape as the house/cabin JSON blueprints
 // (navigation, colliders, inspectables, rests, prop spawns, map) plus a `cave`
@@ -13,6 +13,15 @@
 //                       (east)                   (north)
 //                          │                        │
 //                     Fern Spring ───(west)──── Press Gallery
+//                          │                        │
+//                    (rope, skylight)          (south-east)
+//                          │                        │
+//                 Asilo Spring sinkhole         Sea Gallery ── Post Office Bay
+//
+// Two of the ways in are hard to find from outside: the knotted rope down the
+// fern spring's skylight from the highland grass, and the low mouth where the
+// tube comes out above the cove at Post Office Bay. From inside, both show
+// daylight.
 //
 // Game coordinates: +x east, +y up, +z south (toward the cave mouth).
 // Gabriel Puig i Ferrer and everything he owns here are invented; see the
@@ -22,12 +31,14 @@ export const GABRIEL_CAVE_MOUTH_ZONE_ID = 'CAVE_ENTRANCE';
 export const GABRIEL_CAVE_QUARTERS_ZONE_ID = 'GABRIEL_QUARTERS';
 export const GABRIEL_CAVE_PRESS_ZONE_ID = 'GABRIEL_PRESS';
 export const GABRIEL_CAVE_SPRING_ZONE_ID = 'GABRIEL_SPRING';
+export const GABRIEL_CAVE_SEA_ZONE_ID = 'GABRIEL_SEA_GALLERY';
 
 export const GABRIEL_CAVE_ZONE_IDS = [
   GABRIEL_CAVE_MOUTH_ZONE_ID,
   GABRIEL_CAVE_QUARTERS_ZONE_ID,
   GABRIEL_CAVE_PRESS_ZONE_ID,
   GABRIEL_CAVE_SPRING_ZONE_ID,
+  GABRIEL_CAVE_SEA_ZONE_ID,
 ];
 
 // Deterministic wobbly ellipse for chamber plans.
@@ -527,6 +538,7 @@ const pressBlueprint = {
     passages: [
       { label: 'LIVING CHAMBER', at: [-11.0, 8.8] },
       { label: 'FERN SPRING', at: [14.2, -4.2] },
+      { label: 'SEA TUBE', at: [15.0, 8.4] },
     ],
   },
   navigation: {
@@ -534,10 +546,12 @@ const pressBlueprint = {
     entrySpawns: {
       'from-quarters': [-8.0, 0, 3.6],
       'from-spring': [10.2, 0, -1.4],
+      'from-sea-gallery': [10.6, 0, 2.6],
     },
     entryFacings: {
       'from-quarters': [0.78, 0, -0.62],
       'from-spring': [-0.98, 0, 0.18],
+      'from-sea-gallery': [-0.72, 0, -0.69],
     },
     transitions: [
       {
@@ -564,16 +578,30 @@ const pressBlueprint = {
         facing: [0.95, -0.3],
         routeLabel: 'Damp crawl',
       },
+      {
+        id: 'press-to-sea-gallery',
+        toRegionId: GABRIEL_CAVE_SEA_ZONE_ID,
+        label: 'Go down the tube toward the sea',
+        description: 'Behind the pamphlet crates the floor tilts away south-east. The air coming up it is cool and smells of salt.',
+        entryEdge: 'from-press',
+        position: [13.6, 5.9],
+        radius: 1.7,
+        closeRadius: 1.1,
+        facing: [0.71, 0.71],
+        routeLabel: 'Seaward tube',
+      },
     ],
   },
   cave: {
-    grid: { min: [-15, -2, -9], max: [18, 9, 12.5], step: 0.25 },
+    grid: { min: [-15, -2.5, -9], max: [18, 9, 12.5], step: 0.25 },
     air: {
       blend: 1.2,
       polygons: [PRESS_WEST, PRESS_EAST],
       capsules: [
         { a: [-7.2, 2.0], b: [-12.6, 9.4], r: 1.35, rb: 1.05 },
         { a: [8.2, -0.8], b: [16.6, -3.4], r: 1.3, rb: 0.95 },
+        // The seaward tube, going down behind the crates.
+        { a: [9.2, 1.4], b: [16.2, 8.6], r: 1.25, rb: 1.0 },
       ],
     },
     walk: {
@@ -582,6 +610,7 @@ const pressBlueprint = {
       capsules: [
         { a: [-7.2, 2.0], b: [-10.8, 6.8], r: 1.15 },
         { a: [8.2, -0.8], b: [13.6, -2.5], r: 1.1 },
+        { a: [9.2, 1.4], b: [14.0, 6.3], r: 1.05 },
       ],
       holes: [],
     },
@@ -592,6 +621,7 @@ const pressBlueprint = {
       ramps: [
         { a: [-7.2, 2.0], b: [-12.6, 9.4], ya: 0, yb: -0.3, r: 1.9 },
         { a: [8.4, -0.8], b: [16.6, -3.4], ya: 0, yb: -0.5, r: 1.8 },
+        { a: [9.6, 1.8], b: [16.2, 8.6], ya: 0, yb: -0.9, r: 1.8 },
       ],
     },
     ceiling: {
@@ -603,6 +633,7 @@ const pressBlueprint = {
         { x: 0.2, z: -0.2, r: 3.2, h: 0.35 },
         { x: -11.2, z: 7.6, r: 3.2, h: -1.3 },
         { x: 14.6, z: -2.8, r: 3.0, h: -1.5 },
+        { x: 15.0, z: 7.4, r: 3.0, h: -1.4 },
       ],
     },
     walls: { amp: 0.3, scale: 0.75 },
@@ -613,6 +644,7 @@ const pressBlueprint = {
       ceilingSeep: 0.2,
       wet: [
         { x: 14.2, z: -2.8, r: 3.0, strength: 0.55 },
+        { x: 15.2, z: 7.8, r: 2.6, strength: 0.4 },
       ],
       soot: [
         { x: 0.4, y: 2.6, z: -0.2, r: 0.8, spread: 0.6, strength: 0.6 },
@@ -687,6 +719,9 @@ const SPRING_POOL = blob(1.3, -2.0, 2.9, 2.1, { points: 18, wobble: 0.1, seed: 2
 
 export const GABRIEL_SPRING_POOL = { x: 1.3, z: -2.0, rx: 2.9, rz: 2.1, surfaceY: -0.34, outline: SPRING_POOL };
 export const GABRIEL_SPRING_SKYLIGHT = { x: 1.0, z: -2.4, r: 2.15, from: 4.4 };
+// The knotted rope down the west side of the skylight, from a stake in the
+// highland grass (Asilo Spring's sinkhole) to the chamber floor.
+export const GABRIEL_SPRING_ROPE = { rim: [-1.05, -2.85], foot: [-1.95, -3.2] };
 
 const springBlueprint = {
   id: GABRIEL_CAVE_SPRING_ZONE_ID,
@@ -706,6 +741,7 @@ const springBlueprint = {
     passages: [
       { label: 'MOUTH GALLERY', at: [-9.6, 11.0] },
       { label: 'PRESS GALLERY', at: [-13.2, -4.0] },
+      { label: 'UP TO THE HIGHLANDS', at: [-2.4, -6.2] },
     ],
   },
   navigation: {
@@ -713,10 +749,12 @@ const springBlueprint = {
     entrySpawns: {
       'from-mouth-gallery': [-5.8, 0, 5.4],
       'from-press': [-7.4, 0, -1.2],
+      'from-asilo-sinkhole': [-0.7, 0, 1.4],
     },
     entryFacings: {
       'from-mouth-gallery': [0.68, 0, -0.73],
       'from-press': [0.98, 0, -0.18],
+      'from-asilo-sinkhole': [0.7, 0, -0.7],
     },
     transitions: [
       {
@@ -742,6 +780,18 @@ const springBlueprint = {
         closeRadius: 1.1,
         facing: [-0.98, -0.2],
         routeLabel: 'Damp crawl',
+      },
+      {
+        id: 'spring-to-asilo-sinkhole',
+        toRegionId: 'ASILO_SPRING',
+        label: 'Climb the rope into daylight',
+        description: 'A knotted rope hangs down the side of the skylight among the roots. It is pegged somewhere above.',
+        entryEdge: 'from-gabriels-cave',
+        position: [GABRIEL_SPRING_ROPE.foot[0] - 0.3, GABRIEL_SPRING_ROPE.foot[1] + 0.1],
+        radius: 1.5,
+        closeRadius: 0.95,
+        facing: [0.86, -0.5],
+        routeLabel: 'Knotted rope',
       },
     ],
   },
@@ -835,9 +885,9 @@ const springBlueprint = {
       mode: 'interior-message',
       label: 'collapsed roof',
       text: 'Press E to look up through the skylight',
-      message: 'Here the roof of the tube has fallen in, leaving a ragged hole open to the sky. Roots of the forest above hang down through it like ropes. The fallen roof lies beneath the spring, smashed into blocks and grown over. Lava tubes are hollow only until their ceilings fail.',
-      position: [-0.6, 0.4, -4.4],
-      radius: 1.9,
+      message: 'Here the roof of the tube has fallen in, leaving a ragged hole open to the sky. Roots of the forest above hang down through it, and among them, on the west side, one root that is not a root: a knotted rope, its knots worn dark by hands. The fallen roof lies beneath the spring, smashed into blocks and grown over. Lava tubes are hollow only until their ceilings fail, and each failure is a door.',
+      position: [2.4, 0.4, 1.0],
+      radius: 1.6,
     },
     {
       id: 'spring-washing',
@@ -865,11 +915,202 @@ const springBlueprint = {
   books: [],
 };
 
+// ---------------------------------------------------------------------------
+// 5. Sea Gallery
+// ---------------------------------------------------------------------------
+//
+// The tube's seaward run, from behind the press down to a low mouth in the
+// lava above the cove at Post Office Bay. Half-way down it opens into a
+// landing where eleven water kegs wait in a row, and a side branch dips below
+// the level of the sea: its water rises and falls with the tide. +z is
+// outward, toward the cove.
+
+const SEA_LANDING = blob(0.4, -2.2, 4.6, 3.3, { points: 24, wobble: 0.08, seed: 61 });
+const SEA_TIDE_POOL = blob(5.7, 2.9, 2.5, 1.7, { points: 18, wobble: 0.1, seed: 67, rotation: 0.5 });
+
+export const GABRIEL_SEA_TIDE_POOL = { x: 5.7, z: 2.9, surfaceY: -0.62, outline: SEA_TIDE_POOL };
+export const GABRIEL_SEA_KEGS = { x: -2.7, z: -2.7, yaw: 0.12 };
+
+const seaBlueprint = {
+  id: GABRIEL_CAVE_SEA_ZONE_ID,
+  label: "Gabriel's Cave: Sea Gallery",
+  dimensions: { width: 26, depth: 36, ceiling: 4, floorY: 0 },
+  map: {
+    planLabel: 'Cave survey',
+    exitLabel: 'POST OFFICE BAY',
+    exitAt: [0.2, 13.4],
+    paper: '#d6c9a4',
+    ink: '#3f2e1f',
+    labels: [
+      { text: 'Kegs', at: [-2.7, -2.7] },
+      { text: 'Tide pool', at: [5.7, 2.9] },
+      { text: 'Slate', at: [3.4, -4.8] },
+    ],
+    passages: [
+      { label: 'PRESS GALLERY', at: [-1.8, -16.2] },
+    ],
+  },
+  navigation: {
+    defaultSpawn: [-0.9, 0, -9.6],
+    entrySpawns: {
+      'from-press': [-0.9, 0, -9.6],
+      'from-post-office-bay': [0.3, 0, 8.4],
+    },
+    entryFacings: {
+      'from-press': [0.1, 0, 1],
+      'from-post-office-bay': [0, 0, -1],
+    },
+    transitions: [
+      {
+        id: 'sea-gallery-to-press',
+        toRegionId: GABRIEL_CAVE_PRESS_ZONE_ID,
+        label: 'Climb the tube toward the press',
+        description: 'The tube climbs north-west. The smell of linseed oil comes down it.',
+        entryEdge: 'from-sea-gallery',
+        position: [-1.5, -12.8],
+        radius: 1.7,
+        closeRadius: 1.1,
+        facing: [-0.13, -0.99],
+        routeLabel: 'Climbing tube',
+      },
+      {
+        id: 'sea-gallery-to-post-office-bay',
+        toRegionId: 'POST_OFFICE_BAY',
+        label: 'Crawl out above the cove',
+        description: 'The roof comes down to meet the floor. Beyond the last stoop is daylight, and the sound of the sea.',
+        entryEdge: 'from-gabriels-cave',
+        position: [0.2, 11.3],
+        radius: 2.0,
+        closeRadius: 1.3,
+        facing: [0, 1],
+        routeLabel: 'Tube mouth',
+      },
+    ],
+  },
+  cave: {
+    grid: { min: [-10, -4.5, -18], max: [11, 7, 16.5], step: 0.25 },
+    air: {
+      blend: 1.1,
+      polygons: [SEA_LANDING, SEA_TIDE_POOL],
+      capsules: [
+        { a: [-1.8, -16.6], b: [-0.4, -4.8], r: 1.35, rb: 1.0 },
+        { a: [0.4, 0.4], b: [0.2, 13.4], r: 1.55, rb: 1.35 },
+        { a: [2.6, -0.4], b: [7.2, 3.9], r: 1.3, rb: 1.05 },
+      ],
+    },
+    walk: {
+      margin: 0.32,
+      polygons: [SEA_LANDING],
+      capsules: [
+        { a: [-1.6, -13.4], b: [-0.4, -4.8], r: 1.1 },
+        { a: [0.4, 0.4], b: [0.2, 12.4], r: 1.25 },
+        { a: [2.6, -0.4], b: [4.2, 1.5], r: 0.95 },
+      ],
+      holes: [SEA_TIDE_POOL],
+    },
+    floor: {
+      base: 0,
+      ripple: 0.05,
+      bumps: [
+        { x: 5.7, z: 2.9, r: 2.3, h: -1.1 },
+        { x: -0.6, z: 6.2, r: 1.0, h: 0.14 },
+      ],
+      ramps: [
+        { a: [-0.6, -5.2], b: [-1.8, -16.6], ya: 0, yb: 0.9, r: 1.9 },
+        { a: [0.4, 1.4], b: [0.2, 12.6], ya: 0, yb: -0.8, r: 2.3 },
+      ],
+    },
+    ceiling: {
+      spring: 1.35,
+      apex: 3.9,
+      reach: 2.8,
+      noise: 0.5,
+      bumps: [
+        { x: -1.6, z: -14.8, r: 3.0, h: -1.4 },
+        { x: 0.4, z: -2.2, r: 3.4, h: 0.4 },
+        { x: 0.3, z: 10.8, r: 2.6, h: -0.8 },
+        { x: 6.4, z: 3.4, r: 2.4, h: -1.0 },
+      ],
+    },
+    walls: { amp: 0.4, scale: 0.7 },
+    outside: { at: 12.6, floorY: -3.2, lip: 1.4, noise: 1.2, blend: 1.0 },
+    skylights: [],
+    tint: { ...SHARED_TINT, crustStrength: 0.55 },
+    paint: {
+      floorDamp: 0.3,
+      ceilingSeep: 0.35,
+      wet: [
+        { x: 5.7, y: -0.4, z: 2.9, r: 3.0, strength: 1.0 },
+        { x: 0.3, y: 0.2, z: 10.6, r: 2.6, strength: 0.6 },
+      ],
+      soot: [
+        { x: 3.2, y: 1.6, z: -4.6, r: 0.5, spread: 0.5, strength: 0.45 },
+      ],
+      moss: [
+        { x: 0.3, y: 1.0, z: 13.0, r: 2.6, strength: 0.6, facing: [0, 0.4, 1] },
+      ],
+    },
+    wallHeight: 3.2,
+  },
+  fixedColliders: [
+    { id: 'water-kegs', kind: 'furniture', position: [GABRIEL_SEA_KEGS.x, 0.36, GABRIEL_SEA_KEGS.z], size: [1.3, 0.72, 2.9], yaw: GABRIEL_SEA_KEGS.yaw },
+    { id: 'twelfth-keg', kind: 'furniture', position: [-0.9, 0.3, -0.2], size: [0.7, 0.6, 0.55], yaw: 0.6 },
+    { id: 'rope-ladder', kind: 'furniture', position: [2.3, 0.2, -0.9], size: [0.9, 0.4, 0.9], yaw: 0 },
+  ],
+  inspectables: [
+    {
+      id: 'sea-tide-pool',
+      mode: 'interior-message',
+      label: 'tide pool',
+      text: 'Press E to look into the water',
+      message: 'The side branch dips below the floor into still, dark water. You put a finger to your tongue: salt. Along the rock above it runs a line of barnacles and a fringe of dried weed, and below that the stone is wet. The tube must run on beneath the sea, and the sea comes up it twice a day to this mark.',
+      position: [3.9, 0.3, 1.2],
+      radius: 1.7,
+    },
+    {
+      id: 'sea-rope-ladder',
+      mode: 'interior-message',
+      label: 'rope ladder',
+      text: 'Press E to examine the ladder',
+      message: 'A ladder of tarred rope with oak rungs, coiled and lashed for carrying. It is ship-made, the kind hung over a whaler\'s side for boats coming alongside. Thirty feet of it at least: more than the climb down the outer face of the lava to the water.',
+      position: [2.3, 0.4, -0.9],
+      radius: 1.5,
+    },
+    {
+      id: 'sea-dark-lantern',
+      mode: 'interior-message',
+      label: 'dark lantern',
+      text: 'Press E to examine the lantern',
+      message: 'A tin lantern with a sliding shutter, stood in a niche that looks straight down the tube to the daylight. The horn panes are scraped clean on the seaward side only. Shown from the mouth after dark it would be seen from the cove and from nowhere on land.',
+      position: [0.9, 1.2, 4.4],
+      radius: 1.5,
+    },
+  ],
+  rests: [],
+  narrationTriggers: [
+    {
+      id: 'arrival',
+      mode: 'arrival',
+      text: 'Here the tube runs between the lamplit press above and a grey smudge of daylight below. The air is cool and tastes of salt.',
+    },
+    {
+      id: 'sea-landing',
+      position: [0.4, 0, -2.4],
+      radius: 2.6,
+      text: 'The tube widens into a landing. Water kegs stand in a row along the wall, as orderly as a ship\'s hold, and every one is marked.',
+    },
+  ],
+  propSpawns: [],
+  fixedModels: [],
+  books: [],
+};
+
 export const GABRIEL_CAVE_BLUEPRINTS = {
   [GABRIEL_CAVE_MOUTH_ZONE_ID]: mouthBlueprint,
   [GABRIEL_CAVE_QUARTERS_ZONE_ID]: quartersBlueprint,
   [GABRIEL_CAVE_PRESS_ZONE_ID]: pressBlueprint,
   [GABRIEL_CAVE_SPRING_ZONE_ID]: springBlueprint,
+  [GABRIEL_CAVE_SEA_ZONE_ID]: seaBlueprint,
 };
 
 export const GABRIEL_CAVE_SURFACE_EXIT = EXIT_TO_SURFACE;

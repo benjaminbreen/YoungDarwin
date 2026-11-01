@@ -64,6 +64,7 @@ const AUTHORED_REGION_TERRAIN = {
   GABRIEL_QUARTERS: { preset: 'gabriel-cave-living-chamber-interior', segments: 144, width: 36, depth: 36 },
   GABRIEL_PRESS: { preset: 'gabriel-cave-press-gallery-interior', segments: 152, width: 38, depth: 30 },
   GABRIEL_SPRING: { preset: 'gabriel-cave-fern-spring-interior', segments: 144, width: 34, depth: 34 },
+  GABRIEL_SEA_GALLERY: { preset: 'gabriel-cave-sea-gallery-interior', segments: 144, width: 26, depth: 36 },
   // Hut rooms: the terrain covers only the floor; the exterior apron runs
   // from the walls outward.
   WHALERS_HUT_INTERIOR: { preset: 'whalers-hut-interior', segments: 24, width: 6.8, depth: 4.4 },

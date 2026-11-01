@@ -4,8 +4,10 @@ import { mantaCruiser } from './mantaCruisers';
 import {
   getPostOfficeBayBasaltBlocks,
   getPostOfficeBayOpuntiaHazards,
+  getPostOfficeBaySeaTubeFormations,
   makeFloreanaScatter,
 } from '../floreanaCoveLayout';
+import { POST_OFFICE_BAY_SEA_TUBE } from '../regions/postOfficeBay/seaTube';
 import { varyScatterTransforms } from '../scatter';
 import { terrainHeight } from '../terrain';
 import {
@@ -711,6 +713,13 @@ export function buildPostOfficeBayEcology() {
     // floreanaCoveLayout, so visual rocks and traversal remain aligned.
     rocks: getPostOfficeBayBasaltBlocks(),
     rockDust: { color: '#c4b590', strength: 0.35 },
+    // The seaward mouth of Gabriel's tube, low in the mound's north-west flank.
+    caveEntrances: [POST_OFFICE_BAY_SEA_TUBE],
+    volcanicFormations: [{
+      id: 'post-office-bay-sea-tube-formations',
+      items: getPostOfficeBaySeaTubeFormations(),
+      maxVisibleDistance: 90,
+    }],
     collectibleBeachFinds: [buildBeachFindLayer(POST_OFFICE_BAY, {
       id: 'post-office-bay-beach-finds',
       count: 10,
