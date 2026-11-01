@@ -245,6 +245,17 @@ export function fieldSampleFor(target, zoneId) {
 
 export function resolveFieldAction({ toolId = 'hands', target, examined = false, sampled = false }) {
   if (!target) return null;
+  // A paper is read, whatever is in hand, and read again as often as wanted.
+  if (target.kind === 'item' && target.readable) {
+    return {
+      id: `observe:${target.id}`,
+      kind: 'observe',
+      toolId,
+      target,
+      label: `Read ${target.name}`,
+      shortLabel: 'Read',
+    };
+  }
   // Whatever is in hand, a first meeting with a natural subject leads with
   // Examine: the examine view is the heart of fieldwork, and a hammer or knife
   // left equipped used to skip straight past it. F still swings the tool.

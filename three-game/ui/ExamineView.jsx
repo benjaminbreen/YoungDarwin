@@ -10,6 +10,7 @@ import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
 import { RarityBadge } from './RarityBadge';
+import { ReadableDocument } from './ReadableDocument';
 import { hasPopulationTraits } from '../examine/populationTraits';
 import { casualName, catchPlan, toolDisplayName } from '../catchRules';
 import { specimenInHand } from '../components/player/catchRequest';
@@ -264,6 +265,12 @@ export function ExamineView() {
   const strikeTimerRef = useRef(null);
 
   const open = Boolean(session);
+  const readable = session?.readable || null;
+  const sessionTypeId = session?.typeId || null;
+  // A paper opens on its text; everything else on the inquiry.
+  useEffect(() => {
+    if (sessionTypeId) setActivePanel(readable ? 'document' : 'inquiry');
+  }, [sessionTypeId, readable]);
   const examined = Boolean(session && examinedTypeIds.includes(session.typeId));
   // Collection is one click: no note prerequisite, no confirmation step.
   const collectReady = Boolean(session?.collectable) && !session?.subjectGone;
@@ -529,7 +536,12 @@ export function ExamineView() {
           </span>
         </header>
 
-        <nav className={styles.tabs} role="tablist" aria-label="Notebook sections">
+        <nav className={styles.tabs} role="tablist" aria-label="Notebook sections" style={readable ? { gridTemplateColumns: '1fr 1fr 1fr' } : undefined}>
+          {readable && (
+            <NotebookTab active={activePanel === 'document'} controls="examine-document-panel" onClick={() => setActivePanel('document')}>
+              Document
+            </NotebookTab>
+          )}
           <NotebookTab active={activePanel === 'inquiry'} controls="examine-inquiry-panel" onClick={() => setActivePanel('inquiry')}>
             Inquiry
           </NotebookTab>
@@ -539,7 +551,11 @@ export function ExamineView() {
         </nav>
 
         <div ref={scrollRef} className={styles.scrollPanel}>
-          {activePanel === 'inquiry' ? (
+          {activePanel === 'document' && readable ? (
+            <section id="examine-document-panel" role="tabpanel" className="px-[18px] py-4 lg:px-[27px] lg:py-[22px]">
+              <ReadableDocument readable={readable} typeId={session.typeId} />
+            </section>
+          ) : activePanel === 'inquiry' ? (
             <section id="examine-inquiry-panel" role="tabpanel" className="px-[18px] py-4 lg:px-[27px] lg:py-[22px]">
               <p className={`${styles.inquiryIntro} m-0 mb-4 border-b border-expedition-brass/20 pb-4 text-[16px] leading-relaxed text-expedition-parchment/90 lg:text-[17px]`}>
                 Observe freely, or attempt a procedure. Findings remain provisional until you record them.

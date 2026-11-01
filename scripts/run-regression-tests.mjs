@@ -3966,6 +3966,30 @@ test('Beach with Hut south land route stays above water and walkable', () => {
   assert.equal(isWalkableTerrain(spawn.x, spawn.z, 'S_HUT'), true);
 });
 
+test('Gabriel cave papers are readable, rendered in English, and read rather than examined', () => {
+  const { GABRIEL_CAVE_DOCUMENTS } = loadModule('three-game/examine/gabrielCaveDocuments.js');
+  const caveZones = ['CAVE_ENTRANCE', 'GABRIEL_QUARTERS', 'GABRIEL_PRESS', 'GABRIEL_SPRING'];
+  assert.ok(GABRIEL_CAVE_DOCUMENTS.length >= 12);
+  for (const zoneId of caveZones) {
+    assert.ok(GABRIEL_CAVE_DOCUMENTS.some(item => item.zoneId === zoneId && item.worldPlacement), `${zoneId} has something to read`);
+  }
+  const ids = new Set();
+  for (const item of GABRIEL_CAVE_DOCUMENTS) {
+    assert.ok(!ids.has(item.typeId), `${item.typeId} is unique`);
+    ids.add(item.typeId);
+    assert.ok(caveZones.includes(item.zoneId), `${item.typeId} sits in the cave`);
+    assert.ok(item.readable.pages.length > 0, `${item.typeId} has pages`);
+    for (const page of item.readable.pages) {
+      assert.ok(page.lines.length > 0, `${item.typeId} page has text`);
+      if (page.language !== 'English') {
+        assert.equal(page.translation?.length, page.lines.length, `${item.typeId} renders each ${page.language} line into English`);
+      }
+    }
+    const action = resolveFieldAction({ toolId: 'hammer', target: { id: `item:${item.typeId}`, kind: 'item', readable: true, name: item.name } });
+    assert.equal(action.shortLabel, 'Read');
+  }
+});
+
 test('Basalt Plains and Windy Promontory gateways are dry, walkable and joined by their trails', () => {
   const gateways = {
     S_VOLCANIC: ['north', 'east', 'south', 'west'],

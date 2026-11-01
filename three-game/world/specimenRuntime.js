@@ -94,7 +94,8 @@ export function resolveSpecimenFrameHint(authoredHint, renderedBounds) {
       ...authored,
       height: authoredHeight,
       radius: authoredRadius,
-      centerY: null,
+      // An authored centre (a paper on a wall, anchored at its middle) holds.
+      centerY: Number.isFinite(authored.centerY) ? authored.centerY : null,
     };
   }
 

@@ -4262,7 +4262,9 @@ function InteractionPrompt() {
       label: fieldAction.label,
       keyLabel: 'E',
       hintId: fieldAction.kind === 'observe' && !seenHints.includes(HINT_STUDY) ? HINT_STUDY : null,
-      priority: fieldAction.kind === 'observe'
+      priority: fieldAction.target?.readable
+        ? CONTEXT_PROMPT_PRIORITY.read
+        : fieldAction.kind === 'observe'
         ? CONTEXT_PROMPT_PRIORITY.fieldObserve
         : CONTEXT_PROMPT_PRIORITY.fieldTool,
       dwellMs: fieldAction.kind === 'observe' ? 210 : 130,

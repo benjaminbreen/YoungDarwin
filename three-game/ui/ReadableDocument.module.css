@@ -1,0 +1,255 @@
+.reader {
+  display: grid;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.formLabel {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(227, 197, 133, 0.88);
+}
+
+.language {
+  color: rgba(222, 208, 176, 0.62);
+}
+
+.toggle {
+  display: inline-flex;
+  border: 1px solid rgba(191, 152, 81, 0.45);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.toggle button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  background: transparent;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(222, 208, 176, 0.62);
+  cursor: pointer;
+}
+
+.toggle button + button {
+  border-left: 1px solid rgba(191, 152, 81, 0.35);
+}
+
+.toggle button[aria-pressed='true'] {
+  background: rgba(191, 152, 81, 0.18);
+  color: #f0dcae;
+}
+
+.caption {
+  font-style: italic;
+  font-size: 14px;
+  color: rgba(222, 208, 176, 0.7);
+}
+
+/* The sheet itself. Each hand is a different surface: printed paper, a
+   written page, chalk on oilcloth, scratches in rock, a scorched board. */
+.paper {
+  position: relative;
+  padding: 18px 20px 20px;
+  border-radius: 2px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), inset 0 0 40px rgba(110, 80, 40, 0.18);
+  overflow-wrap: anywhere;
+}
+
+.paper p {
+  margin: 0;
+}
+
+.line {
+  margin-top: 8px !important;
+  line-height: 1.45;
+}
+
+.heading {
+  margin-top: 4px !important;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 1.32em;
+  line-height: 1.15;
+}
+
+.subheading {
+  margin: 2px 0 6px !important;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-size: 0.92em;
+}
+
+.addition {
+  margin-top: 4px !important;
+  padding-left: 28%;
+  font-family: var(--font-caveat), 'Segoe Print', 'Bradley Hand', cursive;
+  font-size: 1.28em;
+  color: #5b2f15;
+}
+
+.editorial {
+  margin-top: 10px !important;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-style: italic;
+  opacity: 0.68;
+}
+
+.struck {
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(70, 38, 18, 0.85);
+  opacity: 0.72;
+}
+
+.hand_print,
+.hand_mirror {
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(255, 250, 235, 0.35), transparent 60%),
+    linear-gradient(160deg, #e6d9b8, #d5c49b);
+  color: #231a10;
+  font-family: var(--font-garamond), Georgia, serif;
+  font-size: 16px;
+}
+
+.hand_print .line,
+.hand_mirror .line {
+  text-align: justify;
+  hyphens: auto;
+}
+
+.hand_script {
+  background:
+    repeating-linear-gradient(transparent 0 26px, rgba(80, 60, 30, 0.08) 26px 27px),
+    linear-gradient(170deg, #e9dcc0, #d7c6a2);
+  color: #2b1d10;
+  font-family: var(--font-caveat), 'Segoe Print', 'Bradley Hand', cursive;
+  font-size: 20px;
+}
+
+.hand_script .heading,
+.hand_script .subheading {
+  text-align: left;
+}
+
+.hand_chalk {
+  background: linear-gradient(160deg, #3b3a2e, #2c2b22);
+  color: rgba(238, 236, 222, 0.9);
+  font-family: var(--font-caveat), 'Segoe Print', cursive;
+  font-size: 23px;
+  letter-spacing: 0.04em;
+}
+
+.hand_scratched {
+  background:
+    radial-gradient(ellipse at 70% 30%, rgba(90, 80, 70, 0.4), transparent 70%),
+    linear-gradient(160deg, #2e2b28, #1f1d1b);
+  color: rgba(214, 205, 188, 0.86);
+  font-family: ui-monospace, 'Courier New', monospace;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+
+.hand_burned {
+  background:
+    repeating-linear-gradient(92deg, rgba(60, 40, 20, 0.07) 0 3px, transparent 3px 11px),
+    linear-gradient(170deg, #9a7d58, #7e6443);
+  color: #1d130a;
+  font-family: var(--font-garamond), Georgia, serif;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.mirrored {
+  transform: scaleX(-1);
+}
+
+.glassButton,
+.pager button {
+  border: 1px solid rgba(191, 152, 81, 0.45);
+  border-radius: 3px;
+  background: rgba(191, 152, 81, 0.06);
+  color: rgba(240, 220, 174, 0.92);
+  cursor: pointer;
+}
+
+.glassButton {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 12px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.renderingNote {
+  margin: -4px 0 0;
+  font-size: 13px;
+  font-style: italic;
+  color: rgba(222, 208, 176, 0.6);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgba(222, 208, 176, 0.75);
+}
+
+.pager button {
+  width: 34px;
+  height: 30px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.pager button:disabled,
+.glassButton:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.gloss {
+  padding: 12px 14px;
+  border: 1px solid rgba(191, 152, 81, 0.25);
+  background: linear-gradient(135deg, rgba(191, 152, 81, 0.07), transparent);
+}
+
+.glossLabel {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(227, 197, 133, 0.85);
+}
+
+.gloss p {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-style: italic;
+  line-height: 1.5;
+  color: rgba(240, 228, 200, 0.92);
+}

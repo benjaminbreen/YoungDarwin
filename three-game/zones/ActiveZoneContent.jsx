@@ -132,6 +132,8 @@ export function ActiveZoneContent({
             <InteriorZone />
           </Suspense>
         )}
+        {/* Papers to read: the letters, maps and broadsides of an interior. */}
+        {interactablesReady && <ExaminableItems />}
       </>
     );
   }

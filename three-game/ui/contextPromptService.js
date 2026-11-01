@@ -1,6 +1,8 @@
 export const CONTEXT_PROMPT_PRIORITY = Object.freeze({
   npc: 100,
   interior: 95,
+  // A paper to read outranks a loose cup or candlestick on the same table.
+  read: 93,
   fieldTool: 92,
   carry: 90,
   item: 70,

@@ -189,27 +189,30 @@ function drawSpanishBroadside() {
     ['P. ¿Quién te desterró?', 'R. Los que temen la imprenta.'],
     ['P. ¿Qué te queda?', 'R. Las manos y la letra.'],
   ];
-  let y = 220;
+  let y = 214;
   for (const [question, answer] of qa) {
     pressLine(ctx, question, 62, y, { size: 21, weight: 'bold', align: 'left', rand, maxWidth: 390 });
     pressLine(ctx, answer, 92, y + 30, { size: 21, weight: 'italic', align: 'left', rand, maxWidth: 360 });
-    bodyLines(ctx, rand, 62, 450, y + 60, y + 92, 15, { indentEvery: 3 });
-    y += 116;
+    bodyLines(ctx, rand, 62, 450, y + 54, y + 78, 15, { indentEvery: 3 });
+    y += 100;
   }
-  // The answer struck out and rewritten twice by hand, in brown ink.
+  // The last question, its printed answer struck out by hand in brown ink
+  // and answered twice beneath (examine/gabrielCaveDocuments.js).
+  pressLine(ctx, 'P. ¿Y la isla?', 62, y, { size: 21, weight: 'bold', align: 'left', rand, maxWidth: 390 });
+  pressLine(ctx, 'R. Del Estado.', 92, y + 30, { size: 21, weight: 'italic', align: 'left', rand, maxWidth: 360 });
   ctx.strokeStyle = 'rgba(70,38,18,0.85)';
   ctx.lineWidth = 2.2;
   ctx.beginPath();
-  ctx.moveTo(88, 676);
-  ctx.lineTo(332, 672);
-  ctx.moveTo(90, 682);
-  ctx.lineTo(300, 680);
+  ctx.moveTo(86, y + 25);
+  ctx.lineTo(240, y + 22);
+  ctx.moveTo(88, y + 31);
+  ctx.lineTo(226, y + 29);
   ctx.stroke();
   ctx.font = 'italic 19px Georgia, serif';
   ctx.fillStyle = 'rgba(70,38,18,0.85)';
   ctx.textAlign = 'left';
-  ctx.fillText('— de todos', 300, 706);
-  ctx.fillText('— de nadie', 330, 724);
+  ctx.fillText('— de todos', 250, y + 62);
+  ctx.fillText('— de nadie', 290, y + 86);
   wornSpecks(ctx, 512, 768, rand, 220);
   return canvas;
 }
@@ -222,10 +225,10 @@ function drawEnglishHandbill() {
   paperGround(ctx, 512, 640, rand, { tone: '#e8dcc0', stains: 3 });
   rule(ctx, 36, 476, 40, 3);
   pressLine(ctx, 'TO THE SAILORS', 256, 104, { size: 50, weight: 'bold', rand, maxWidth: 440 });
-  pressLine(ctx, 'OF THE WHALE SHIPS.', 256, 150, { size: 34, weight: 'bold', rand, maxWidth: 440 });
+  pressLine(ctx, 'OF THE VVHALE SHIPS.', 256, 150, { size: 34, weight: 'bold', rand, maxWidth: 440 });
   rule(ctx, 36, 476, 170, 1.5);
-  pressLine(ctx, 'Your owners grow rich at home', 256, 222, { size: 25, rand, maxWidth: 440 });
-  pressLine(ctx, 'while you eat worms at sea.', 256, 256, { size: 25, rand, maxWidth: 440 });
+  pressLine(ctx, 'Your oVVners groVV rich at home', 256, 222, { size: 25, rand, maxWidth: 440 });
+  pressLine(ctx, 'while you eat VVorms at sea.', 256, 256, { size: 25, rand, maxWidth: 440 });
   ornament(ctx, 256, 296, 12);
   pressLine(ctx, 'ON THIS ISLAND', 256, 352, { size: 36, weight: 'bold', rand, maxWidth: 440 });
   pressLine(ctx, 'NO MAN NEED BE', 256, 398, { size: 36, weight: 'bold', rand, maxWidth: 440 });

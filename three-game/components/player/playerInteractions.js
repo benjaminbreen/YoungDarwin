@@ -512,11 +512,14 @@ export function updatePlayerInteractions({
   // into range mid-hold cannot turn "speak" into "collect".
   const actHeld = Boolean(keys.interact);
   if (actHeld && !stateRef.current.actRoute) {
+    // A paper to read takes the key from a loose prop beside it, as its
+    // prompt does (contextPromptService READ outranks CARRY).
+    const readableAhead = Boolean(storeState.fieldAction?.target?.readable);
     const hasInteractTarget = Boolean(
       storeState.carriedObjectId
       || (storeState.nearbyNpcEncounter && !storeState.nearbyNpcEncounter.yieldsToSpecimen)
       || storeState.interiorPrompt
-      || storeState.carryPrompt
+      || (storeState.carryPrompt && !readableAhead)
       || storeState.edgePrompt?.kind === 'blocked'
     );
     const hasFieldTarget = Boolean(
@@ -742,6 +745,7 @@ export function updatePlayerInteractions({
         typeId: currentState.nearbyItem.typeId,
         itemTypeId: currentState.nearbyItem.typeId,
         kind: 'item',
+        readable: Boolean(currentState.nearbyItem.readable),
         category: 'Item',
         name: currentState.nearbyItem.name || 'field object',
         radius: 0.3,

@@ -7,9 +7,12 @@
 import { baseSpecimens } from '../../data/specimens';
 import { fieldSampleFor } from '../fieldActions';
 import { specimenInteractionHeight } from '../components/player/playerInteractions';
+import { GABRIEL_CAVE_DOCUMENTS } from './gabrielCaveDocuments';
 
 // Non-specimen examinables. Collected entries land in `items`, not the
 // specimen case. `worldPlacement` is consumed by the zone that hosts the prop.
+// An item with a `readable` body (pages of transcribed text, with an optional
+// English rendering) opens the examine screen on its Document tab.
 export const EXAMINABLE_ITEMS = [
   {
     typeId: 'postoffice_letter',
@@ -32,6 +35,7 @@ export const EXAMINABLE_ITEMS = [
     // Tucked against the inland side of the large post barrel.
     worldPlacement: { x: 1.05, z: 9.45, rotationY: 0.7 },
   },
+  ...GABRIEL_CAVE_DOCUMENTS,
 ];
 
 export function getZoneExaminableItems(zoneId) {
@@ -224,6 +228,7 @@ export function createExamineSession(examinable, { focus = null, day = 1, timeOf
     collectable: examinable.collectable !== false,
     sample: examinable.sample || null,
     specimen: examinable.specimen || null,
+    readable: examinable.readable || null,
     focus,
     frameHint: examinable.frameHint,
     chat: [],
