@@ -55,13 +55,15 @@ export function isSwingClaimed(swingId) {
 // 'npc-footstep' { npcId, zoneId, position: {x,y,z}, side, speed, movementMode }
 // 'bee-audio-proximity' { zoneId, active, position?: {x,y,z}, phase?: 'hover'|'dart'|'descend', gate? }
 // 'lightning-flash' { zoneId, distance, pan, storm }
-// 'fieldwork-foley' { kind: 'note'|'container'|'snare'|'door', position?, specimenId?, trapId? }
+// 'fieldwork-foley' { kind: 'note'|'container'|'snare'|'door'|'stow-sample', position?, specimenId?, trapId?, material? }
 // 'equipment-foley' { kind: 'case-open'|'case-close'|'tool-change'|'carry-pickup', position?, fromToolId?, toToolId?, propId? }
 // 'carried-prop-settle' { propId, zoneId, mode: 'place'|'release', position: {x,y,z} }
 // 'container-foley' { kind: 'chest-open'|'chest-close', propId, position }
 // 'player-winded' { active, effort, fatigue }
-// 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount, material?, tool?, hammerMaterial?, groundSample?, tap? }
+// 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount, material?, tool?, hammerMaterial?, groundSample?, wear?, strained?, tap? }
 // 'rock-broken' { rockId, zoneId, hammerMaterial, position: {x,y,z} } — a boulder's last hammer blow
+// 'hammer-shard-hit' { material, position: {x,y,z} } — a chip snapping back into Darwin
+// 'fauna-takeoff' { zoneId, speciesId, actorId, position: {x,y,z} } — an animal leaving the ground
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }
 // 'toggle-syms-field-case' { id }
 // 'mature-cactus-impact' { sourceId, itemId, position, direction, amplitude, duration, frequency, tool }

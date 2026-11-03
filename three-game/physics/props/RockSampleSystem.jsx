@@ -988,12 +988,23 @@ export function RockSampleSystem() {
       const profile = profileForTarget(target, currentZoneId);
       const outcome = resolveHammerOutcome(profile, `${target.key}:${sequenceRef.current}`);
       const chip = makeChipFromTarget(target, strike, currentZoneId, sequenceRef.current, profile, outcome);
+      // How worn the boulder is after this blow, so it can sound it: duller
+      // as it is cut back, and straining on the blow before it parts.
+      const strikeBudget = target.groundSample ? 1 : rockStrikeBudget(target.rock);
+      const strikesSoFar = target.groundSample
+        ? 0
+        : (useThreeGameStore.getState().rockDamage[chip.sourceRockKey]?.strikes || 0) + 1;
       emitPropEvent('prop-struck', {
         propId: target.rock?.id || `hammer-sample:${target.key}`,
         material: 'stone',
         tool: 'hammer',
         hammerMaterial: profile.material,
         groundSample: Boolean(target.groundSample),
+        wear: target.groundSample ? 0 : Math.min(1, strikesSoFar / strikeBudget),
+        strained: !target.groundSample
+          && isRockBreakable(target.rock)
+          && strikeBudget > 2
+          && strikesSoFar === strikeBudget - 1,
         position: chip.scarPosition,
         impactDir: { x: chip.normal.x, y: 0, z: chip.normal.z },
         dustCount: 0,
@@ -1050,6 +1061,7 @@ export function RockSampleSystem() {
         && seededUnit(`${chip.id}:field-dilemma`, 91) < shardRisk
       ) {
         lastShardDilemmaRef.current = clockRef.current;
+        emitPropEvent('hammer-shard-hit', { material: profile.material, position: chip.scarPosition });
         store.triggerHammerShardDilemma?.({
           material: profile.material,
           sampleLabel: chip.sampleNoun,

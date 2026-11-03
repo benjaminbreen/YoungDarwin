@@ -26,6 +26,10 @@
 //   renderPiece(piece) — meshes rendered inside the piece's sway group.
 //   strikeAbsorbMessage(piece) — narrator line for absorbed hammer hits.
 //   absorbEducationalNote — note attached to that narrator beat.
+//   renderBreakDetail(piece, { released, isBrokenOff }) — optional meshes
+//                    for break wounds: splinters on a piece that broke off and
+//                    stubs left on the parent where a child has gone.
+//                    isBrokenOff(key) is false for a piece still welded on.
 //   tuning         — optional overrides of DEFAULT_PLANT_TUNING.
 
 import React, {
@@ -36,7 +40,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { CuboidCollider, interactionGroups, RigidBody } from '@react-three/rapier';
+import { CuboidCollider, interactionGroups, RigidBody, useRapier } from '@react-three/rapier';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -57,6 +61,8 @@ import {
   clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
   damageLeanAngle,
+  rayToSegmentMiss,
+  releaseMomentumMass,
   selectHammerImpactTargets,
   selectKnifeCutTargets,
 } from './breakablePhysics';
@@ -364,6 +370,24 @@ export const DEFAULT_PLANT_TUNING = {
   coherentCascade: true,
   cascadeMomentumScale: 0.86,
   cascadeTorqueScale: 0.28,
+  // Woody plants (opt-in). The hammer prefers a breakable piece to the
+  // unbreakable trunk when both are inside the swing.
+  hammerPreferBreakable: false,
+  // Above this mass (kg) a release shares a fixed momentum budget, so heavy
+  // limbs drop instead of leaving at the same speed as a twig. Null keeps the
+  // mass-proportional impulse every plant has always used.
+  releaseReferenceMass: null,
+  // Shot pieces are tested along their base-to-tip axis instead of by centre,
+  // and each piece's `shotDamageScale` (thickness) and range scale the damage.
+  shotgunSegmentTest: false,
+  // A piece snapped from a still-standing parent hangs on its torn fibres for
+  // this long (or until it has swung this far), so it swings down from the
+  // break before it drops.
+  breakHingeSeconds: 0,
+  breakHingeMaxAngle: 1.1,
+  // Descendants released with a piece are welded to it with fixed joints, so
+  // a fallen limb lands and lies as one limb.
+  weldReleasedSubtree: false,
 };
 
 function inheritReleaseImpulse(impulse, parentMass, childMass, tuning) {
@@ -642,6 +666,94 @@ function updateReleasedPlantPieces(runtime, tuning, delta) {
   }
 }
 
+const RAPIER_DYNAMIC_BODY = 0;
+const jointScratch = {
+  parentPosition: new THREE.Vector3(),
+  parentQuat: new THREE.Quaternion(),
+  childPosition: new THREE.Vector3(),
+  childQuat: new THREE.Quaternion(),
+  anchor: new THREE.Vector3(),
+  frame: new THREE.Quaternion(),
+};
+
+function releaseJoint(world, record) {
+  if (record?.joint?.isValid?.()) world.removeImpulseJoint(record.joint, true);
+}
+
+// Hinges hold a freshly snapped piece to its still-standing parent at the
+// break; welds hold a released subtree together as one limb. Both wait until
+// the piece has turned dynamic and taken over its last flexed pose, so the
+// joint is authored against where the piece really is.
+function updateBreakJoints(runtime, tuning, world, rapier, delta) {
+  if (!world || !rapier) return;
+  if (runtime.pendingJoints.length) {
+    const waiting = [];
+    for (const request of runtime.pendingJoints) {
+      if (runtime.culled.has(request.childKey) || runtime.joints.has(request.childKey)) continue;
+      const child = runtime.bodies.get(request.childKey)?.current;
+      const parent = runtime.bodies.get(request.parentKey)?.current;
+      if (!child || !parent) continue;
+      const childRecord = runtime.intactVisuals.get(request.childKey);
+      const childReady = child.bodyType() === RAPIER_DYNAMIC_BODY && childRecord?.state.cleared;
+      const parentReady = request.kind === 'hinge'
+        || (parent.bodyType() === RAPIER_DYNAMIC_BODY
+          && runtime.intactVisuals.get(request.parentKey)?.state.cleared);
+      if (!childReady || !parentReady) {
+        waiting.push(request);
+        continue;
+      }
+      const { parentPosition, parentQuat, childPosition, childQuat, anchor, frame } = jointScratch;
+      parentPosition.copy(parent.translation());
+      parentQuat.copy(parent.rotation());
+      childPosition.copy(child.translation());
+      childQuat.copy(child.rotation());
+      // Child body origins are their attachment points, so the joint sits at
+      // the child's origin expressed in the parent's frame.
+      anchor.copy(childPosition).sub(parentPosition).applyQuaternion(parentQuat.clone().invert());
+      const params = request.kind === 'weld'
+        ? rapier.JointData.fixed(
+          { x: anchor.x, y: anchor.y, z: anchor.z },
+          frame.copy(parentQuat).invert().multiply(childQuat),
+          { x: 0, y: 0, z: 0 },
+          { x: 0, y: 0, z: 0, w: 1 },
+        )
+        : rapier.JointData.spherical(
+          { x: anchor.x, y: anchor.y, z: anchor.z },
+          { x: 0, y: 0, z: 0 },
+        );
+      const joint = world.createImpulseJoint(params, parent, child, true);
+      joint.setContactsEnabled?.(false);
+      runtime.joints.set(request.childKey, {
+        joint,
+        kind: request.kind,
+        age: 0,
+        startQuat: childQuat.clone(),
+      });
+    }
+    runtime.pendingJoints = waiting;
+  }
+
+  for (const [key, record] of runtime.joints) {
+    if (!record.joint.isValid?.()) {
+      runtime.joints.delete(key);
+      continue;
+    }
+    if (record.kind !== 'hinge') continue;
+    record.age += delta;
+    const body = runtime.bodies.get(key)?.current;
+    const rotation = body?.rotation();
+    const dot = rotation
+      ? Math.abs(record.startQuat.x * rotation.x + record.startQuat.y * rotation.y
+        + record.startQuat.z * rotation.z + record.startQuat.w * rotation.w)
+      : 1;
+    const swung = 2 * Math.acos(Math.min(1, dot));
+    if (!body || record.age >= tuning.breakHingeSeconds || swung >= tuning.breakHingeMaxAngle) {
+      releaseJoint(world, record);
+      runtime.joints.delete(key);
+    }
+  }
+}
+
 function isPlayerTarget(target) {
   return target?.rigidBodyObject?.userData?.kind === 'player'
     || target?.colliderObject?.userData?.kind === 'player'
@@ -658,6 +770,7 @@ function BreakablePlantPiece({
   damageKeys,
   registerBody,
   registerIntactVisual,
+  isBrokenOff,
 }) {
   const bodyRef = useRef(null);
   const visualRef = useRef(null);
@@ -788,6 +901,7 @@ function BreakablePlantPiece({
         >
           {spec.renderPiece(piece)}
         </group>
+        {spec.renderBreakDetail?.(piece, { released: isReleased, isBrokenOff })}
       </group>
     </RigidBody>
   );
@@ -798,6 +912,7 @@ export function BreakablePlantField({ spec }) {
   const sampledRockIds = useThreeGameStore(state => state.sampledRockIds);
   const setSpecimenRuntimePosition = useThreeGameStore(state => state.setSpecimenRuntimePosition);
   const [version, bumpVersion] = useState(0);
+  const { world: rapierWorld, rapier: rapierApi } = useRapier();
   const examinationSiteRef = useRef({ zoneId: null, siteId: null });
 
   const tuning = useMemo(
@@ -904,6 +1019,11 @@ export function BreakablePlantField({ spec }) {
       releaseAges: new Map(),
       pendingCascades: [],
       pendingStrikes: [],
+      // Hinge/weld joints waiting for both bodies to be dynamic and posed,
+      // and the live ones (see updateBreakJoints).
+      pendingJoints: [],
+      joints: new Map(),
+      weldedKeys: new Set(),
       // Breaks requested from Rapier contact-force events. These must never be
       // resolved inline — see handleContactForce.
       pendingContactBreaks: [],
@@ -934,6 +1054,11 @@ export function BreakablePlantField({ spec }) {
     runtime.releaseAges = new Map();
     runtime.pendingCascades = [];
     runtime.pendingStrikes = [];
+    // The bodies these joined are unmounted with the old zone, which removes
+    // their joints from the world; only the bookkeeping is left to drop.
+    runtime.pendingJoints = [];
+    runtime.joints = new Map();
+    runtime.weldedKeys = new Set();
     runtime.playerVel = { x: 0, z: 0 };
     runtime.playerTrack = { has: false, x: 0, z: 0 };
     runtime.siteFlexes = createSiteFlexes(sitePivots);
@@ -994,6 +1119,13 @@ export function BreakablePlantField({ spec }) {
     if (!piece) return false;
     runtime.released.add(key);
     if (impulse) runtime.pendingImpulses.set(key, impulse);
+    if (
+      tuning.breakHingeSeconds > 0
+      && piece.parentKey
+      && !runtime.released.has(piece.parentKey)
+    ) {
+      runtime.pendingJoints.push({ kind: 'hinge', childKey: key, parentKey: piece.parentKey });
+    }
     if (fx) {
       const body = runtime.bodies.get(key)?.current;
       const at = body ? body.translation() : { x: piece.center.x, y: piece.center.y, z: piece.center.z };
@@ -1015,7 +1147,12 @@ export function BreakablePlantField({ spec }) {
         if (child?.releaseWithParent || tuning.coherentCascade) {
           // Blossoms and branch descendants leave with the parent. Matching
           // launch velocity makes the free pieces read as one snapped branch
-          // until their first ground contact, without a web of physics joints.
+          // until their first ground contact; `weldReleasedSubtree` keeps them
+          // one branch after it too.
+          if (tuning.weldReleasedSubtree) {
+            runtime.pendingJoints.push({ kind: 'weld', childKey, parentKey: key });
+            runtime.weldedKeys.add(childKey);
+          }
           releaseChildNow(childKey, childImpulse);
         } else {
           runtime.pendingCascades.push({
@@ -1035,6 +1172,10 @@ export function BreakablePlantField({ spec }) {
       const child = piecesByKey.get(childKey);
       for (const grandChildKey of dependents.get(childKey) || []) {
         const grandChild = piecesByKey.get(grandChildKey);
+        if (tuning.weldReleasedSubtree && !runtime.released.has(grandChildKey)) {
+          runtime.pendingJoints.push({ kind: 'weld', childKey: grandChildKey, parentKey: childKey });
+          runtime.weldedKeys.add(grandChildKey);
+        }
         releaseChildNow(
           grandChildKey,
           inheritReleaseImpulse(childImpulse, child?.mass, grandChild?.mass, tuning),
@@ -1149,8 +1290,25 @@ export function BreakablePlantField({ spec }) {
     const d = event.dir;
     if (!o || !d) return;
     const hits = [];
+    const range = event.range ?? 24;
     for (const piece of pieces) {
       if (runtime.released.has(piece.key) || runtime.culled.has(piece.key)) continue;
+      if (tuning.shotgunSegmentTest && piece.spawn && piece.center) {
+        // Long limbs are hit where the pellets actually pass along them, not
+        // by a sphere around their midpoint.
+        const start = { x: piece.spawn[0], y: piece.spawn[1], z: piece.spawn[2] };
+        const end = {
+          x: piece.center.x * 2 - start.x,
+          y: piece.center.y * 2 - start.y,
+          z: piece.center.z * 2 - start.z,
+        };
+        const miss = rayToSegmentMiss(o, d, start, end, { maxAlong: range + 0.6 });
+        if (!miss) continue;
+        const reach = SHOTGUN.prop.rayRadius + (piece.radius ?? piece.width * 0.5);
+        if (miss.lateral > reach) continue;
+        hits.push({ piece, along: miss.along, lateral: miss.lateral, reach });
+        continue;
+      }
       const at = runtime.bodies.get(piece.key)?.current?.translation() || piece.center;
       const tx = at.x - o.x;
       const ty = at.y - o.y;
@@ -1175,9 +1333,15 @@ export function BreakablePlantField({ spec }) {
       const planarLength = Math.hypot(d.x || 0, d.z || 0) || 1;
       const dirX = (d.x || 0) / planarLength;
       const dirZ = (d.z || 0) / planarLength;
-      const kick = hit.piece.mass * releaseSpeed;
-      const lift = hit.piece.mass * tuning.shotgunReleaseLiftSpeed * (0.85 + directness * 0.15);
-      damagePiece(hit.piece.key, tuning.shotgunDamage, {
+      const pushMass = releaseMomentumMass(hit.piece.mass, tuning.releaseReferenceMass);
+      const kick = pushMass * releaseSpeed;
+      const lift = pushMass * tuning.shotgunReleaseLiftSpeed * (0.85 + directness * 0.15);
+      // Pellets that sever a twig only scar a limb: damage follows the
+      // piece's thickness and falls off with range.
+      const shotDamage = tuning.shotgunSegmentTest
+        ? tuning.shotgunDamage * (hit.piece.shotDamageScale ?? 1) * falloff * (0.6 + directness * 0.4)
+        : tuning.shotgunDamage;
+      damagePiece(hit.piece.key, shotDamage, {
         linear: { x: dirX * kick, y: lift, z: dirZ * kick },
         torque: { x: dirZ * kick * 0.045, y: 0, z: -dirX * kick * 0.045 },
         maxLinearSpeed: tuning.shotgunReleaseVelocityCap,
@@ -1507,6 +1671,7 @@ export function BreakablePlantField({ spec }) {
 
     updateIntactPlantVisuals(runtime, tuning, state.clock.elapsedTime);
     updateReleasedPlantPieces(runtime, tuning, delta);
+    updateBreakJoints(runtime, tuning, rapierWorld, rapierApi, delta);
 
     // Contact-force breaks queued from Rapier's event drain. Resolving them
     // here runs outside the world borrow, so the fixed -> dynamic RigidBody
@@ -1557,6 +1722,7 @@ export function BreakablePlantField({ spec }) {
           facing: f,
           maxHits: tuning.strikeMaxPieces,
           swing: { endDistance: tuning.strikeRange },
+          preferBreakable: tuning.hammerPreferBreakable,
         });
       if (candidates.length) claimSwing(strike.swingId);
       for (const hit of candidates) {
@@ -1564,7 +1730,7 @@ export function BreakablePlantField({ spec }) {
           hit.piece.key,
           knifeCut ? Math.max(1, hit.piece.hits || 1) : tuning.strikeDamage,
           createRestrainedReleaseImpulse({
-            mass: hit.piece.mass,
+            mass: releaseMomentumMass(hit.piece.mass, tuning.releaseReferenceMass),
             direction: { x: hit.dirX, z: hit.dirZ },
             speed: knifeCut ? tuning.knifeReleaseSpeed : tuning.hammerReleaseSpeed,
             liftSpeed: knifeCut ? tuning.knifeReleaseLiftSpeed : tuning.hammerReleaseLiftSpeed,
@@ -1588,6 +1754,11 @@ export function BreakablePlantField({ spec }) {
   const visiblePieces = pieces.filter(
     piece => !collected.has(piece.key) && !runtime.culled.has(piece.key),
   );
+  // A piece has broken off when it is gone, or loose and not welded to the
+  // limb it fell with.
+  const isBrokenOff = key => collected.has(key)
+    || runtime.culled.has(key)
+    || (runtime.released.has(key) && !runtime.weldedKeys.has(key));
 
   return (
     <group userData={{
@@ -1658,6 +1829,7 @@ export function BreakablePlantField({ spec }) {
             releasedVersion={version}
             registerBody={registerBody}
             registerIntactVisual={registerIntactVisual}
+            isBrokenOff={isBrokenOff}
           />
         ))}
     </group>

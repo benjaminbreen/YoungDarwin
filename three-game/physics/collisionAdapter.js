@@ -19,6 +19,8 @@ import {
   resolveObstacleCollision,
 } from '../world/obstacles';
 import { caveRayDistance, getCaveSpec } from '../interiors/cave/caveRuntime';
+import { looseRockSurfaceY } from '../world/looseRocks';
+import { getLooseRockStates } from './props/propRuntime';
 
 const DEFAULT_SUPPORT_RADIUS = 0.28;
 const STANCE_SUPPORT_RADIUS = 0.1;
@@ -27,6 +29,7 @@ const STANCE_HALF_LENGTH = 0.34;
 const STANCE_TILT_SCALE = 0.32;
 const CACHE_PRECISION = 1000;
 const PLAYER_GROUND_CLEARANCE = 0.015;
+const LOOSE_ROCK_MAX_STEP = 1.0;
 
 function cacheCoord(value) {
   return Math.round((Number(value) || 0) * CACHE_PRECISION);
@@ -160,6 +163,26 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     return sample;
   };
 
+  // Live loose-rock support from the Rapier poses LooseRocks publishes. Only
+  // surfaces above the terrain and within a stride of Darwin count, so a
+  // rock tumbling past at head height never yanks him up onto it.
+  const looseRockSupport = position => {
+    let best = null;
+    for (const state of getLooseRockStates(zoneId)) {
+      if (!state.radii) continue;
+      const surfaceY = looseRockSurfaceY(state, state.radii, position.x, position.z);
+      if (surfaceY === null || surfaceY > position.y + LOOSE_ROCK_MAX_STEP) continue;
+      if (surfaceY <= terrainHeight(position.x, position.z, zoneId) + 0.02) continue;
+      if (!best || surfaceY > best.height) {
+        best = {
+          height: surfaceY,
+          obstacle: { id: state.id, kind: 'loose-rock', looseRockKey: state.id, mass: state.mass },
+        };
+      }
+    }
+    return best;
+  };
+
   const getGroundInfo = (position, options = {}) => {
     const supportRadius = options.supportRadius ?? DEFAULT_SUPPORT_RADIUS;
     const ignoreObstacles = options.ignoreObstacles === true;
@@ -176,9 +199,20 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     const obstacleSupport = ignoreObstacles
       ? null
       : getObstacleSupport(position.x, position.z, position.y, supportRadius, obstacles);
+    const looseSupport = ignoreObstacles ? null : looseRockSupport(position);
+    const useLoose = looseSupport && looseSupport.height > (obstacleSupport?.height ?? -Infinity);
     const obstacleGroundY = obstacleSupport?.height ?? null;
     let result;
-    if (obstacleGroundY !== null && obstacleGroundY !== undefined) {
+    if (useLoose) {
+      result = {
+        y: looseSupport.height + PLAYER_GROUND_CLEARANCE,
+        source: 'loose-rock',
+        terrainY: visualTerrainY,
+        movementTerrainY: terrainGroundY,
+        physicsY: physicsGroundY,
+        obstacle: looseSupport.obstacle,
+      };
+    } else if (obstacleGroundY !== null && obstacleGroundY !== undefined) {
       result = {
         y: obstacleGroundY + PLAYER_GROUND_CLEARANCE,
         source: 'authored-obstacle',
@@ -239,7 +273,9 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     const minY = Math.min(...heights);
     const maxY = Math.max(...heights);
     const samples = [center, left, rightSample, front, back];
-    const obstacleSupportCount = samples.filter(sample => sample.source === 'authored-obstacle').length;
+    const obstacleSupportCount = samples.filter(sample => (
+      sample.source === 'authored-obstacle' || sample.source === 'loose-rock'
+    )).length;
     const result = {
       center,
       left,

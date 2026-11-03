@@ -1,5 +1,6 @@
 const propPosesByZone = new Map();
 const waterInfluencesByZone = new Map();
+const looseRockCollidersByZone = new Map();
 
 function zonePoseMap(zoneId) {
   const key = zoneId || 'UNKNOWN';
@@ -82,13 +83,43 @@ export function clearZonePropPoses(zoneId) {
   if (!zoneId) return;
   propPosesByZone.delete(zoneId);
   waterInfluencesByZone.delete(zoneId);
+  looseRockCollidersByZone.delete(zoneId);
+}
+
+// Loose rocks are Rapier bodies outside the prop registry. They publish a
+// prop-shaped collider (centre pose + ball) so wildlife and NPC separation,
+// which only reads prop definitions, steps around them as they move. The
+// entry also carries { qx, qy, qz, qw, radii } for player support.
+export function publishLooseRockCollider(zoneId, rockId, collider) {
+  if (!zoneId || !rockId || !collider) return;
+  const key = zoneId || 'UNKNOWN';
+  let colliders = looseRockCollidersByZone.get(key);
+  if (!colliders) {
+    colliders = new Map();
+    looseRockCollidersByZone.set(key, colliders);
+  }
+  colliders.set(rockId, collider);
+}
+
+export function removeLooseRockCollider(zoneId, rockId) {
+  looseRockCollidersByZone.get(zoneId || 'UNKNOWN')?.delete(rockId);
+}
+
+// The same entries carry the full body pose (quaternion, radii) for analytic
+// ground support: Darwin walks over loose rocks exactly like fixed ones.
+export function getLooseRockStates(zoneId) {
+  return looseRockCollidersByZone.get(zoneId || 'UNKNOWN')?.values() || [];
 }
 
 export function getZonePropCollisionProps(zoneId, props = []) {
   const poses = propPosesByZone.get(zoneId || 'UNKNOWN');
-  if (!poses || poses.size === 0) return props;
-  return props.map(prop => {
-    const pose = poses.get(prop.id);
-    return pose ? { ...prop, x: pose.x, y: pose.y, z: pose.z } : prop;
-  });
+  const looseRocks = looseRockCollidersByZone.get(zoneId || 'UNKNOWN');
+  const placed = !poses || poses.size === 0
+    ? props
+    : props.map(prop => {
+      const pose = poses.get(prop.id);
+      return pose ? { ...prop, x: pose.x, y: pose.y, z: pose.z } : prop;
+    });
+  if (!looseRocks || looseRocks.size === 0) return placed;
+  return [...placed, ...looseRocks.values()];
 }

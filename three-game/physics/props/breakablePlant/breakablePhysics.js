@@ -34,6 +34,7 @@ export function selectHammerImpactTargets(pieces, {
   facing,
   maxHits = 1,
   swing = null,
+  preferBreakable = false,
 } = {}) {
   if (!origin || !facing || !pieces?.length || maxHits <= 0) return [];
   const config = { ...DEFAULT_SWING, ...(swing || {}) };
@@ -98,8 +99,42 @@ export function selectHammerImpactTargets(pieces, {
     });
   }
 
-  hits.sort((a, b) => a.distance - b.distance || a.swingProgress - b.swingProgress);
+  // A woody plant's trunk is usually the closest thing to the hammer. With
+  // `preferBreakable` a limb or shoot inside the swing takes the blow and the
+  // unbreakable trunk only answers when nothing else was in reach.
+  hits.sort((a, b) => (
+    (preferBreakable ? (a.piece.unbreakable ? 1 : 0) - (b.piece.unbreakable ? 1 : 0) : 0)
+    || a.distance - b.distance
+    || a.swingProgress - b.swingProgress
+  ));
   return hits.slice(0, maxHits);
+}
+
+// Pieces heavier than `referenceMass` share a fixed momentum budget instead
+// of all leaving at the same speed: a twig still flies, a heavy limb barely
+// moves before gravity takes it.
+export function releaseMomentumMass(mass, referenceMass) {
+  const safeMass = Math.max(0.01, Number.isFinite(mass) ? mass : 0.01);
+  if (!Number.isFinite(referenceMass) || referenceMass <= 0) return safeMass;
+  return Math.min(safeMass, referenceMass);
+}
+
+// Closest approach between a shot ray and a piece's base-to-tip segment.
+// Returns the ray distance and lateral miss, or null when the segment lies
+// wholly behind the muzzle or beyond `maxAlong`.
+export function rayToSegmentMiss(origin, dir, start, end, { minAlong = 0.3, maxAlong = Infinity, samples = 8 } = {}) {
+  let best = null;
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const px = start.x + (end.x - start.x) * t - origin.x;
+    const py = start.y + (end.y - start.y) * t - origin.y;
+    const pz = start.z + (end.z - start.z) * t - origin.z;
+    const along = px * dir.x + py * dir.y + pz * dir.z;
+    if (along < minAlong || along > maxAlong) continue;
+    const lateral = Math.sqrt(Math.max(0, px * px + py * py + pz * pz - along * along));
+    if (!best || lateral < best.lateral) best = { along, lateral };
+  }
+  return best;
 }
 
 // A knife is intentionally not a generic melee weapon. Only pieces authored

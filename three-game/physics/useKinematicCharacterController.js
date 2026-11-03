@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { PLAYER_QUERY_GROUPS } from './collisionGroups';
 
 export const CHARACTER_CONTROLLER_CONFIG = {
   radius: 0.36,
@@ -131,7 +132,7 @@ export function useKinematicCharacterController(rapierContext, bodyRef, collider
       }
 
       body.setTranslation(position, true);
-      current.controller.computeColliderMovement(collider, desiredDelta);
+      current.controller.computeColliderMovement(collider, desiredDelta, undefined, PLAYER_QUERY_GROUPS);
       const movement = vecToThree(current.controller.computedMovement());
       const next = position.clone().add(movement);
       body.setNextKinematicTranslation(next);
