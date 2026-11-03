@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeRng, pushSpike, seededUnit } from '../breakablePlant/plantGeoUtils';
+import { applyNatureSurface } from '../../../wildlife/natureTextures';
 
 export { seededUnit };
 
@@ -360,7 +361,10 @@ export function getPricklyPearMaterials() {
   };
   // Only cache once the browser texture exists so an early server-side call
   // can't pin map-less materials for the whole session.
-  if (detailMap) materialsCache = materials;
+  if (detailMap) {
+    [...materials.pads, materials.driedPad].forEach(material => applyNatureSurface(material, 'cactus-skin', detailMap, { repeat: true }));
+    materialsCache = materials;
+  }
   return materials;
 }
 

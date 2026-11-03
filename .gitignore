@@ -53,6 +53,15 @@ desktop.ini
 !/assets-src/nature-materials/guides/
 !/assets-src/nature-materials/guides/*.png
 !/assets-src/nature-materials/guides/*.json
+!/assets-src/coastal-basalt-preview/
+!/assets-src/coastal-basalt-preview/*.png
+!/assets-src/coastal-basalt-preview/*.json
+!/assets-src/coastal-basalt-preview/*.md
+!/assets-src/botanical-materials/
+!/assets-src/botanical-materials/*.png
+!/assets-src/botanical-materials/*.json
+!/assets-src/botanical-materials/guides/
+!/assets-src/botanical-materials/guides/*.png
 !/assets-src/.gitkeep
 !/assets-src/raw/
 !/assets-src/raw/.gitkeep
@@ -127,3 +136,6 @@ next-env.d.ts
 /sketchbook drawings/
 __pycache__/
 *.pyc
+
+# Scratch scripts sessions leave behind.
+/scripts/*.tmp.mjs

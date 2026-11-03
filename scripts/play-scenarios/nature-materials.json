@@ -1,0 +1,16 @@
+[
+  ["zone", "E_MID"],
+  ["wait", 2000],
+  ["expect", "(() => {let ok=false;window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name==='Nature:finch-body')ok ||= m.map.image.width===512 && !(m.map.image instanceof HTMLCanvasElement) && m.map.colorSpace==='srgb' && m.normalMap.colorSpace==='' && m.roughnessMap.colorSpace==='';});return ok;})()"],
+  ["expect", "(() => {const {scene,gl}=window.__darwinScene;let ok=false;scene.traverse(o=>{const t=o.material&&gl.properties.get(o.material).uniforms?.uDryGrassBladeAtlas?.value;if(t)ok ||= t.image.width===1024 && t.colorSpace==='srgb' && t.version===gl.properties.get(t).__version;});return ok;})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "W_LAVA"],
+  ["wait", 2000],
+  ["expect", "(() => {let ok=false;window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name==='Nature:tortoise-shell')ok ||= m.map.image.width===1024 && !(m.map.image instanceof HTMLCanvasElement) && m.normalMap.image.width===512 && m.map.colorSpace==='srgb' && m.normalMap.colorSpace==='' && m.roughnessMap.colorSpace==='';});return ok;})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "E_MID"],
+  ["wait", 2000],
+  ["expect", "(() => {let ok=false;window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name==='Nature:finch-body')ok ||= m.map.image.width===512 && m.map.version===window.__darwinScene.gl.properties.get(m.map).__version;});return ok;})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["errors"]
+]

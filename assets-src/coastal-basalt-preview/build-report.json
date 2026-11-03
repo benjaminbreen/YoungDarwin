@@ -1,0 +1,13 @@
+{
+  "hashes": {
+    "coastal-basalt-color.png": "4c874d586304524ea93ad6ea40b22f32ef74e1594eef0b9044514f458d0f788f",
+    "coastal-basalt-height.png": "6761512f6cfdc48cb2e7ce241f9cc2ed50a1cc305d3c6a4c5ddd20b1fa521b3d"
+  },
+  "reflectanceGain": 1.9985572890994663,
+  "tileMetres": 1.25,
+  "reliefMetres": 0.012,
+  "packing": "linear R normal X, G normal Y OpenGL +Y, B roughness variation, A height",
+  "albedoSize": 1024,
+  "dataSize": 512,
+  "losslessDataVerified": true
+}

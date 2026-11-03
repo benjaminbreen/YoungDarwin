@@ -146,3 +146,79 @@ npm run check
 Use `npm run three:screenshot:fast` when asset loading, scale, material, scene
 composition, or animation visibility needs visual confirmation. Use contact
 sheets for skeletal animation quality review.
+
+## Generated animal surfaces and grass fibres
+
+### Darwin coat microrelief
+
+`node scripts/build-darwin-fabric.mjs` reuses the existing ImageGen period wool
+height source to build a 512px lossless linear height tile, with matched edges.
+The source hash, provenance pointer and byte count are recorded in
+`assets-src/darwin/fabric/build-report.json`. The manifest's `fabricDetail`
+settings project this tile in pre-skinning coordinates at 18 cm per repeat and
+0.6 mm relief; the deformed surface receives its height gradient. This replaces
+the older albedo-derived Darwin5 atlas normal, preserving the authored albedo
+and baked AO. It does not modify the GLB or its animation.
+
+Only the mixed clothing material opts in. A conservative upper-body/color mask
+limits wool to the muted brown coat, excluding cream cloth, green waistcoat and
+saturated leather. Skin, eyes, hair and brass materials do not receive the hook.
+Distance and projected texel footprint fade the relief before it becomes
+subpixel. Missing height data yields the existing smooth material. Use
+`?noDarwinFabric=1` for a comparison, or
+`npm run perf:sweep -- --variants=baseline,no-darwin-fabric --repeat=3` to measure
+the shader change on hardware.
+
+The tortoise and ground-finch pass uses built-in ImageGen sources in
+`assets-src/nature-materials/`, with exact prompts in `provenance.json` and the
+original procedural texture guides in `guides/`. These are reconstructed art
+and approximate generated height fields, not measured specimen scans. The
+finch sheet is a registered 4-by-2 atlas: body, head, inner wing, outer wing;
+coverts, primary feather, tail, unused. Only ground-finch profiles consume it;
+the other bird species retain their authored plumage.
+
+Run `npm run asset:nature` to rebuild the optimized animal and grass maps in
+`public/assets/textures/nature/generated/` and the botanical maps described below. The shared configuration is
+`three-game/wildlife/natureTextureCatalog.js`. The bake cuts atlas cells before
+computing relief, makes only the requested edges periodic, and derives OpenGL
++Y normals from height rather than albedo. Albedo is sRGB; lossless normal and
+roughness maps use linear data. The build report records physical assumptions,
+source hashes, data encoding verification and output size.
+
+`ProceduralTortoisePlayer` and `ProceduralFinchPlayer` load these maps directly;
+their older GLBs are not the world-specimen renderer. Shared asynchronous
+sources retain the procedural albedo during loading or failure. Creature
+resources use deferred disposal so React effect replay and region return do
+not break texture subscriptions. Shell UVs allocate space by distance over each modeled meridian to reduce
+side stretching. Vertex positions, topology, animation, and collision are intact.
+
+`DryGrassPatchField` supplies the generated fibre atlas by default, retaining
+existing per-instance habitat colors and geometry. A region may override
+`bladeTexturePath`, or set it to `false` to disable the atlas. Its custom sampler
+receives linear RGB from the sRGB texture; do not decode that color a second
+time. The atlas modulates surface value and does not change blade silhouettes.
+
+
+### Botanical surfaces
+
+`assets-src/botanical-materials/` contains the built-in ImageGen sources,
+procedural UV guides, and exact prompts in `provenance.json`. The six botanical
+surface sets cover palo santo bark, humid forest bark, green/olive/dry palo
+santo leaflets, and a neutral cactus epidermis multiplier. They are reconstructed
+material art with approximate generated height fields, not specimen scans.
+The existing leaf outlines, spines, ribs, seasonal foliage density and physics
+remain authored geometry and data.
+
+The shared nature catalog selects source folder, output directory, atlas grid,
+nominal scale and physical ranges. The leaf sheet uses three cells of a 2-by-2
+grid; its unused cell is never shipped. `npm run asset:nature` writes botanical
+maps to `public/assets/textures/nature/botanical/`, verifies lossless linear data
+encoding and records hashes in the combined nature build report.
+
+Procedural palo santo and both interactive cactus families use the new maps.
+Generated-tree presets opt into a species-appropriate `barkSurface`: the active
+Scalesia layers receive humid bark. Texture assignment occurs after any matte
+Phong conversion so the final material owns its texture handles; deferred
+variant disposal preserves asynchronous loading during effect replay and
+region return. Generated bark supplies its own base color, with the older
+variant color retained only as a subtle tint.

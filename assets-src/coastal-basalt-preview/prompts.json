@@ -1,0 +1,17 @@
+{
+  "generator": "Built-in image_gen",
+  "date": "2026-11-02",
+  "requests": [
+    {
+      "file": "coastal-basalt-color.png",
+      "prompt": "Create one production PBR BASE COLOR material image for a game: a seamless tile of coastal basalt rock surface, flat orthographic material scan, square 2048x2048. This is ONLY the unlit colour of a continuous rock surface covering 1.25 metres square, to be triplanar-mapped onto EXISTING low-poly 3D boulders. Do NOT depict a rock object, a pile of stones, loose gravel, a landscape, a model render or a plant. Coherent charcoal-grey basalt with irregular interlocking angular fractures at 8-25cm scale, small chipped edges, subtle broad patches of cool grey and subdued warm-grey weathering, sparse tiny dull olive mineral inclusions. Fine pitting at 1-4mm scale, with a few shallow pores, but not a sponge or pumice. Avoid the repetitive concentric swirls of generic lava textures. Restrained and realistic, medium contrast, predominantly neutral grey; no painted black cracks, white outlines, exaggerated crevices or shiny bright flecks. No baked directional light, cast shadows, highlights, ambient occlusion, perspective or depth-of-field. Fractures should have subtle material colour variation only; actual relief and lighting will be provided separately by normal/height maps and the game engine. Seamless continuation on opposite edges, no central focal point, no border or text. Natural surface detail that belongs on a broad volcanic boulder at normal gameplay distance, not an illustration.",
+      "transparent_background": false
+    },
+    {
+      "file": "coastal-basalt-height.png",
+      "prompt": "Convert the attached basalt material into a spatially REGISTERED PHYSICAL HEIGHT MAP for the same seamless tile. Output grayscale only, same exact framing and position of every fracture and pit, square. This is a low-relief rock heightfield, not a grayscale photograph. Intact broad basalt plates are nearly even light-medium grey (around 160), fracture recesses and small pits are lower grey (around 90-125), chipped shoulders gently transition over a few millimetres. Maximum physical relief is only about 12mm across a 1.25 metre tile. Colour/mineral patches must NOT become bumps. No lighting, highlights, ambient occlusion, cast shadows, exaggerated canyon cracks, new fractures, text or border. Preserve the exact existing arrangement so colour and normal relief will line up on an existing game boulder. Seamless opposite edges. Smooth shallow continuous relief with a little fine grain.",
+      "reference": "coastal-basalt-color.png",
+      "transparent_background": false
+    }
+  ]
+}

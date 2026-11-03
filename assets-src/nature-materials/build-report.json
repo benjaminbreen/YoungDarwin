@@ -1,0 +1,459 @@
+{
+  "normalConvention": "OpenGL +Y; derived from generated height, never pigment",
+  "surfaces": [
+    {
+      "key": "tortoise-shell",
+      "file": "tortoise-shell",
+      "source": "tortoise-shell",
+      "size": [
+        1024,
+        1024
+      ],
+      "span": [
+        2,
+        2
+      ],
+      "relief": 0.003,
+      "roughness": [
+        0.78,
+        0.94
+      ],
+      "albedo": "/assets/textures/nature/generated/tortoise-shell-albedo.webp",
+      "normal": "/assets/textures/nature/generated/tortoise-shell-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/tortoise-shell-roughness.webp",
+      "hashes": {
+        "color": "642aa153d5c7c1e8acfeb0efccb98f0736b1f5274c3bba9c9a4c9efa91c526f8",
+        "height": "ba1096f4c272463e1e97038291760ff41ac9d5dc1348b194157ae750f13b0fc2"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "tortoise-skin",
+      "file": "tortoise-skin",
+      "source": "tortoise-skin",
+      "size": [
+        1024,
+        1024
+      ],
+      "span": [
+        0.12,
+        0.12
+      ],
+      "relief": 0.0006,
+      "roughness": [
+        0.86,
+        0.98
+      ],
+      "periodic": [
+        0,
+        1
+      ],
+      "albedo": "/assets/textures/nature/generated/tortoise-skin-albedo.webp",
+      "normal": "/assets/textures/nature/generated/tortoise-skin-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/tortoise-skin-roughness.webp",
+      "hashes": {
+        "color": "ce70290b04c3617a7adce285bcd3cedfa0211e30a088493b2f53b46724ca76c4",
+        "height": "91498c1d497c99164ba6a0ca44b92b9df26910d9479291a4dbe3609f8f06acf8"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-body",
+      "file": "finch-body",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.65,
+        0.65
+      ],
+      "relief": 0.00018,
+      "roughness": [
+        0.9,
+        0.99
+      ],
+      "cell": 0,
+      "periodic": [
+        0
+      ],
+      "albedo": "/assets/textures/nature/generated/finch-body-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-body-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-body-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-head",
+      "file": "finch-head",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.25,
+        0.25
+      ],
+      "relief": 0.00012,
+      "roughness": [
+        0.91,
+        0.99
+      ],
+      "cell": 1,
+      "periodic": [
+        0
+      ],
+      "albedo": "/assets/textures/nature/generated/finch-head-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-head-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-head-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-armWing",
+      "file": "finch-arm-wing",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.35,
+        0.35
+      ],
+      "relief": 0.0002,
+      "roughness": [
+        0.82,
+        0.96
+      ],
+      "cell": 2,
+      "albedo": "/assets/textures/nature/generated/finch-arm-wing-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-arm-wing-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-arm-wing-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-handWing",
+      "file": "finch-hand-wing",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.3,
+        0.3
+      ],
+      "relief": 0.00018,
+      "roughness": [
+        0.82,
+        0.96
+      ],
+      "cell": 3,
+      "albedo": "/assets/textures/nature/generated/finch-hand-wing-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-hand-wing-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-hand-wing-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-covert",
+      "file": "finch-covert",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.3,
+        0.3
+      ],
+      "relief": 0.00015,
+      "roughness": [
+        0.88,
+        0.98
+      ],
+      "cell": 4,
+      "albedo": "/assets/textures/nature/generated/finch-covert-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-covert-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-covert-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-primary",
+      "file": "finch-primary",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        256
+      ],
+      "span": [
+        0.3,
+        0.08
+      ],
+      "relief": 0.00012,
+      "roughness": [
+        0.82,
+        0.96
+      ],
+      "cell": 5,
+      "albedo": "/assets/textures/nature/generated/finch-primary-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-primary-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-primary-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "finch-tail",
+      "file": "finch-tail",
+      "source": "finch-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.3,
+        0.3
+      ],
+      "relief": 0.00018,
+      "roughness": [
+        0.84,
+        0.97
+      ],
+      "cell": 6,
+      "albedo": "/assets/textures/nature/generated/finch-tail-albedo.webp",
+      "normal": "/assets/textures/nature/generated/finch-tail-normal.webp",
+      "roughnessMap": "/assets/textures/nature/generated/finch-tail-roughness.webp",
+      "hashes": {
+        "color": "9a81b31b0e30c566432db370db9e13825b89e96ff73d8861b35d783a406d6b92",
+        "height": "a0d2b84037981b03c876330e94070dceba4783d736d389c949f7229d9d47d402"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "palo-bark",
+      "file": "palo-bark",
+      "source": "palo-bark",
+      "size": [
+        1024,
+        1024
+      ],
+      "span": [
+        0.35,
+        0.56
+      ],
+      "relief": 0.0008,
+      "roughness": [
+        0.85,
+        0.97
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "periodic": [
+        0,
+        1
+      ],
+      "albedo": "/assets/textures/nature/botanical/palo-bark-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/palo-bark-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/palo-bark-roughness.webp",
+      "hashes": {
+        "color": "a72563665c52d0cdebc24a8405563e0ba2f8b2ee4e58f1ec3b0ea4a91ac08c67",
+        "height": "9caf51f043f432a3b16a999e76cae721dff434335bd1ecd0972c7dd7bea8c9ce"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "humid-bark",
+      "file": "humid-bark",
+      "source": "humid-bark",
+      "size": [
+        1024,
+        1024
+      ],
+      "span": [
+        0.4,
+        0.4
+      ],
+      "relief": 0.0015,
+      "roughness": [
+        0.82,
+        0.97
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "periodic": [
+        0,
+        1
+      ],
+      "albedo": "/assets/textures/nature/botanical/humid-bark-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/humid-bark-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/humid-bark-roughness.webp",
+      "hashes": {
+        "color": "400ac93d4d0d16d5f367b920e130e3d966153a5f6e06d8171c5f1b3cebe0d82e",
+        "height": "334cbbcc28e27618f225c699c089b7969139be65a955f5eee1f60df5c66c7768"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "palo-leaf-green",
+      "file": "palo-leaf-green",
+      "source": "palo-leaf-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.07,
+        0.13
+      ],
+      "relief": 0.00008,
+      "roughness": [
+        0.78,
+        0.94
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "cell": 0,
+      "atlasGrid": [
+        2,
+        2
+      ],
+      "albedo": "/assets/textures/nature/botanical/palo-leaf-green-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/palo-leaf-green-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/palo-leaf-green-roughness.webp",
+      "hashes": {
+        "color": "1e21ac99565efee8a9eebdf65ff142b5d1f0e645c519fa993f2f7a164d26d684",
+        "height": "ba9b98a0ddec96d0ede14acb998b5681e6ba7b04f25aec7991e403e906786c56"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "palo-leaf-olive",
+      "file": "palo-leaf-olive",
+      "source": "palo-leaf-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.07,
+        0.13
+      ],
+      "relief": 0.00008,
+      "roughness": [
+        0.83,
+        0.96
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "cell": 1,
+      "atlasGrid": [
+        2,
+        2
+      ],
+      "albedo": "/assets/textures/nature/botanical/palo-leaf-olive-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/palo-leaf-olive-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/palo-leaf-olive-roughness.webp",
+      "hashes": {
+        "color": "1e21ac99565efee8a9eebdf65ff142b5d1f0e645c519fa993f2f7a164d26d684",
+        "height": "ba9b98a0ddec96d0ede14acb998b5681e6ba7b04f25aec7991e403e906786c56"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "palo-leaf-dry",
+      "file": "palo-leaf-dry",
+      "source": "palo-leaf-atlas",
+      "size": [
+        512,
+        512
+      ],
+      "span": [
+        0.07,
+        0.13
+      ],
+      "relief": 0.00007,
+      "roughness": [
+        0.91,
+        0.99
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "cell": 2,
+      "atlasGrid": [
+        2,
+        2
+      ],
+      "albedo": "/assets/textures/nature/botanical/palo-leaf-dry-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/palo-leaf-dry-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/palo-leaf-dry-roughness.webp",
+      "hashes": {
+        "color": "1e21ac99565efee8a9eebdf65ff142b5d1f0e645c519fa993f2f7a164d26d684",
+        "height": "ba9b98a0ddec96d0ede14acb998b5681e6ba7b04f25aec7991e403e906786c56"
+      },
+      "losslessDataVerified": true
+    },
+    {
+      "key": "cactus-skin",
+      "file": "cactus-skin",
+      "source": "cactus-skin",
+      "size": [
+        1024,
+        1024
+      ],
+      "span": [
+        0.2,
+        0.2
+      ],
+      "relief": 0.00015,
+      "roughness": [
+        0.77,
+        0.94
+      ],
+      "base": "/assets/textures/nature/botanical",
+      "sourceFolder": "botanical-materials",
+      "periodic": [
+        0,
+        1
+      ],
+      "albedo": "/assets/textures/nature/botanical/cactus-skin-albedo.webp",
+      "normal": "/assets/textures/nature/botanical/cactus-skin-normal.webp",
+      "roughnessMap": "/assets/textures/nature/botanical/cactus-skin-roughness.webp",
+      "hashes": {
+        "color": "25d3c9e43fa03d29e0e598d12aa934a6c9e2f14d0ea111a3202901d32b425e01",
+        "height": "41ba33e281d8aa9143bea1dd05d665b8247fc89d614620012ec395c7233bce9a"
+      },
+      "losslessDataVerified": true
+    }
+  ],
+  "grass": {
+    "size": [
+      1024,
+      1024
+    ],
+    "sourceSha256": "bcb9d4032c852aa29dd8f0f5bbfef6190efb7c96d0a63d9ea6de5df6e34bd592"
+  },
+  "runtimeBytes": 5370004
+}

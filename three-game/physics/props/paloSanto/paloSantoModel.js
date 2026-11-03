@@ -6,10 +6,27 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { makeRng, seededUnit } from '../breakablePlant/plantGeoUtils';
+import { applyNatureSurface } from '../../../wildlife/natureTextures';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const WOOD_DENSITY = 430;
-const BARK_TINTS = ['#d8d0ba', '#cbc2aa', '#e0d7c0', '#cfc8b4'];
+// Bursera bark is smooth and silvery grey, often chalky with crustose lichen;
+// the dry-season woods read almost white against the lava. The shared bark
+// map is a warm beige, so the material keeps only a trace of its chroma.
+const BARK_TINTS = ['#e2e3de', '#d6d8d3', '#e6e5de', '#cfd2ce'];
+const BARK_MAP_CHROMA = 0.12;
+
+function applyPaloBarkTone(material) {
+  material.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `#include <map_fragment>
+      diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), diffuseColor.rgb, ${BARK_MAP_CHROMA.toFixed(2)});`,
+    );
+  };
+  material.customProgramCacheKey = () => `palo-bark-tone:${BARK_MAP_CHROMA}`;
+  return material;
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -93,6 +110,64 @@ function makeCrookedPath({
   return points;
 }
 
+// Like makeCrookedPath, but the heading swings smoothly from `from` to `to`:
+// palo santo leaders climb steeply off the fork and then lean out.
+function makeArcPath({ start, from, to, length, steps, wobble, phase, rng }) {
+  const points = [start.clone()];
+  let current = start.clone();
+  const heading = new THREE.Vector3();
+  for (let index = 0; index < steps; index += 1) {
+    const t = (index + 0.5) / steps;
+    heading.copy(from).lerp(to, Math.pow(t, 0.85)).normalize();
+    const [a, b] = perpendicularBasis(heading);
+    const angle = phase + index * 2.1 + rng() * 0.8;
+    heading.addScaledVector(a, Math.cos(angle) * wobble)
+      .addScaledVector(b, Math.sin(angle) * wobble)
+      .normalize();
+    current = current.clone().addScaledVector(heading, length / steps * (0.85 + rng() * 0.3));
+    points.push(current);
+  }
+  return points;
+}
+
+// Cheap smooth noise for bark mottling, evaluated in tree space so lichen
+// patches stay put on the bark however a limb's geometry is framed.
+function barkNoise(x, y, z) {
+  return (
+    Math.sin(x * 3.1 + y * 1.7 + 0.4) * Math.sin(z * 2.9 - y * 2.3 + 1.1)
+    + Math.sin(x * 7.3 - z * 5.9 + y * 4.1) * 0.5
+    + Math.sin(y * 11.7 + x * 9.1 - z * 8.3) * 0.25
+  ) / 1.75 * 0.5 + 0.5;
+}
+
+const soilShade = [0.62, 0.58, 0.52];
+// Vertex colours multiply the desaturated bark map, so values above 1 lift
+// pale crustose lichen out of the grey bark.
+function barkColor(treePoint, phase, out) {
+  const n = barkNoise(treePoint.x, treePoint.y + phase * 0.31, treePoint.z);
+  const fine = barkNoise(treePoint.x * 3.3 + 7, treePoint.y * 2.7, treePoint.z * 3.1 - 3);
+  let r = 1.02 + (fine - 0.5) * 0.08;
+  let g = r;
+  let b = r * 0.985;
+  const lichen = THREE.MathUtils.smoothstep(n, 0.58, 0.74);
+  r = THREE.MathUtils.lerp(r, 1.2, lichen);
+  g = THREE.MathUtils.lerp(g, 1.2, lichen);
+  b = THREE.MathUtils.lerp(b, 1.14, lichen);
+  const greyGreen = THREE.MathUtils.smoothstep(fine, 0.7, 0.84) * (1 - lichen);
+  r *= 1 - greyGreen * 0.1;
+  b *= 1 - greyGreen * 0.16;
+  const weathered = THREE.MathUtils.smoothstep(1 - n, 0.68, 0.86);
+  r *= 1 - weathered * 0.16;
+  g *= 1 - weathered * 0.15;
+  b *= 1 - weathered * 0.13;
+  // Rain-splashed soil and shade at the root collar.
+  const soil = 1 - THREE.MathUtils.smoothstep(treePoint.y, 0.02, 0.55);
+  out[0] = r * THREE.MathUtils.lerp(1, soilShade[0], soil);
+  out[1] = g * THREE.MathUtils.lerp(1, soilShade[1], soil);
+  out[2] = b * THREE.MathUtils.lerp(1, soilShade[2], soil);
+  return out;
+}
+
 function createTubeGeometry({
   points,
   radiusStart,
@@ -101,6 +176,9 @@ function createTubeGeometry({
   radialSegments = 12,
   lengthSegments = null,
   baseFlare = 0,
+  tipRound = 0,
+  frame = null,
+  rooted = false,
 }) {
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.35);
   const tubularSegments = lengthSegments || clamp(points.length * 6, 18, 42);
@@ -112,6 +190,8 @@ function createTubeGeometry({
   const phase = variant * 1.37 + 0.61;
   const length = Math.max(0.1, curve.getLength());
   const point = new THREE.Vector3();
+  const treePoint = new THREE.Vector3();
+  const color = [1, 1, 1];
 
   for (let ring = 0; ring <= tubularSegments; ring += 1) {
     const t = ring / tubularSegments;
@@ -119,16 +199,19 @@ function createTubeGeometry({
     const taperT = Math.pow(t, 0.84);
     const taper = THREE.MathUtils.lerp(radiusStart, radiusEnd, taperT);
     const flare = 1 + baseFlare * Math.pow(1 - t, 3.2);
+    const rounding = 1 - tipRound * THREE.MathUtils.smoothstep(t, 0.78, 1);
     const organic = 1
       + Math.sin(t * Math.PI * 4.4 + phase) * 0.018
       + Math.sin(t * Math.PI * 10.7 - phase) * 0.009;
-    const radius = taper * flare * organic;
+    const radius = taper * flare * rounding * organic;
     const normal = frames.normals[ring];
     const binormal = frames.binormals[ring];
     for (let side = 0; side < radialSegments; side += 1) {
       const u = side / radialSegments;
       const angle = u * Math.PI * 2 + t * 0.08;
-      const furrow = 1 + Math.sin(angle * 5 + phase) * 0.014;
+      // Buttress lobes at the root collar; otherwise the bark is smooth.
+      const lobes = baseFlare > 0 ? Math.sin(angle * 4 + phase) * 0.06 * Math.pow(1 - t, 6) : 0;
+      const furrow = 1 + Math.sin(angle * 5 + phase) * 0.014 + lobes;
       const radial = normal.clone().multiplyScalar(Math.cos(angle))
         .addScaledVector(binormal, Math.sin(angle));
       positions.push(
@@ -136,10 +219,18 @@ function createTubeGeometry({
         point.y + radial.y * radius * furrow,
         point.z + radial.z * radius * furrow,
       );
-      const shade = 0.93
-        + Math.max(0, Math.cos(angle - 0.55)) * 0.055
-        + Math.sin(ring * 0.73 + side * 1.9 + phase) * 0.008;
-      colors.push(shade, shade * 0.995, shade * 0.96);
+      if (rooted) {
+        colors.push(soilShade[0] * 1.08, soilShade[1] * 1.08, soilShade[2] * 1.08);
+      } else {
+        treePoint.set(
+          point.x + radial.x * radius,
+          point.y + radial.y * radius,
+          point.z + radial.z * radius,
+        );
+        if (frame) treePoint.applyQuaternion(frame.quaternion).add(frame.position);
+        barkColor(treePoint, phase, color);
+        colors.push(color[0], color[1], color[2]);
+      }
       uvs.push(u, t * Math.max(1.2, length / 0.56));
     }
   }
@@ -182,15 +273,26 @@ function createTubeGeometry({
   return geometry;
 }
 
-export function buildPaloSantoLimbGeometry(limb, twigs = []) {
+// `lod` builds the dormant stand-in drawn for every tree except the one the
+// player is interacting with. At full detail that stand-in cost ~98k triangles
+// per tree (~1M across Post Office Bay). Only one site is ever active, so a
+// dormant tree can still be the second-nearest tree a few metres away: the
+// reduction is deliberately moderate (roughly a third of the triangles) rather
+// than a far-distance impostor.
+export function buildPaloSantoLimbGeometry(limb, twigs = [], { lod = false } = {}) {
+  const trunk = limb.role === 'trunk';
   const geometries = [createTubeGeometry({
     points: limb.points,
     radiusStart: limb.radiusStart,
     radiusEnd: limb.radiusEnd,
     variant: limb.variant,
-    radialSegments: limb.role === 'trunk' ? 16 : 14,
-    lengthSegments: limb.role === 'trunk' ? 40 : null,
-    baseFlare: limb.role === 'trunk' ? 0.42 : 0.05,
+    radialSegments: lod ? (trunk ? 10 : 8) : (trunk ? 16 : 14),
+    lengthSegments: trunk
+      ? (lod ? 20 : 40)
+      : (lod ? clamp(limb.points.length * 4, 10, 24) : null),
+    baseFlare: trunk ? 0.42 : limb.role === 'limb' ? 0.1 : 0.16,
+    tipRound: limb.tipRound || 0,
+    frame: limb.frame,
   })];
   for (const twig of twigs) {
     geometries.push(createTubeGeometry({
@@ -198,8 +300,9 @@ export function buildPaloSantoLimbGeometry(limb, twigs = []) {
       radiusStart: twig.radiusStart,
       radiusEnd: twig.radiusEnd,
       variant: twig.variant,
-      radialSegments: twig.order >= 2 ? 8 : 10,
-      lengthSegments: twig.order >= 2 ? 12 : 16,
+      frame: limb.frame,
+      radialSegments: lod ? (twig.order >= 2 ? 5 : 6) : (twig.order >= 2 ? 8 : 10),
+      lengthSegments: lod ? (twig.order >= 2 ? 6 : 8) : (twig.order >= 2 ? 12 : 16),
     }));
   }
   const merged = mergeGeometries(geometries, false);
@@ -224,14 +327,15 @@ export function getPaloSantoBranchGeometry(variantIndex = 0) {
       variant,
       radialSegments: 12,
       lengthSegments: 16,
+      rooted: true,
     }));
   }
   return branchGeometryCache.get(variant);
 }
 
-function createLeafletGeometry(width, length, curl = 0.015, phase = 0) {
-  const lengthSegments = 12;
-  const widthSegments = 4;
+function createLeafletGeometry(width, length, curl = 0.015, phase = 0, lod = false) {
+  const lengthSegments = lod ? 6 : 12;
+  const widthSegments = lod ? 2 : 4;
   const positions = [];
   const uvs = [];
   const indices = [];
@@ -268,9 +372,10 @@ function createLeafletGeometry(width, length, curl = 0.015, phase = 0) {
 }
 
 const leafSprayCache = new Map();
-export function getPaloSantoLeafSprayGeometry(variantIndex = 0) {
+export function getPaloSantoLeafSprayGeometry(variantIndex = 0, { lod = false } = {}) {
   const variant = ((variantIndex | 0) % 6 + 6) % 6;
-  if (leafSprayCache.has(variant)) return leafSprayCache.get(variant);
+  const cacheKey = lod ? `lod:${variant}` : variant;
+  if (leafSprayCache.has(cacheKey)) return leafSprayCache.get(cacheKey);
   const leafGeometries = [];
   const stemGeometries = [];
   const compoundLeaves = variant === 4 ? 2 : 1;
@@ -282,7 +387,7 @@ export function getPaloSantoLeafSprayGeometry(variantIndex = 0) {
     const tilt = (variant % 2 ? 0.18 : -0.06) + spray * 0.15;
     const roll = (variant - 2.5) * 0.035;
     const transform = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tilt, yaw, roll));
-    const stem = new THREE.CylinderGeometry(0.0055, 0.009, stemLength, 7, 2);
+    const stem = new THREE.CylinderGeometry(0.0055, 0.009, stemLength, lod ? 4 : 7, lod ? 1 : 2);
     stem.translate(0, stemLength * 0.5, 0);
     stem.applyMatrix4(transform);
     stemGeometries.push(stem);
@@ -296,6 +401,7 @@ export function getPaloSantoLeafSprayGeometry(variantIndex = 0) {
           0.105 + progress * 0.026 + (variant % 2) * 0.008,
           0.009 + progress * 0.004,
           leafPhase + pair * 0.67 + side,
+          lod,
         );
         leaflet.rotateZ(side * (0.9 - progress * 0.12));
         leaflet.rotateY(side * (0.05 + progress * 0.11 + spray * 0.08));
@@ -309,6 +415,7 @@ export function getPaloSantoLeafSprayGeometry(variantIndex = 0) {
       0.125 + (variant % 3) * 0.008,
       0.012,
       leafPhase + 2.1,
+      lod,
     );
     terminal.translate(0, stemLength + 0.035, 0);
     terminal.applyMatrix4(transform);
@@ -321,14 +428,14 @@ export function getPaloSantoLeafSprayGeometry(variantIndex = 0) {
   leaves.computeVertexNormals();
   stems.computeVertexNormals();
   const result = { leaves, stems };
-  leafSprayCache.set(variant, result);
+  leafSprayCache.set(cacheKey, result);
   return result;
 }
 
-export function buildPaloSantoFoliageGeometry(foliage = []) {
+export function buildPaloSantoFoliageGeometry(foliage = [], { lod = false } = {}) {
   const groups = { greenLeaves: [], oliveLeaves: [], dryLeaves: [], stems: [] };
   for (const cluster of foliage) {
-    const spray = getPaloSantoLeafSprayGeometry(cluster.variant);
+    const spray = getPaloSantoLeafSprayGeometry(cluster.variant, { lod });
     const direction = new THREE.Vector3(...cluster.direction).normalize();
     const orientation = new THREE.Quaternion().setFromUnitVectors(UP, direction);
     const variation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
@@ -488,7 +595,7 @@ export function getPaloSantoMaterials() {
   if (materialCache) return materialCache;
   const barkTextures = getBarkTextures();
   const materials = {
-    bark: BARK_TINTS.map(color => new THREE.MeshStandardMaterial({
+    bark: BARK_TINTS.map(color => applyPaloBarkTone(new THREE.MeshStandardMaterial({
       color,
       map: barkTextures.albedo,
       bumpMap: barkTextures.bump,
@@ -496,7 +603,7 @@ export function getPaloSantoMaterials() {
       vertexColors: true,
       roughness: 0.93,
       metalness: 0,
-    })),
+    }))),
     leaves: new THREE.MeshStandardMaterial({
       color: '#ffffff',
       map: getLeafTexture('green'),
@@ -518,13 +625,26 @@ export function getPaloSantoMaterials() {
       metalness: 0,
       side: THREE.DoubleSide,
     }),
+    wood: new THREE.MeshStandardMaterial({
+      color: '#ece3cf',
+      vertexColors: true,
+      roughness: 0.88,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    }),
     leafStems: new THREE.MeshStandardMaterial({
       color: '#6d6d43',
       roughness: 0.92,
       metalness: 0,
     }),
   };
-  if (barkTextures.albedo) materialCache = materials;
+  if (barkTextures.albedo) {
+    materials.bark.forEach(material => applyNatureSurface(material, 'palo-bark', barkTextures.albedo, { repeat: true }));
+    for (const [key, tone] of [['leaves', 'green'], ['oliveLeaves', 'olive'], ['dryLeaves', 'dry']]) {
+      applyNatureSurface(materials[key], `palo-leaf-${tone}`, getLeafTexture(tone));
+    }
+    materialCache = materials;
+  }
   return materials;
 }
 
@@ -577,66 +697,78 @@ export function buildPaloSanto({ seed, size = 1, leafiness = null }) {
     return limb;
   };
 
-  const height = treeScale * (3.35 + rng() * 0.95);
-  const trunkNodes = 7;
+  // Bursera graveolens is deliquescent: a short, slightly crooked bole forks
+  // low into a few co-dominant leaders that climb steeply and then lean out,
+  // giving the open umbrella crown of the dry-zone woodland. The bole does not
+  // run on as a central stake.
+  const height = treeScale * (3.8 + rng() * 1.4);
+  const boleHeight = height * (0.27 + rng() * 0.13);
+  const trunkNodes = 6;
   const trunkPoints = [];
   const leanAngle = rng() * Math.PI * 2;
-  const leanMagnitude = height * (0.025 + rng() * 0.045);
+  const leanMagnitude = boleHeight * (0.05 + rng() * 0.1);
   const crookPhase = rng() * Math.PI * 2;
   for (let index = 0; index < trunkNodes; index += 1) {
     const t = index / (trunkNodes - 1);
     const envelope = Math.sin(t * Math.PI);
     trunkPoints.push(new THREE.Vector3(
       Math.cos(leanAngle) * leanMagnitude * t
-        + Math.sin(t * Math.PI * 1.55 + crookPhase) * height * 0.028 * envelope,
-      -0.14 * treeScale + height * t,
+        + Math.sin(t * Math.PI * 1.55 + crookPhase) * boleHeight * 0.035 * envelope,
+      -0.14 * treeScale + (boleHeight + 0.14 * treeScale) * t,
       Math.sin(leanAngle) * leanMagnitude * t
-        + Math.cos(t * Math.PI * 1.37 + crookPhase) * height * 0.024 * envelope,
+        + Math.cos(t * Math.PI * 1.37 + crookPhase) * boleHeight * 0.03 * envelope,
     ));
   }
+  const trunkRadius = treeScale * (0.17 + rng() * 0.05);
   const trunk = addLimb({
     points: trunkPoints,
-    radiusStart: treeScale * (0.23 + rng() * 0.055),
-    radiusEnd: treeScale * (0.052 + rng() * 0.018),
+    radiusStart: trunkRadius,
+    radiusEnd: trunkRadius * (0.74 + rng() * 0.08),
     generation: 0,
     role: 'trunk',
   });
+  trunk.tipRound = 0.62;
+  const leanDirection = new THREE.Vector3(Math.cos(leanAngle), 0, Math.sin(leanAngle));
 
   const crownBias = rng() * Math.PI * 2;
-  const scaffoldCount = 3 + Math.floor(rng() * 3);
+  const leaderRoll = rng();
+  const leaderCount = leaderRoll < 0.18 ? 2 : leaderRoll < 0.72 ? 3 : 4;
   const scaffolds = [];
-  for (let index = 0; index < scaffoldCount; index += 1) {
-    const distributed = scaffoldCount > 1 ? index / (scaffoldCount - 1) : 0.5;
-    const attachT = clamp(0.36 + distributed * 0.36 + (rng() * 2 - 1) * 0.045, 0.34, 0.76);
+  for (let index = 0; index < leaderCount; index += 1) {
+    // A fourth leader leaves the bole lower down as a side limb.
+    const sideLimb = leaderCount === 4 && index === 3;
+    const attachT = sideLimb ? 0.6 + rng() * 0.14 : 0.78 + rng() * 0.07;
     const host = samplePath(trunk.points, attachT);
-    const azimuth = crownBias + index * 2.39996 + (rng() * 2 - 1) * 0.42;
-    const leader = index === 0 && rng() > 0.35;
-    const horizontal = leader ? 0.44 + rng() * 0.12 : 0.72 + rng() * 0.22;
-    const vertical = leader ? 0.9 + rng() * 0.18 : 0.42 + rng() * 0.32;
-    const direction = new THREE.Vector3(
-      Math.cos(azimuth) * horizontal,
-      vertical,
-      Math.sin(azimuth) * horizontal,
-    ).addScaledVector(host.tangent, 0.12).normalize();
-    const asymmetry = 0.84 + Math.max(0, Math.cos(azimuth - crownBias)) * 0.24 + rng() * 0.14;
-    const limbLength = height * (leader ? 0.31 + rng() * 0.08 : 0.28 + rng() * 0.13) * asymmetry;
-    const startRadius = radiusAt(trunk, attachT) * (0.48 + rng() * 0.13);
-    const start = host.point.clone().addScaledVector(direction, -startRadius * 0.72);
-    const points = makeCrookedPath({
-      start,
-      direction,
-      length: limbLength,
-      steps: 5 + Math.floor(rng() * 2),
-      phase: azimuth,
-      bend: 0.1 + rng() * 0.1,
-      lift: leader ? 0.13 : 0.08,
-      rng,
-    });
+    const azimuth = crownBias + index * (Math.PI * 2 / leaderCount) + (rng() * 2 - 1) * 0.38;
+    const outward = new THREE.Vector3(Math.cos(azimuth), 0, Math.sin(azimuth))
+      .addScaledVector(leanDirection, 0.25)
+      .normalize();
+    const climb = sideLimb ? 0.62 + rng() * 0.22 : 0.9 + rng() * 0.32;
+    const settle = sideLimb ? 0.2 + rng() * 0.22 : 0.3 + rng() * 0.32;
+    const from = outward.clone().multiplyScalar(Math.cos(climb)).addScaledVector(UP, Math.sin(climb)).normalize();
+    const to = outward.clone().multiplyScalar(Math.cos(settle)).addScaledVector(UP, Math.sin(settle)).normalize();
+    const crownRise = Math.max(height * 0.38, height * (0.86 + rng() * 0.12) - host.point.y);
+    const limbLength = crownRise / (0.62 + rng() * 0.1) * (sideLimb ? 0.72 : 1);
+    const startRadius = radiusAt(trunk, attachT) * (sideLimb ? 0.55 + rng() * 0.08 : 0.74 + rng() * 0.1);
+    // Seat the leader against the outside of the bole so the bark flows
+    // up into the fork instead of stepping in where the limbs begin.
+    const start = host.point.clone()
+      .addScaledVector(outward, Math.max(0, radiusAt(trunk, attachT) - startRadius) * 0.9)
+      .addScaledVector(from, -startRadius * 0.8);
     scaffolds.push(addLimb({
       parent: trunk,
-      points,
+      points: makeArcPath({
+        start,
+        from,
+        to,
+        length: limbLength,
+        steps: 6,
+        wobble: 0.1 + rng() * 0.08,
+        phase: azimuth,
+        rng,
+      }),
       radiusStart: startRadius,
-      radiusEnd: treeScale * (0.018 + rng() * 0.012),
+      radiusEnd: treeScale * (0.022 + rng() * 0.008),
       generation: 1,
       role: 'limb',
     }));
@@ -644,133 +776,208 @@ export function buildPaloSanto({ seed, size = 1, leafiness = null }) {
 
   const branches = [];
   for (const scaffold of scaffolds) {
-    const branchCount = 2 + Math.floor(rng() * 3);
+    const branchCount = 3 + Math.floor(rng() * 3);
+    const firstSide = rng() < 0.5 ? -1 : 1;
     for (let index = 0; index < branchCount; index += 1) {
-      const attachT = clamp(0.34 + index * (0.5 / Math.max(1, branchCount - 1)) + (rng() * 2 - 1) * 0.06, 0.3, 0.9);
+      const attachT = clamp(0.3 + index * (0.55 / Math.max(1, branchCount - 1)) + (rng() * 2 - 1) * 0.06, 0.26, 0.88);
       const host = samplePath(scaffold.points, attachT);
-      const azimuth = crownBias + index * 2.17 + scaffold.variant * 0.51 + rng() * 0.7;
-      const direction = branchDirection(
-        host.tangent,
-        azimuth,
-        0.48 + rng() * 0.38,
-        0.08 + rng() * 0.14,
-      );
-      const startRadius = radiusAt(scaffold, attachT) * (0.38 + rng() * 0.13);
-      const start = host.point.clone().addScaledVector(direction, -startRadius * 0.8);
-      const points = makeCrookedPath({
-        start,
-        direction,
-        length: height * (0.13 + rng() * 0.11),
-        steps: 4 + Math.floor(rng() * 2),
-        phase: azimuth,
-        bend: 0.14 + rng() * 0.13,
-        lift: 0.08 + rng() * 0.08,
-        rng,
-      });
+      // Branches reach away from the crown axis, alternating either side of
+      // their leader, and turn their tips back up toward the light.
+      const away = new THREE.Vector3(host.point.x, 0, host.point.z);
+      if (away.lengthSq() < 1e-4) away.set(host.tangent.x, 0, host.tangent.z);
+      away.normalize().applyAxisAngle(UP, (index % 2 ? -firstSide : firstSide) * (0.55 + rng() * 0.6));
+      const elevation = 0.3 + rng() * 0.5;
+      const from = away.clone().multiplyScalar(Math.cos(elevation)).addScaledVector(UP, Math.sin(elevation))
+        .addScaledVector(host.tangent, 0.35)
+        .normalize();
+      const tipElevation = elevation + 0.2 + rng() * 0.35;
+      const to = away.clone().multiplyScalar(Math.cos(tipElevation)).addScaledVector(UP, Math.sin(tipElevation)).normalize();
+      const startRadius = radiusAt(scaffold, attachT) * (0.5 + rng() * 0.16);
+      const start = host.point.clone().addScaledVector(from, -startRadius * 0.7);
       branches.push(addLimb({
         parent: scaffold,
-        points,
+        points: makeArcPath({
+          start,
+          from,
+          to,
+          length: height * (0.17 + rng() * 0.13) * (1 - attachT * 0.35),
+          steps: 5,
+          wobble: 0.12 + rng() * 0.1,
+          phase: crownBias + index * 2.17,
+          rng,
+        }),
         radiusStart: startRadius,
-        radiusEnd: treeScale * (0.009 + rng() * 0.006),
+        radiusEnd: treeScale * (0.015 + rng() * 0.006),
         generation: 2,
         role: 'branch',
       }));
     }
   }
 
+  // Leaves come in tufts at the shoot tips: a few pinnate leaves splayed
+  // around the bud, held up rather than drooping.
   const addFoliage = (limb, endpoint, direction, strength = 1) => {
-    const chance = clamp(0.025 + seasonalLeaves * 0.9 * strength, 0, 0.68);
+    const chance = clamp(0.03 + seasonalLeaves * 0.95 * strength, 0, 0.74);
     if (rng() >= chance) return;
     const toneRoll = rng();
     const dryThreshold = clamp(0.1 + (0.34 - seasonalLeaves) * 0.28, 0.06, 0.22);
     const tone = toneRoll < dryThreshold ? 'dry' : toneRoll < 0.43 ? 'olive' : 'green';
-    limb.foliage.push({
-      position: endpoint.clone(),
-      direction: direction.clone().normalize(),
-      variant: Math.floor(rng() * 6),
-      scale: treeScale * (0.34 + rng() * 0.22),
-      pitch: (rng() * 2 - 1) * 0.18,
-      yaw: rng() * Math.PI * 2,
-      roll: (rng() * 2 - 1) * 0.28,
-      tone,
-    });
+    const tuft = 1 + Math.floor(rng() * (1 + seasonalLeaves * 2.2));
+    const raised = direction.clone().normalize().lerp(UP, 0.45).normalize();
+    const spin = rng() * Math.PI * 2;
+    for (let leaf = 0; leaf < tuft; leaf += 1) {
+      const leafDirection = tuft > 1
+        ? branchDirection(raised, spin + leaf * (Math.PI * 2 / tuft), 0.5 + rng() * 0.35, 0)
+        : raised;
+      limb.foliage.push({
+        position: endpoint.clone(),
+        direction: leafDirection,
+        variant: Math.floor(rng() * 6),
+        scale: treeScale * (0.36 + rng() * 0.22),
+        pitch: (rng() * 2 - 1) * 0.18,
+        yaw: rng() * Math.PI * 2,
+        roll: (rng() * 2 - 1) * 0.28,
+        tone,
+      });
+    }
   };
 
-  const crownHosts = [trunk, ...scaffolds, ...branches];
-  for (const limb of crownHosts) {
-    const twigCount = limb.role === 'trunk'
-      ? 3 + Math.floor(rng() * 3)
-      : limb.role === 'limb'
-        ? 5 + Math.floor(rng() * 3)
-        : 3 + Math.floor(rng() * 3);
-    for (let index = 0; index < twigCount; index += 1) {
-      const baseT = limb.role === 'trunk' ? 0.68 : limb.role === 'limb' ? 0.4 : 0.3;
-      const attachT = clamp(baseT + (index + rng() * 0.65) / twigCount * (0.97 - baseT), baseT, 0.97);
-      const host = samplePath(limb.points, attachT);
-      const azimuth = crownBias + limb.variant * 0.61 + index * 2.31 + rng() * 0.75;
-      const direction = branchDirection(
-        host.tangent,
-        azimuth,
-        0.48 + rng() * 0.5,
-        0.06 + rng() * 0.16,
+  // Shoots are short, stout and sympodial: each season's growth ends and a
+  // couple of new shoots break from just behind the tip, so branch ends read
+  // as knobbly clustered fists rather than tapering whips.
+  const addShoot = (limb, host, direction, { length, radius, azimuth, strength }) => {
+    const start = host.point.clone().addScaledVector(direction, -radius * 0.9);
+    const shootPoints = makeCrookedPath({
+      start,
+      direction,
+      length,
+      steps: 3,
+      phase: azimuth,
+      bend: 0.16 + rng() * 0.14,
+      lift: 0.12 + rng() * 0.1,
+      rng,
+    });
+    limb.twigs.push({
+      points: shootPoints,
+      radiusStart: radius,
+      radiusEnd: Math.max(0.004, radius * (0.48 + rng() * 0.12)),
+      variant: Math.floor(rng() * 8),
+      order: 1,
+    });
+    const shootTip = samplePath(shootPoints, 1);
+    addFoliage(limb, shootTip.point, shootTip.tangent, strength);
+    const forkCount = rng() < 0.7 ? 1 + (rng() < 0.3 ? 1 : 0) : 0;
+    for (let forkIndex = 0; forkIndex < forkCount; forkIndex += 1) {
+      const forkHost = samplePath(shootPoints, 0.72 + rng() * 0.16);
+      const forkDirection = branchDirection(
+        forkHost.tangent,
+        azimuth + 1.9 + forkIndex * 2.5 + rng(),
+        0.45 + rng() * 0.3,
+        0.14 + rng() * 0.12,
       );
-      const hostRadius = radiusAt(limb, attachT);
-      const twigRadius = Math.max(treeScale * 0.0055, hostRadius * (0.15 + rng() * 0.08));
-      const twigLength = height * (limb.role === 'trunk' ? 0.075 + rng() * 0.045 : 0.055 + rng() * 0.065);
-      const start = host.point.clone().addScaledVector(direction, -twigRadius * 0.95);
-      const twigPoints = makeCrookedPath({
-        start,
-        direction,
-        length: twigLength,
-        steps: 3 + Math.floor(rng() * 2),
-        phase: azimuth,
-        bend: 0.18 + rng() * 0.16,
-        lift: 0.05 + rng() * 0.09,
+      const forkRadius = radius * (0.55 + rng() * 0.12);
+      const forkPoints = makeCrookedPath({
+        start: forkHost.point.clone().addScaledVector(forkDirection, -forkRadius * 0.9),
+        direction: forkDirection,
+        length: length * (0.42 + rng() * 0.26),
+        steps: 3,
+        phase: azimuth + forkIndex,
+        bend: 0.16 + rng() * 0.12,
+        lift: 0.1 + rng() * 0.08,
         rng,
       });
-      const twig = {
-        points: twigPoints,
-        radiusStart: twigRadius,
-        radiusEnd: Math.max(0.0028, twigRadius * (0.2 + rng() * 0.13)),
+      limb.twigs.push({
+        points: forkPoints,
+        radiusStart: forkRadius,
+        radiusEnd: Math.max(0.0035, forkRadius * 0.5),
         variant: Math.floor(rng() * 8),
-        order: 1,
-      };
-      limb.twigs.push(twig);
-      const twigTangent = samplePath(twigPoints, 1).tangent;
-      addFoliage(limb, twigPoints[twigPoints.length - 1], twigTangent, limb.role === 'branch' ? 1.12 : 0.92);
+        order: 2,
+      });
+      const forkTip = samplePath(forkPoints, 1);
+      addFoliage(limb, forkTip.point, forkTip.tangent, strength * 0.9);
+    }
+  };
 
-      const forkCount = rng() < 0.72 ? 1 + (rng() < 0.32 ? 1 : 0) : 0;
-      for (let forkIndex = 0; forkIndex < forkCount; forkIndex += 1) {
-        const forkT = 0.46 + forkIndex * 0.2 + rng() * 0.12;
-        const forkHost = samplePath(twigPoints, forkT);
-        const forkDirection = branchDirection(
-          forkHost.tangent,
-          azimuth + 1.7 + forkIndex * 2.4 + rng(),
-          0.48 + rng() * 0.34,
-          0.04 + rng() * 0.1,
-        );
-        const forkRadius = twigRadius * (0.42 + rng() * 0.15);
-        const forkStart = forkHost.point.clone().addScaledVector(forkDirection, -forkRadius * 0.9);
-        const forkPoints = makeCrookedPath({
-          start: forkStart,
-          direction: forkDirection,
-          length: twigLength * (0.38 + rng() * 0.28),
-          steps: 3,
-          phase: azimuth + forkIndex,
-          bend: 0.19 + rng() * 0.14,
-          lift: 0.04 + rng() * 0.08,
-          rng,
-        });
-        limb.twigs.push({
-          points: forkPoints,
-          radiusStart: forkRadius,
-          radiusEnd: Math.max(0.0024, forkRadius * 0.22),
-          variant: Math.floor(rng() * 8),
-          order: 2,
-        });
-        const forkTangent = samplePath(forkPoints, 1).tangent;
-        addFoliage(limb, forkPoints[forkPoints.length - 1], forkTangent, 0.84);
-      }
+  for (const limb of [...scaffolds, ...branches]) {
+    const leader = limb.role === 'limb';
+    const lateralCount = leader ? 3 + Math.floor(rng() * 3) : 2 + Math.floor(rng() * 2);
+    for (let index = 0; index < lateralCount; index += 1) {
+      const attachT = clamp(0.45 + (index + rng() * 0.7) / lateralCount * 0.47, 0.45, 0.92);
+      const host = samplePath(limb.points, attachT);
+      const azimuth = crownBias + limb.variant * 0.61 + index * 2.31 + rng() * 0.75;
+      addShoot(limb, host, branchDirection(host.tangent, azimuth, 0.6 + rng() * 0.35, 0.22 + rng() * 0.16), {
+        length: height * (0.05 + rng() * 0.05),
+        radius: Math.max(treeScale * 0.008, radiusAt(limb, attachT) * (0.42 + rng() * 0.14)),
+        azimuth,
+        strength: leader ? 0.9 : 1.05,
+      });
+    }
+    const tip = samplePath(limb.points, 0.985);
+    const tipCount = 2 + (rng() < 0.45 ? 1 : 0);
+    const tipSpin = rng() * Math.PI * 2;
+    for (let index = 0; index < tipCount; index += 1) {
+      const azimuth = tipSpin + index * (Math.PI * 2 / tipCount) + rng() * 0.5;
+      addShoot(limb, tip, branchDirection(tip.tangent, azimuth, 0.3 + rng() * 0.3, 0.2), {
+        length: height * (0.045 + rng() * 0.045),
+        radius: Math.max(treeScale * 0.008, limb.radiusEnd * (0.82 + rng() * 0.12)),
+        azimuth,
+        strength: 1.15,
+      });
+    }
+  }
+
+  // Bursera resprouts readily from the bole. A few low shoots, drawn after
+  // the crown so they never reshape it, also put a twig within reach of
+  // Darwin's hammer: the crown starts above anything he can swing at.
+  const sproutCount = 1 + Math.floor(rng() * 2.4);
+  const sproutCeiling = Math.min(1.45, boleHeight * 0.82);
+  for (let index = 0; index < sproutCount; index += 1) {
+    const sproutY = Math.max(0.32, sproutCeiling - rng() * 0.8);
+    const attachT = clamp((sproutY + 0.14 * treeScale) / (boleHeight + 0.14 * treeScale), 0.12, 0.85);
+    const host = samplePath(trunk.points, attachT);
+    const azimuth = crownBias + Math.PI + index * 2.4 + (rng() * 2 - 1) * 0.6;
+    const outward = new THREE.Vector3(Math.cos(azimuth), 0, Math.sin(azimuth));
+    const elevation = 0.45 + rng() * 0.35;
+    const from = outward.clone().multiplyScalar(Math.cos(elevation)).addScaledVector(UP, Math.sin(elevation)).normalize();
+    const tipElevation = elevation + 0.3 + rng() * 0.25;
+    const to = outward.clone().multiplyScalar(Math.cos(tipElevation)).addScaledVector(UP, Math.sin(tipElevation)).normalize();
+    const radius = (0.016 + rng() * 0.01) * Math.sqrt(treeScale);
+    const start = host.point.clone()
+      .addScaledVector(outward, radiusAt(trunk, attachT) - radius * 1.2);
+    const sprout = addLimb({
+      parent: trunk,
+      points: makeArcPath({
+        start,
+        from,
+        to,
+        length: 0.42 + rng() * 0.38,
+        steps: 4,
+        wobble: 0.14 + rng() * 0.1,
+        phase: azimuth,
+        rng,
+      }),
+      radiusStart: radius,
+      radiusEnd: radius * 0.5,
+      generation: 2,
+      role: 'branch',
+    });
+    sprout.sprout = true;
+    const lateral = samplePath(sprout.points, 0.5 + rng() * 0.25);
+    addShoot(sprout, lateral, branchDirection(lateral.tangent, azimuth + 1.6, 0.6 + rng() * 0.3, 0.25), {
+      length: 0.12 + rng() * 0.1,
+      radius: radius * 0.6,
+      azimuth: azimuth + 1.6,
+      strength: 1.2,
+    });
+    const tip = samplePath(sprout.points, 0.985);
+    for (let shoot = 0; shoot < 2; shoot += 1) {
+      const shootAzimuth = azimuth + shoot * Math.PI + rng() * 0.5;
+      addShoot(sprout, tip, branchDirection(tip.tangent, shootAzimuth, 0.3 + rng() * 0.3, 0.2), {
+        length: 0.1 + rng() * 0.1,
+        radius: radius * 0.55,
+        azimuth: shootAzimuth,
+        strength: 1.25,
+      });
     }
   }
 
@@ -785,10 +992,126 @@ export function branchColliderSpec(branch) {
   };
 }
 
+// Toughness follows thickness: a pencil-thin shoot snaps in two blows, a
+// limb as thick as a forearm takes deliberate work.
 export function branchHitPoints(branch) {
   if (branch.role === 'trunk') return 999;
-  if (branch.role === 'limb') return 4;
-  return 2;
+  const radius = branch.radiusStart;
+  if (radius < 0.035) return 2;
+  if (radius < 0.07) return 3;
+  if (radius < 0.11) return 5;
+  return 7;
+}
+
+// Birdshot severs twigs and scars limbs. Damage per blast falls steeply with
+// thickness: a shoot goes in one blast, a wrist-thick branch in a few, and a
+// main limb shrugs off anything short of a long fusillade.
+export function branchShotDamageScale(branch) {
+  return clamp((0.04 / Math.max(0.005, branch.radiusStart)) ** 1.5, 0.05, 1.6);
+}
+
+// Fresh palo santo wood is pale cream; a snap leaves a ragged face with long
+// fibrous splinters pulled out of it. Built with +Y out of the break, at the
+// origin, then oriented by the caller.
+function createSplinterGeometry(radius, seed) {
+  const rng = makeRng(`palo-splinter:${seed}`);
+  const positions = [];
+  const colors = [];
+  const push = (point, shade) => {
+    positions.push(point[0], point[1], point[2]);
+    colors.push(shade[0], shade[1], shade[2]);
+  };
+  const face = [];
+  const rim = 10;
+  for (let index = 0; index < rim; index += 1) {
+    const angle = (index / rim) * Math.PI * 2;
+    const r = radius * (0.9 + rng() * 0.12);
+    face.push([Math.cos(angle) * r, radius * rng() * 0.3, Math.sin(angle) * r]);
+  }
+  const centre = [0, radius * 0.18, 0];
+  const faceShade = [0.8, 0.76, 0.68];
+  for (let index = 0; index < rim; index += 1) {
+    push(centre, faceShade);
+    push(face[(index + 1) % rim], [0.92, 0.89, 0.8]);
+    push(face[index], [0.92, 0.89, 0.8]);
+  }
+  const spikes = 11 + Math.floor(rng() * 7);
+  for (let index = 0; index < spikes; index += 1) {
+    const angle = rng() * Math.PI * 2;
+    const rho = radius * (0.2 + rng() * 0.72);
+    const width = radius * (0.07 + rng() * 0.1);
+    // Splinters near the bark tear out longest.
+    const length = radius * (0.25 + rng() * 0.95) * (0.5 + (rho / radius) * 0.75);
+    const radial = [Math.cos(angle), 0, Math.sin(angle)];
+    const tangent = [-Math.sin(angle), 0, Math.cos(angle)];
+    const base = [radial[0] * rho, radius * 0.1, radial[2] * rho];
+    const b0 = [base[0] + tangent[0] * width, base[1], base[2] + tangent[2] * width];
+    const b1 = [base[0] - tangent[0] * width, base[1], base[2] - tangent[2] * width];
+    const b2 = [base[0] - radial[0] * width * 0.6, base[1], base[2] - radial[2] * width * 0.6];
+    const lean = (rng() - 0.3) * 0.35 * length;
+    const twist = (rng() - 0.5) * width;
+    const tip = [
+      base[0] + radial[0] * lean + tangent[0] * twist,
+      base[1] + length,
+      base[2] + radial[2] * lean + tangent[2] * twist,
+    ];
+    const root = [0.82, 0.79, 0.72];
+    const point = [1, 0.98, 0.93];
+    for (const [a, b] of [[b0, b1], [b1, b2], [b2, b0]]) {
+      push(a, root);
+      push(b, root);
+      push(tip, point);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function orientSplinter(geometry, origin, direction) {
+  geometry.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, direction.clone().normalize()));
+  geometry.translate(origin.x, origin.y, origin.z);
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+// The stub a snapped limb leaves on its parent, in the parent's local frame:
+// the first couple of diameters of the limb's own path (its buried base plus a
+// short collar) ending in a splintered face.
+export function buildPaloSantoBreakStub(branch, toParentLocal, parentFrame) {
+  const total = Math.max(0.05, branch.pathLength);
+  const stubLength = Math.min(total * 0.4, branch.radiusStart * (2.1 + seededUnit(`palo-stub:${branch.id}`) * 0.6));
+  const tEnd = stubLength / total;
+  const points = [0, 0.34, 0.67, 1].map(step => toParentLocal(samplePath(branch.points, tEnd * step).point));
+  const end = samplePath(branch.points, tEnd);
+  const bark = createTubeGeometry({
+    points,
+    radiusStart: branch.radiusStart * 1.02,
+    radiusEnd: radiusAt(branch, tEnd) * 0.98,
+    variant: branch.variant,
+    radialSegments: 10,
+    lengthSegments: 4,
+    frame: parentFrame,
+  });
+  const tipLocal = toParentLocal(end.point);
+  const ahead = toParentLocal(end.point.clone().add(end.tangent)).sub(tipLocal);
+  const wood = orientSplinter(
+    createSplinterGeometry(radiusAt(branch, tEnd) * 0.98, `${branch.id}:stub`),
+    tipLocal,
+    ahead,
+  );
+  return { bark, wood };
+}
+
+// The torn end of the snapped limb itself, at its own origin, splinters
+// pointing back toward the tree.
+export function buildPaloSantoBreakEnd(branch, toBranchLocal) {
+  const origin = toBranchLocal(branch.points[0]);
+  const back = origin.clone().sub(toBranchLocal(branch.points[1])).normalize();
+  return orientSplinter(createSplinterGeometry(branch.radiusStart, `${branch.id}:end`), origin, back);
 }
 
 export function buildPaloSantoDressing({ seed, size = 1 }) {

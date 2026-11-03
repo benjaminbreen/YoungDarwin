@@ -1,0 +1,18 @@
+[
+  ["zone", "POST_SCRUB_RISE"],
+  ["wait", 2000],
+  ["expect", "(() => {const keys=new Set();window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name?.startsWith('Nature:')&&m.map?.image?.width>1&&m.map.colorSpace==='srgb'&&m.normalMap?.colorSpace==='')keys.add(m.name);});return ['Nature:palo-bark','Nature:palo-leaf-green','Nature:cactus-skin'].every(k=>keys.has(k));})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "W_HIGH"],
+  ["wait", 2000],
+  ["expect", "(() => {let ok=false;window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name==='Nature:humid-bark')ok ||= m.map.image.width===1024&&m.normalMap.image.width===512&&m.map.colorSpace==='srgb'&&m.normalMap.colorSpace==='';});return ok;})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "POST_SCRUB_RISE"],
+  ["wait", 1200],
+  ["expect", "api.renderAudit().ok"],
+  ["zone", "W_HIGH"],
+  ["wait", 2000],
+  ["expect", "(() => {let ok=false;window.__darwinScene.scene.traverse(o=>{const m=o.material;if(m?.name==='Nature:humid-bark')ok ||= m.map.image.width===1024;});return ok;})()"],
+  ["expect", "api.renderAudit().ok"],
+  ["errors"]
+]

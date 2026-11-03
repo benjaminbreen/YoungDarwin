@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useMemo, useRef } from 'react';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { useDeferredDisposal } from '../assets/useDeferredDisposal';
+import { loadNatureSurface, disposeCreatureResources } from '../../wildlife/natureTextures';
 
 const FINCH_VISUAL_VARIANTS = Object.freeze({
   mediumGround: Object.freeze({
@@ -1149,7 +1152,11 @@ function material(color, options = {}) {
   return new THREE.MeshStandardMaterial({
     color,
     map: options.map || null,
-    roughness: options.roughness ?? 0.92,
+    roughness: options.roughnessMap ? 1 : options.roughness ?? 0.92,
+    normalMap: options.normalMap || null,
+    normalScale: new THREE.Vector2(0.32, 0.32),
+    roughnessMap: options.roughnessMap || null,
+    name: options.name || '',
     metalness: 0,
     side: options.side ?? THREE.FrontSide,
     emissive: options.emissive || '#080604',
@@ -1169,6 +1176,115 @@ function material(color, options = {}) {
 const PRIMARY_LENGTHS = [0.26, 0.31, 0.36, 0.4, 0.42, 0.4, 0.35];
 const PRIMARY_COUNT = PRIMARY_LENGTHS.length;
 
+// Draw-call budget. Every bird on screen used to be ~46 meshes (each drawn
+// again into the shadow map), almost all of them a few hundred triangles.
+// Parts that never move relative to each other and share a material are baked
+// into one geometry; the primaries, which do move one by one, become a
+// single skinned mesh driven by the same feather groups the animation rotates.
+
+const _bakeMatrix = new THREE.Matrix4();
+const _bakeLocal = new THREE.Matrix4();
+const _bakeQuat = new THREE.Quaternion();
+const _bakeEuler = new THREE.Euler();
+
+function partMatrix({ position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1] }, target) {
+  _bakeQuat.setFromEuler(_bakeEuler.set(rotation[0], rotation[1], rotation[2]));
+  return target.compose(
+    new THREE.Vector3(...position),
+    _bakeQuat,
+    new THREE.Vector3(...(Array.isArray(scale) ? scale : [scale, scale, scale])),
+  );
+}
+
+// parts: [{ geometry, transforms: [outermost, ..., innermost] }]. Consumes the
+// part geometries.
+function bakeParts(parts) {
+  const baked = parts.map(({ geometry, transforms }) => {
+    _bakeMatrix.identity();
+    for (const transform of transforms) _bakeMatrix.multiply(partMatrix(transform, _bakeLocal));
+    return geometry.applyMatrix4(_bakeMatrix);
+  });
+  const merged = mergeGeometries(baked, false);
+  for (const geometry of baked) geometry.dispose();
+  return merged;
+}
+
+// One leg below the hip pivot: tarsus, three forward toes and the hind toe.
+function makeLegGeometry(side) {
+  return bakeParts([
+    { geometry: new THREE.CylinderGeometry(0.011, 0.013, 0.185, 8), transforms: [{ rotation: [0.1, 0, side * 0.06], position: [0, -0.082, 0] }] },
+    ...[0, -0.38, 0.38].map(toeAngle => ({
+      geometry: new THREE.CylinderGeometry(0.0045, 0.0065, 0.08, 6),
+      transforms: [{ position: [0, -0.171, 0.028], rotation: [Math.PI / 2 + 0.22, 0, toeAngle + side * 0.06] }],
+    })),
+    { geometry: new THREE.CylinderGeometry(0.0045, 0.006, 0.05, 6), transforms: [{ position: [0, -0.171, -0.02], rotation: [-Math.PI / 2 - 0.18, 0, 0] }] },
+  ]);
+}
+
+// Both eyes in head space, one geometry per material.
+function makeEyeGeometries(visual) {
+  const eyeGroup = side => ({
+    position: [side * 0.07 * visual.headScale[0], 0.028 * visual.headScale[1], 0.048 * visual.headScale[2]],
+    rotation: [0, side * 0.55, 0],
+  });
+  const bothSides = (makeGeometry, transform) => bakeParts([-1, 1].map(side => ({
+    geometry: makeGeometry(),
+    transforms: [eyeGroup(side), transform(side)],
+  })));
+  return {
+    eyeRing: bothSides(
+      () => new THREE.RingGeometry(visual.eyeRingInner || 0.02, visual.eyeRingOuter || 0.026, 24),
+      side => ({ rotation: [0, side * (Math.PI / 2), 0], position: [side * 0.013, 0, 0] }),
+    ),
+    eye: bothSides(
+      () => new THREE.SphereGeometry(1, 16, 12),
+      side => ({ scale: [0.021, 0.021, 0.017], position: [side * 0.004, 0, 0] }),
+    ),
+    eyeShine: bothSides(
+      () => new THREE.SphereGeometry(1, 8, 6),
+      side => ({ scale: [0.0055, 0.0055, 0.004], position: [side * 0.02, 0.007, 0.007] }),
+    ),
+  };
+}
+
+// All primaries in one geometry, each feather's vertices weighted fully to
+// bone i (its own feather group), still in that feather's local space.
+function makePrimaryFanGeometry(primaries) {
+  const parts = primaries.map((source, i) => {
+    const geometry = source.clone();
+    const count = geometry.attributes.position.count;
+    const skinIndex = new Uint16Array(count * 4);
+    const skinWeight = new Float32Array(count * 4);
+    for (let v = 0; v < count; v += 1) {
+      skinIndex[v * 4] = i;
+      skinWeight[v * 4] = 1;
+    }
+    geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
+    geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
+    return geometry;
+  });
+  const merged = mergeGeometries(parts, false);
+  for (const geometry of parts) geometry.dispose();
+  return merged;
+}
+
+// With identity bone inverses and bind matrix, three's attached-mode skinning
+// reduces to `featherGroup.matrixWorld * vertex`: each feather is drawn exactly
+// where its old mesh was.
+function bindPrimaryFan(mesh, bones) {
+  const skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
+  mesh.bind(skeleton, new THREE.Matrix4());
+  // Skinned bounds are computed from the current pose and then cached, and
+  // specimen bounds are measured right after mount, so pose the bones now.
+  // The cull sphere gets headroom for the fan opening in flight.
+  mesh.parent?.updateMatrixWorld(true);
+  skeleton.update();
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+  mesh.boundingSphere.radius += 0.12;
+  return skeleton;
+}
+
 // Both wings are built identically spanning +x and mirrored with a static
 // scale.x = -1 group, so the animation writes one set of Euler angles and the
 // mirror keeps them symmetric — no per-side sign bookkeeping. (The mirror
@@ -1178,6 +1294,17 @@ const PRIMARY_COUNT = PRIMARY_LENGTHS.length;
 // the wrist, each staggered slightly lower than the one inside it so the
 // stack reads from behind.
 function Wing({ side, shoulderRef, handRef, featherRefs, geometries, materials, visual }) {
+  const primaryFan = useMemo(() => {
+    const mesh = new THREE.SkinnedMesh(geometries.primaryFan, materials.primary);
+    mesh.castShadow = true;
+    return mesh;
+  }, [geometries.primaryFan, materials.primary]);
+  useLayoutEffect(() => {
+    const bones = featherRefs.current.slice(0, PRIMARY_COUNT);
+    if (bones.length < PRIMARY_COUNT || bones.some(bone => !bone)) return undefined;
+    const skeleton = bindPrimaryFan(primaryFan, bones);
+    return () => skeleton.dispose();
+  }, [primaryFan, featherRefs]);
   return (
     <group
       position={[side * 0.05, 0.372, 0.06]}
@@ -1202,15 +1329,15 @@ function Wing({ side, shoulderRef, handRef, featherRefs, geometries, materials, 
             rotation={[0, Math.PI / 2 + 0.24, 0]}
             position={[0.004, 0.002, -0.004]}
           />
+          {/* Feather groups are the fan's bones: empty, posed by the animation. */}
           {geometries.primaries.map((geometry, i) => (
             <group
               key={`primary-${i}`}
               ref={el => { featherRefs.current[i] = el; }}
               position={[0.04 + i * 0.009, -0.001 - i * 0.0035, -0.03 - i * 0.007]}
-            >
-              <mesh geometry={geometry} material={materials.primary} castShadow />
-            </group>
+            />
           ))}
+          <primitive object={primaryFan} />
         </group>
       </group>
     </group>
@@ -1237,95 +1364,104 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
   const leftOwlEyelid = useRef(null);
   const rightOwlEyelid = useRef(null);
 
-  const geometries = useMemo(() => ({
-    // Torso: one continuous loft — plump and compact, shallow-bellied. The
-    // last stations swell up into the nape so the head grows out of the body
-    // instead of sitting on it like a snowman.
-    body: makeLoftGeometry([
-      { z: -0.28, y: 0.35, hw: 0.012, up: 0.012, down: 0.01 },
-      { z: -0.235, y: 0.345, hw: 0.058, up: 0.05, down: 0.048 },
-      { z: -0.15, y: 0.335, hw: 0.105, up: 0.09, down: 0.096 },
-      { z: -0.04, y: 0.33, hw: 0.135, up: 0.108, down: 0.135 },
-      { z: 0.06, y: 0.33, hw: 0.135, up: 0.105, down: 0.145 },
-      { z: 0.14, y: 0.35, hw: 0.118, up: 0.092, down: 0.125 },
-      { z: 0.21, y: 0.395, hw: 0.098, up: 0.08, down: 0.1 },
-      { z: 0.26, y: 0.44, hw: 0.07, up: 0.06, down: 0.075 },
-    ]),
-    // Head: big and round — nearly the body's width; most of the charm.
-    // The rear stations stay wide so the crown is a smooth dome flowing into
-    // the nape, not a point that reads as a crest.
-    head: makeLoftGeometry([
-      { z: -0.09, y: -0.005, hw: 0.03, up: 0.024, down: 0.03 },
-      { z: -0.055, y: 0.005, hw: 0.068, up: 0.056, down: 0.062 },
-      { z: 0, y: 0.012, hw: 0.088, up: 0.075, down: 0.08 },
-      { z: 0.055, y: 0.006, hw: 0.078, up: 0.06, down: 0.075 },
-      { z: 0.1, y: -0.012, hw: 0.05, up: 0.034, down: 0.052 },
-      { z: 0.12, y: -0.02, hw: 0.03, up: 0.02, down: 0.033 },
-    ], { radialSegments: 24, lengthSegments: 30 }),
-    // Finch: a deep seed-cracking wedge. Mockingbird: a long, narrow bill
-    // whose centreline and lower mandible curve gently down toward the tip.
-    beak: makeLoftGeometry(visual.beakShape === 'raptor' ? [
-      { z: 0, y: 0.002, hw: 0.038, up: 0.034, down: 0.032 },
-      { z: 0.042, y: 0.002, hw: 0.03, up: 0.026, down: 0.03 },
-      { z: 0.078, y: -0.008, hw: 0.021, up: 0.02, down: 0.026 },
-      { z: 0.102, y: -0.029, hw: 0.012, up: 0.012, down: 0.019 },
-      { z: 0.108, y: -0.057, hw: 0.004, up: 0.005, down: 0.007 },
-    ] : visual.beakShape === 'decurved' ? [
-      { z: 0, y: -0.003, hw: 0.023, up: 0.024, down: 0.027 },
-      { z: 0.046, y: -0.006, hw: 0.018, up: 0.019, down: 0.021 },
-      { z: 0.09, y: -0.013, hw: 0.012, up: 0.013, down: 0.015 },
-      { z: 0.13, y: -0.026, hw: 0.006, up: 0.007, down: 0.009 },
-      { z: 0.155, y: -0.043, hw: 0.0025, up: 0.003, down: 0.004 },
-    ] : [
-      { z: 0, y: -0.004, hw: 0.038, up: 0.042, down: 0.046 },
-      { z: 0.028, y: -0.008, hw: 0.03, up: 0.032, down: 0.036 },
-      { z: 0.06, y: -0.016, hw: 0.018, up: 0.018, down: 0.022 },
-      { z: 0.088, y: -0.024, hw: 0.005, up: 0.005, down: 0.006 },
-    ], { radialSegments: 14, lengthSegments: 18 }),
-    armWing: makeWingShellGeometry({
-      span: 0.33, rootChord: 0.34, tipChord: 0.3, sweep: 0.05,
-      camber: 0.05, thickness: 0.05, arch: 0.03,
-      scallops: 7, scallopDepth: 0.022, splitUV: true,
-    }),
-    // Covert overlay: a shorter shell floated just above the arm wing's front
-    // half, so the top surface reads as stepped feather layers, not one sheet.
-    armCovert: makeWingShellGeometry({
-      span: 0.32, rootChord: 0.21, tipChord: 0.13, sweep: 0.05,
-      camber: 0.055, thickness: 0.02, arch: 0.03,
-      scallops: 8, scallopDepth: 0.014,
-    }),
-    // The hand shell is short — the wingtip itself belongs to the primaries.
-    handWing: makeWingShellGeometry({
-      span: 0.3, rootChord: 0.3, tipChord: 0.2, sweep: 0.14,
-      camber: 0.03, thickness: 0.028, arch: 0.012,
-      scallops: 5, scallopDepth: 0.02, splitUV: true,
-    }),
-    // Muscle-and-bone lofts hugging the leading edge (shoulder→wrist, plus a
-    // slimmer one along the hand). Built along +z and rotated to span +x.
-    // This mass is most of the difference between a bat membrane and a bird
-    // arm seen from behind.
-    armMass: makeLoftGeometry([
-      { z: -0.02, y: 0, hw: 0.034, up: 0.03, down: 0.026 },
-      { z: 0.09, y: 0.006, hw: 0.03, up: 0.024, down: 0.02 },
-      { z: 0.2, y: 0.008, hw: 0.024, up: 0.018, down: 0.015 },
-      { z: 0.3, y: 0.006, hw: 0.016, up: 0.012, down: 0.01 },
-    ], { radialSegments: 12, lengthSegments: 12 }),
-    handMass: makeLoftGeometry([
-      { z: -0.01, y: 0, hw: 0.016, up: 0.014, down: 0.012 },
-      { z: 0.08, y: 0.002, hw: 0.012, up: 0.01, down: 0.008 },
-      { z: 0.17, y: 0, hw: 0.007, up: 0.006, down: 0.005 },
-    ], { radialSegments: 10, lengthSegments: 10 }),
-    // Individual primary feathers: solid mini-shells that fan from the wrist.
-    primaries: PRIMARY_LENGTHS.map(len => makeWingShellGeometry({
-      span: len, rootChord: 0.075, tipChord: 0.06, sweep: 0.02,
-      camber: 0.01, thickness: 0.008, arch: 0.006,
-      spanSegments: 8, chordSegments: 4,
-    })),
-    tail: makeTailGeometry({
-      length: 0.27, rootHalfWidth: 0.05, tipHalfWidth: 0.105,
-      scallops: 6, scallopDepth: 0.045,
-    }),
-  }), [visual.beakShape]);
+  const geometries = useMemo(() => {
+    const built = {
+      // Torso: one continuous loft — plump and compact, shallow-bellied. The
+      // last stations swell up into the nape so the head grows out of the body
+      // instead of sitting on it like a snowman.
+      body: makeLoftGeometry([
+        { z: -0.28, y: 0.35, hw: 0.012, up: 0.012, down: 0.01 },
+        { z: -0.235, y: 0.345, hw: 0.058, up: 0.05, down: 0.048 },
+        { z: -0.15, y: 0.335, hw: 0.105, up: 0.09, down: 0.096 },
+        { z: -0.04, y: 0.33, hw: 0.135, up: 0.108, down: 0.135 },
+        { z: 0.06, y: 0.33, hw: 0.135, up: 0.105, down: 0.145 },
+        { z: 0.14, y: 0.35, hw: 0.118, up: 0.092, down: 0.125 },
+        { z: 0.21, y: 0.395, hw: 0.098, up: 0.08, down: 0.1 },
+        { z: 0.26, y: 0.44, hw: 0.07, up: 0.06, down: 0.075 },
+      ]),
+      // Head: big and round — nearly the body's width; most of the charm.
+      // The rear stations stay wide so the crown is a smooth dome flowing into
+      // the nape, not a point that reads as a crest.
+      head: makeLoftGeometry([
+        { z: -0.09, y: -0.005, hw: 0.03, up: 0.024, down: 0.03 },
+        { z: -0.055, y: 0.005, hw: 0.068, up: 0.056, down: 0.062 },
+        { z: 0, y: 0.012, hw: 0.088, up: 0.075, down: 0.08 },
+        { z: 0.055, y: 0.006, hw: 0.078, up: 0.06, down: 0.075 },
+        { z: 0.1, y: -0.012, hw: 0.05, up: 0.034, down: 0.052 },
+        { z: 0.12, y: -0.02, hw: 0.03, up: 0.02, down: 0.033 },
+      ], { radialSegments: 24, lengthSegments: 30 }),
+      // Finch: a deep seed-cracking wedge. Mockingbird: a long, narrow bill
+      // whose centreline and lower mandible curve gently down toward the tip.
+      beak: makeLoftGeometry(visual.beakShape === 'raptor' ? [
+        { z: 0, y: 0.002, hw: 0.038, up: 0.034, down: 0.032 },
+        { z: 0.042, y: 0.002, hw: 0.03, up: 0.026, down: 0.03 },
+        { z: 0.078, y: -0.008, hw: 0.021, up: 0.02, down: 0.026 },
+        { z: 0.102, y: -0.029, hw: 0.012, up: 0.012, down: 0.019 },
+        { z: 0.108, y: -0.057, hw: 0.004, up: 0.005, down: 0.007 },
+      ] : visual.beakShape === 'decurved' ? [
+        { z: 0, y: -0.003, hw: 0.023, up: 0.024, down: 0.027 },
+        { z: 0.046, y: -0.006, hw: 0.018, up: 0.019, down: 0.021 },
+        { z: 0.09, y: -0.013, hw: 0.012, up: 0.013, down: 0.015 },
+        { z: 0.13, y: -0.026, hw: 0.006, up: 0.007, down: 0.009 },
+        { z: 0.155, y: -0.043, hw: 0.0025, up: 0.003, down: 0.004 },
+      ] : [
+        { z: 0, y: -0.004, hw: 0.038, up: 0.042, down: 0.046 },
+        { z: 0.028, y: -0.008, hw: 0.03, up: 0.032, down: 0.036 },
+        { z: 0.06, y: -0.016, hw: 0.018, up: 0.018, down: 0.022 },
+        { z: 0.088, y: -0.024, hw: 0.005, up: 0.005, down: 0.006 },
+      ], { radialSegments: 14, lengthSegments: 18 }),
+      armWing: makeWingShellGeometry({
+        span: 0.33, rootChord: 0.34, tipChord: 0.3, sweep: 0.05,
+        camber: 0.05, thickness: 0.05, arch: 0.03,
+        scallops: 7, scallopDepth: 0.022, splitUV: true,
+      }),
+      // Covert overlay: a shorter shell floated just above the arm wing's front
+      // half, so the top surface reads as stepped feather layers, not one sheet.
+      armCovert: makeWingShellGeometry({
+        span: 0.32, rootChord: 0.21, tipChord: 0.13, sweep: 0.05,
+        camber: 0.055, thickness: 0.02, arch: 0.03,
+        scallops: 8, scallopDepth: 0.014,
+      }),
+      // The hand shell is short — the wingtip itself belongs to the primaries.
+      handWing: makeWingShellGeometry({
+        span: 0.3, rootChord: 0.3, tipChord: 0.2, sweep: 0.14,
+        camber: 0.03, thickness: 0.028, arch: 0.012,
+        scallops: 5, scallopDepth: 0.02, splitUV: true,
+      }),
+      // Muscle-and-bone lofts hugging the leading edge (shoulder→wrist, plus a
+      // slimmer one along the hand). Built along +z and rotated to span +x.
+      // This mass is most of the difference between a bat membrane and a bird
+      // arm seen from behind.
+      armMass: makeLoftGeometry([
+        { z: -0.02, y: 0, hw: 0.034, up: 0.03, down: 0.026 },
+        { z: 0.09, y: 0.006, hw: 0.03, up: 0.024, down: 0.02 },
+        { z: 0.2, y: 0.008, hw: 0.024, up: 0.018, down: 0.015 },
+        { z: 0.3, y: 0.006, hw: 0.016, up: 0.012, down: 0.01 },
+      ], { radialSegments: 12, lengthSegments: 12 }),
+      handMass: makeLoftGeometry([
+        { z: -0.01, y: 0, hw: 0.016, up: 0.014, down: 0.012 },
+        { z: 0.08, y: 0.002, hw: 0.012, up: 0.01, down: 0.008 },
+        { z: 0.17, y: 0, hw: 0.007, up: 0.006, down: 0.005 },
+      ], { radialSegments: 10, lengthSegments: 10 }),
+      // Individual primary feathers: solid mini-shells that fan from the wrist.
+      primaries: PRIMARY_LENGTHS.map(len => makeWingShellGeometry({
+        span: len, rootChord: 0.075, tipChord: 0.06, sweep: 0.02,
+        camber: 0.01, thickness: 0.008, arch: 0.006,
+        spanSegments: 8, chordSegments: 4,
+      })),
+      tail: makeTailGeometry({
+        length: 0.27, rootHalfWidth: 0.05, tipHalfWidth: 0.105,
+        scallops: 6, scallopDepth: 0.045,
+      }),
+    };
+    return {
+      ...built,
+      primaryFan: makePrimaryFanGeometry(built.primaries),
+      legLeft: makeLegGeometry(-1),
+      legRight: makeLegGeometry(1),
+      ...(visual.owlFace ? {} : makeEyeGeometries(visual)),
+    };
+  }, [visual]);
 
   const textures = useMemo(() => {
     const mockingbird = visual.plumage === 'floreanaMockingbird';
@@ -1333,7 +1469,7 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     const hawk = visual.plumage === 'galapagosHawk';
     const owl = visual.plumage === 'galapagosShortEaredOwl';
     const rng = mulberry32(owl ? 18351002 : hawk ? 18351001 : dove ? 18350924 : mockingbird ? 1835 : 1859);
-    return {
+    const painted = {
       // Dusty gray-brown, heavily mottled — the streaky female medium ground
       // finch. Wider value spread than reads right up close: Floreana's fog
       // compresses values hard, so the zones need room to survive it.
@@ -1381,19 +1517,33 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
       tail: paintTailTexture(rng, visual.plumage),
       beak: paintBeakTexture(visual.plumage),
     };
+    if (visual.plumage === 'groundFinch') {
+      for (const key of ['body', 'head', 'armWing', 'handWing', 'covert', 'primary', 'tail']) {
+        const surface = loadNatureSurface(`finch-${key}`, painted[key]);
+        painted[`${key}Fallback`] = painted[key];
+        painted[key] = surface.map;
+        painted[`${key}Normal`] = surface.normalMap;
+        painted[`${key}Roughness`] = surface.roughnessMap;
+      }
+    }
+    return painted;
   }, [visual.plumage]);
+  const plumage = key => ({
+    map: textures[key], normalMap: textures[`${key}Normal`], roughnessMap: textures[`${key}Roughness`],
+    name: textures[`${key}Normal`] ? `Nature:finch-${key}` : '',
+  });
 
   const materials = useMemo(() => ({
-    body: material(visual.bodyTint, { map: textures.body, roughness: 0.95 }),
-    head: material(visual.headTint, { map: textures.head, roughness: 0.94 }),
+    body: material(visual.bodyTint, { ...plumage('body'), roughness: 0.95 }),
+    head: material(visual.headTint, { ...plumage('head'), roughness: 0.94 }),
     // Wing tops get a touch less roughness than the body: flight feathers
     // have a faint sheen that down never does.
-    armWing: material(visual.wingTint, { map: textures.armWing, side: THREE.DoubleSide, roughness: 0.84 }),
-    handWing: material(visual.wingTint, { map: textures.handWing, side: THREE.DoubleSide, roughness: 0.84 }),
-    covert: material(visual.wingTint, { map: textures.covert, side: THREE.DoubleSide, roughness: 0.86 }),
-    primary: material(visual.wingTint, { map: textures.primary, side: THREE.DoubleSide, roughness: 0.86 }),
+    armWing: material(visual.wingTint, { ...plumage('armWing'), side: THREE.DoubleSide, roughness: 0.84 }),
+    handWing: material(visual.wingTint, { ...plumage('handWing'), side: THREE.DoubleSide, roughness: 0.84 }),
+    covert: material(visual.wingTint, { ...plumage('covert'), side: THREE.DoubleSide, roughness: 0.86 }),
+    primary: material(visual.wingTint, { ...plumage('primary'), side: THREE.DoubleSide, roughness: 0.86 }),
     armMass: material(visual.armMassTint || '#655843', { side: THREE.DoubleSide, roughness: 0.92 }),
-    tail: material(visual.tailTint, { map: textures.tail, side: THREE.DoubleSide, roughness: 0.85 }),
+    tail: material(visual.tailTint, { ...plumage('tail'), side: THREE.DoubleSide, roughness: 0.85 }),
     beak: material(visual.beakTint, { map: textures.beak, roughness: 0.45, envMapIntensity: 0.5 }),
     cere: material(visual.cereTint || '#b7892b', { roughness: 0.72 }),
     eye: material('#0a0705', { roughness: 0.25, emissive: '#020202', emissiveIntensity: 0.04, envMapIntensity: 0.8 }),
@@ -1406,6 +1556,9 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
     thigh: material(visual.thighTint || '#b6a687', { roughness: 0.95 }),
     leg: material(visual.legTint || '#5a4f42', { roughness: 0.72 }),
   }), [textures, visual]);
+
+  const resources = useMemo(() => ({ geometries, textures, materials }), [geometries, textures, materials]);
+  useDeferredDisposal(resources, disposeCreatureResources);
 
   const anim = useRef({
     flapPhase: 0,
@@ -1835,30 +1988,13 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
           ) : null}
           {/* Eyes: large, dark, set high on the head sides, with a fixed
               catchlight — the catchlight is most of the life in the face. */}
-          {!visual.owlFace ? [-1, 1].map(side => (
-            <group
-              key={`eye-${side}`}
-              position={[
-                side * 0.07 * visual.headScale[0],
-                0.028 * visual.headScale[1],
-                0.048 * visual.headScale[2],
-              ]}
-              rotation={[0, side * 0.55, 0]}
-            >
-              <mesh rotation={[0, side * (Math.PI / 2), 0]} position={[side * 0.013, 0, 0]}>
-                <ringGeometry args={[visual.eyeRingInner || 0.02, visual.eyeRingOuter || 0.026, 24]} />
-                <primitive object={materials.eyeRing} attach="material" />
-              </mesh>
-              <mesh scale={[0.021, 0.021, 0.017]} position={[side * 0.004, 0, 0]}>
-                <sphereGeometry args={[1, 16, 12]} />
-                <primitive object={materials.eye} attach="material" />
-              </mesh>
-              <mesh scale={[0.0055, 0.0055, 0.004]} position={[side * 0.02, 0.007, 0.007]}>
-                <sphereGeometry args={[1, 8, 6]} />
-                <primitive object={materials.eyeShine} attach="material" />
-              </mesh>
-            </group>
-          )) : null}
+          {!visual.owlFace ? (
+            <>
+              <mesh geometry={geometries.eyeRing} material={materials.eyeRing} />
+              <mesh geometry={geometries.eye} material={materials.eye} />
+              <mesh geometry={geometries.eyeShine} material={materials.eyeShine} />
+            </>
+          ) : null}
         </group>
         <group ref={legs} position={visual.legPosition} scale={visual.legScale}>
           {[-1, 1].map(side => (
@@ -1877,21 +2013,8 @@ export function ProceduralFinchPlayer({ motionRef, variant = 'mediumGround' }) {
                 <sphereGeometry args={[1, 14, 10]} />
                 <primitive object={materials.thigh} attach="material" />
               </mesh>
-              <mesh castShadow rotation={[0.1, 0, side * 0.06]} position={[0, -0.082, 0]}>
-                <cylinderGeometry args={[0.011, 0.013, 0.185, 8]} />
-                <primitive object={materials.leg} attach="material" />
-              </mesh>
-              {/* Toes slope from the ankle down to the ground. */}
-              {[0, -0.38, 0.38].map((toeAngle, index) => (
-                <mesh key={`toe-${index}`} castShadow position={[0, -0.171, 0.028]} rotation={[Math.PI / 2 + 0.22, 0, toeAngle + side * 0.06]}>
-                  <cylinderGeometry args={[0.0045, 0.0065, 0.08, 6]} />
-                  <primitive object={materials.leg} attach="material" />
-                </mesh>
-              ))}
-              <mesh castShadow position={[0, -0.171, -0.02]} rotation={[-Math.PI / 2 - 0.18, 0, 0]}>
-                <cylinderGeometry args={[0.0045, 0.006, 0.05, 6]} />
-                <primitive object={materials.leg} attach="material" />
-              </mesh>
+              {/* Tarsus plus toes sloping from the ankle down to the ground. */}
+              <mesh castShadow geometry={side < 0 ? geometries.legLeft : geometries.legRight} material={materials.leg} />
             </group>
           ))}
         </group>

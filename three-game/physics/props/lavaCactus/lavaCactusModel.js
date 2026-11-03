@@ -6,6 +6,7 @@
 // body, generated as pieces rather than a single mesh.
 
 import * as THREE from 'three';
+import { applyNatureSurface } from '../../../wildlife/natureTextures';
 import { makeRng, pushSpike, seededUnit } from '../breakablePlant/plantGeoUtils';
 
 // --- Visual tuning knobs ---------------------------------------------------
@@ -159,7 +160,7 @@ export function getColumnSpineGeometry(variantIndex = 0) {
 let materialsCache = null;
 export function getLavaCactusMaterials() {
   if (materialsCache) return materialsCache;
-  materialsCache = {
+  const materials = {
     columnsYoung: COLUMN_TINTS_YOUNG.map(tint => new THREE.MeshStandardMaterial({
       color: tint,
       roughness: COLUMN_ROUGHNESS_YOUNG,
@@ -206,7 +207,11 @@ export function getLavaCactusMaterials() {
       flatShading: true,
     }),
   };
-  return materialsCache;
+  if (typeof window !== 'undefined') {
+    [...materials.columnsYoung, ...materials.columnsOld].forEach(material => applyNatureSurface(material, 'cactus-skin', null, { repeat: true, fallback: '#ffffff' }));
+    materialsCache = materials;
+  }
+  return materials;
 }
 
 // --- Plant graph builder ----------------------------------------------------

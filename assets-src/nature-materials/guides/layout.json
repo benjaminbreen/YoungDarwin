@@ -1,0 +1,72 @@
+[
+  {
+    "file": "assets-src/nature-materials/guides/finch-0.png",
+    "w": 512,
+    "h": 512,
+    "bump": false,
+    "vertices": 1217
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-1.png",
+    "w": 512,
+    "h": 512,
+    "bump": false,
+    "vertices": 300
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-2.png",
+    "w": 256,
+    "h": 256,
+    "bump": false,
+    "vertices": 300
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-3.png",
+    "w": 512,
+    "h": 512,
+    "bump": false,
+    "vertices": 300
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-4.png",
+    "w": 128,
+    "h": 64,
+    "bump": false,
+    "vertices": 90
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-5.png",
+    "w": 256,
+    "h": 256,
+    "bump": false,
+    "vertices": 198
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-6.png",
+    "w": 256,
+    "h": 256,
+    "bump": false,
+    "vertices": 777
+  },
+  {
+    "file": "assets-src/nature-materials/guides/finch-7.png",
+    "w": 64,
+    "h": 8,
+    "bump": false,
+    "vertices": 287
+  },
+  {
+    "file": "assets-src/nature-materials/guides/tortoise-0.png",
+    "w": 768,
+    "h": 768,
+    "bump": true,
+    "vertices": 7685
+  },
+  {
+    "file": "assets-src/nature-materials/guides/tortoise-1.png",
+    "w": 512,
+    "h": 512,
+    "bump": true,
+    "vertices": 1225
+  }
+]

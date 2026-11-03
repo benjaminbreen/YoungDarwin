@@ -3,6 +3,9 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useDeferredDisposal } from '../assets/useDeferredDisposal';
+import { loadNatureSurface, disposeCreatureResources } from '../../wildlife/natureTextures';
+import { mapShellUvsByMeridian } from '../../wildlife/tortoiseShellUvs';
 
 const LEG_CONFIGS = [
   { key: 'front-left', side: -1, fore: true, x: -0.48, z: 0.48, phase: 0 },
@@ -272,7 +275,7 @@ function createShellGeometry() {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
-  return geometry;
+  return mapShellUvsByMeridian(geometry, RING_COUNT, RADIAL_SEGMENTS);
 }
 
 function createFootGeometry({ fore }) {
@@ -626,72 +629,85 @@ export function ProceduralTortoisePlayer({ motionRef }) {
     rearLowerLeg: createLowerLegGeometry({ fore: false }),
   }), []);
 
-  const textures = useMemo(() => ({
-    shellAlbedo: createShellAlbedoTexture(),
-    shellBump: createShellBumpTexture(),
-    skinAlbedo: createSkinTexture(),
-    skinBump: createSkinBumpTexture(),
-  }), []);
+  const textures = useMemo(() => {
+    const fallbackShell = createShellAlbedoTexture();
+    const fallbackSkin = createSkinTexture();
+    const shell = loadNatureSurface('tortoise-shell', fallbackShell);
+    const skin = loadNatureSurface('tortoise-skin', fallbackSkin, { repeat: true });
+    return {
+      fallbackShell, fallbackSkin,
+      shellAlbedo: shell.map, shellNormal: shell.normalMap, shellRoughness: shell.roughnessMap,
+      skinAlbedo: skin.map, skinNormal: skin.normalMap, skinRoughness: skin.roughnessMap,
+    };
+  }, []);
 
   const materials = useMemo(() => ({
-	    shell: new THREE.MeshPhysicalMaterial({
-	      map: textures.shellAlbedo,
-	      bumpMap: textures.shellBump,
-	      bumpScale: 0.038,
-	      color: '#b9aa7d',
-	      roughness: 0.61,
-	      metalness: 0,
-	      clearcoat: 0.3,
-	      clearcoatRoughness: 0.8,
-	      envMapIntensity: 0.4,
-	    }),
-	    shellEdge: new THREE.MeshPhysicalMaterial({
-	      color: '#28271f',
-	      roughness: 0.72,
-	      metalness: 0,
-	      clearcoat: 0.18,
-	      clearcoatRoughness: 0.84,
-	      envMapIntensity: 0.25,
-	    }),
+        shell: new THREE.MeshPhysicalMaterial({
+          map: textures.shellAlbedo,
+          normalMap: textures.shellNormal,
+          normalScale: new THREE.Vector2(0.65, 0.65),
+          roughnessMap: textures.shellRoughness,
+          name: 'Nature:tortoise-shell',
+          color: '#ffffff',
+          roughness: 1,
+          metalness: 0,
+          clearcoat: 0.05,
+          clearcoatRoughness: 0.8,
+          envMapIntensity: 0.4,
+        }),
+        shellEdge: new THREE.MeshPhysicalMaterial({
+          color: '#28271f',
+          roughness: 0.72,
+          metalness: 0,
+          clearcoat: 0.18,
+          clearcoatRoughness: 0.84,
+          envMapIntensity: 0.25,
+        }),
     skin: new THREE.MeshStandardMaterial({
-	      map: textures.skinAlbedo,
-	      bumpMap: textures.skinBump,
-	      bumpScale: 0.029,
-	      color: '#968c6b',
-	      roughness: 0.86,
-	      metalness: 0,
-	      envMapIntensity: 0.18,
-	    }),
-	    skinDark: new THREE.MeshStandardMaterial({
-	      map: textures.skinAlbedo,
-	      bumpMap: textures.skinBump,
-	      bumpScale: 0.024,
-	      color: '#5f5741',
-	      roughness: 0.9,
-	      metalness: 0,
-	      envMapIntensity: 0.12,
-	    }),
-	    skinLight: new THREE.MeshStandardMaterial({
-	      map: textures.skinAlbedo,
-	      bumpMap: textures.skinBump,
-	      bumpScale: 0.018,
-	      color: '#aca07a',
-	      roughness: 0.84,
-	      metalness: 0,
-	      envMapIntensity: 0.15,
-	    }),
-	    scaleNodule: new THREE.MeshStandardMaterial({
-	      color: '#4e4635',
-	      roughness: 0.92,
-	      metalness: 0,
-	      envMapIntensity: 0.05,
-	    }),
-	    plastron: new THREE.MeshStandardMaterial({
-	      color: '#a99870',
-	      roughness: 0.74,
-	      metalness: 0,
-	      envMapIntensity: 0.18,
-	    }),
+          map: textures.skinAlbedo,
+          normalMap: textures.skinNormal,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          roughnessMap: textures.skinRoughness,
+          name: 'Nature:tortoise-skin',
+          color: '#ffffff',
+          roughness: 1,
+          metalness: 0,
+          envMapIntensity: 0.18,
+        }),
+        skinDark: new THREE.MeshStandardMaterial({
+          map: textures.skinAlbedo,
+          normalMap: textures.skinNormal,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          roughnessMap: textures.skinRoughness,
+          name: 'Nature:tortoise-skin',
+          color: '#aca49a',
+          roughness: 1,
+          metalness: 0,
+          envMapIntensity: 0.12,
+        }),
+        skinLight: new THREE.MeshStandardMaterial({
+          map: textures.skinAlbedo,
+          normalMap: textures.skinNormal,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          roughnessMap: textures.skinRoughness,
+          name: 'Nature:tortoise-skin',
+          color: '#e2dacc',
+          roughness: 1,
+          metalness: 0,
+          envMapIntensity: 0.15,
+        }),
+        scaleNodule: new THREE.MeshStandardMaterial({
+          color: '#4e4635',
+          roughness: 0.92,
+          metalness: 0,
+          envMapIntensity: 0.05,
+        }),
+        plastron: new THREE.MeshStandardMaterial({
+          color: '#a99870',
+          roughness: 0.74,
+          metalness: 0,
+          envMapIntensity: 0.18,
+        }),
     eye: new THREE.MeshPhysicalMaterial({
       color: '#050403',
       roughness: 0.22,
@@ -700,24 +716,27 @@ export function ProceduralTortoisePlayer({ motionRef }) {
       envMapIntensity: 0.58,
     }),
     eyeGlint: new THREE.MeshBasicMaterial({ color: '#fff2bf' }),
-	    claw: new THREE.MeshStandardMaterial({
-	      color: '#1c1914',
-	      roughness: 0.54,
-	      metalness: 0.02,
-	      envMapIntensity: 0.18,
-	    }),
-	    beak: new THREE.MeshStandardMaterial({
-	      color: '#28231b',
-	      roughness: 0.68,
-	      metalness: 0,
-	      envMapIntensity: 0.16,
-	    }),
+        claw: new THREE.MeshStandardMaterial({
+          color: '#1c1914',
+          roughness: 0.54,
+          metalness: 0.02,
+          envMapIntensity: 0.18,
+        }),
+        beak: new THREE.MeshStandardMaterial({
+          color: '#28231b',
+          roughness: 0.68,
+          metalness: 0,
+          envMapIntensity: 0.16,
+        }),
     dropping: new THREE.MeshStandardMaterial({
       color: '#2e2518',
       roughness: 0.96,
       metalness: 0,
     }),
   }), [textures]);
+
+  const resources = useMemo(() => ({ geometry, textures, materials }), [geometry, textures, materials]);
+  useDeferredDisposal(resources, disposeCreatureResources);
 
   useFrame(({ clock }, delta) => {
     const root = rootRef.current;

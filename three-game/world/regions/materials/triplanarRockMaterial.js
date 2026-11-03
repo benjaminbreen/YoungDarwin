@@ -78,9 +78,17 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         rockDataZ = texture2D(uRockNrh, rockUvZ);
       `)
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
+        ${profile.albedoScale !== undefined ? `diffuseColor.rgb *= ${profile.albedoScale.toFixed(3)};` : ''}
         diffuseColor.rgb = mix(diffuseColor.rgb, uRockDustColor, vRockDust * uRockDustStrength);
       `)
-      .replace('#include <roughnessmap_fragment>', /* glsl */`
+      .replace('#include <roughnessmap_fragment>', profile.roughnessMode === 'multiply'
+        // Roughness map applied as three's roughnessMap does (a multiply), so
+        // the map's glossy texels stay glossy: the moving glints of fresh lava.
+        ? /* glsl */`
+        float roughnessFactor = ${profile.roughness.toFixed(3)}
+          * dot(vec3(rockDataX.b, rockDataY.b, rockDataZ.b), rockBlend);
+      `
+        : /* glsl */`
         float roughnessFactor = mix(${(profile.roughness - 0.12).toFixed(3)}, ${Math.min(0.995, profile.roughness + 0.04).toFixed(3)},
           dot(vec3(rockDataX.b, rockDataY.b, rockDataZ.b), rockBlend));
       `)
@@ -96,6 +104,6 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         normal = normalize(normal + mat3(viewMatrix) * vRockOrientation * rockDetail * ${profile.normalScale.toFixed(3)});
       `);
   };
-  material.customProgramCacheKey = () => `triplanar-rock-v1:${profile.textureKey}:${profile.textureScale ?? 0.8}:${profile.normalScale}:${profile.roughness}`;
+  material.customProgramCacheKey = () => `triplanar-rock-v1:${profile.textureKey}:${profile.textureScale ?? 0.8}:${profile.normalScale}:${profile.roughness}:${profile.albedoScale ?? 1}:${profile.roughnessMode ?? 'band'}`;
   return material;
 }

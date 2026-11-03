@@ -16,7 +16,10 @@ import { getPaloSantoSites, PALO_SANTO_SITES } from './paloSantoSites';
 import {
   branchColliderSpec,
   branchHitPoints,
+  branchShotDamageScale,
   buildPaloSanto,
+  buildPaloSantoBreakEnd,
+  buildPaloSantoBreakStub,
   buildPaloSantoDressing,
   buildPaloSantoFoliageGeometry,
   buildPaloSantoLimbGeometry,
@@ -26,6 +29,16 @@ import {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+// Break wounds are only ever needed for the few limbs actually snapped, so
+// their geometry is built on first use.
+function lazy(build) {
+  let value = null;
+  return () => {
+    if (!value) value = build();
+    return value;
+  };
+}
+
 function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
   const pieces = [];
   for (const site of sites) {
@@ -33,6 +46,7 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
     const groundY = movementTerrainHeight(site.x, site.z, zoneId);
     const siteQuat = new THREE.Quaternion().setFromAxisAngle(UP, site.yaw || 0);
     const keyFor = localId => `${zoneId}:palo-santo:${site.id}:${localId}`;
+    const piecesByBranch = new Map();
     for (const branch of tree.segments) {
       const localBase = branch.position.clone().applyQuaternion(siteQuat);
       const quaternion = siteQuat.clone().multiply(branch.quaternion);
@@ -51,24 +65,47 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
       const toBranchLocal = point => point.clone()
         .sub(branch.position)
         .applyQuaternion(inverseBranchQuat);
-      const visualGeometry = buildPaloSantoLimbGeometry({
+      const localLimb = {
         points: branch.points.map(toBranchLocal),
         radiusStart: branch.radiusStart,
         radiusEnd: branch.radiusEnd,
         role: branch.role,
         variant: branch.variant,
-      }, branch.twigs.map(twig => ({
+        tipRound: branch.tipRound,
+        // Maps limb-local geometry back to tree space for bark shading.
+        frame: { position: branch.position, quaternion: branch.quaternion },
+      };
+      const localTwigs = branch.twigs.map(twig => ({
         ...twig,
         points: twig.points.map(toBranchLocal),
-      })));
-      const foliageGeometry = buildPaloSantoFoliageGeometry(branch.foliage.map(cluster => ({
+      }));
+      const localFoliage = branch.foliage.map(cluster => ({
         ...cluster,
         position: toBranchLocal(cluster.position).toArray(),
         direction: cluster.direction.clone().applyQuaternion(inverseBranchQuat).normalize().toArray(),
-      })));
+      }));
+      const visualGeometry = buildPaloSantoLimbGeometry(localLimb, localTwigs);
+      const foliageGeometry = buildPaloSantoFoliageGeometry(localFoliage);
+      // Lighter twin for the merged dormant LOD (every tree but the active one).
+      const dormantVisualGeometry = buildPaloSantoLimbGeometry(localLimb, localTwigs, { lod: true });
+      const dormantFoliageGeometry = buildPaloSantoFoliageGeometry(localFoliage, { lod: true });
       const highestPointY = [...branch.points, ...branch.twigs.flatMap(twig => twig.points)]
         .reduce((highest, point) => Math.max(highest, point.y), branch.position.y);
-      pieces.push({
+      const parentBranch = branch.parentId
+        ? tree.segments.find(candidate => candidate.id === branch.parentId)
+        : null;
+      if (parentBranch) {
+        const inverseParentQuat = parentBranch.quaternion.clone().invert();
+        piecesByBranch.get(parentBranch.id)?.childStubs.push({
+          key: keyFor(branch.id),
+          get: lazy(() => buildPaloSantoBreakStub(
+            branch,
+            point => point.clone().sub(parentBranch.position).applyQuaternion(inverseParentQuat),
+            { position: parentBranch.position, quaternion: parentBranch.quaternion },
+          )),
+        });
+      }
+      const piece = {
         key: keyFor(branch.id),
         parentKey: branch.parentId ? keyFor(branch.parentId) : null,
         type: branch.role,
@@ -102,6 +139,8 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
         windAmp: 0,
         visualGeometry,
         foliageGeometry,
+        dormantVisualGeometry,
+        dormantFoliageGeometry,
         barkIndex: branch.barkIndex,
         specimenId: 'palosantotwig',
         sampleLabel: 'palo santo twig',
@@ -115,10 +154,39 @@ function buildZonePieces(zoneId, sites = getPaloSantoSites(zoneId)) {
         },
         educationalNote: 'Palo santo sheds its leaves through the long dry season; its aromatic wood stores resin beneath pale mottled bark.',
         tone: branch.variant / 8,
-      });
+        shotDamageScale: trunk ? 0 : branchShotDamageScale(branch),
+        breakEnd: trunk ? null : lazy(() => buildPaloSantoBreakEnd(branch, toBranchLocal)),
+        childStubs: [],
+      };
+      piecesByBranch.set(branch.id, piece);
+      pieces.push(piece);
     }
   }
   return pieces;
+}
+
+// The splintered end of a limb that has snapped off, and the torn stub it
+// leaves on its parent. Pieces still welded to a fallen limb show neither.
+function renderBreakDetail(piece, { released, isBrokenOff }) {
+  const stubs = piece.childStubs.filter(stub => isBrokenOff(stub.key));
+  const showEnd = released && piece.breakEnd && isBrokenOff(piece.key);
+  if (!stubs.length && !showEnd) return null;
+  const materials = getPaloSantoMaterials();
+  const bark = materials.bark[(piece.barkIndex || 0) % materials.bark.length];
+  return (
+    <>
+      {showEnd && <mesh castShadow geometry={piece.breakEnd()} material={materials.wood} />}
+      {stubs.map(stub => {
+        const geometry = stub.get();
+        return (
+          <React.Fragment key={stub.key}>
+            <mesh castShadow receiveShadow geometry={geometry.bark} material={bark} />
+            <mesh castShadow geometry={geometry.wood} material={materials.wood} />
+          </React.Fragment>
+        );
+      })}
+    </>
+  );
 }
 
 // Surface roots for every site, merged into one static mesh per bark tint —
@@ -223,37 +291,38 @@ function renderPiece(piece) {
 function dormantVisualParts(piece) {
   const materials = getPaloSantoMaterials();
   const matrix = composePlantPartMatrix(piece);
+  const foliage = piece.dormantFoliageGeometry || piece.foliageGeometry;
   const parts = [{
-    geometry: piece.visualGeometry,
+    geometry: piece.dormantVisualGeometry || piece.visualGeometry,
     material: materials.bark[(piece.barkIndex || 0) % materials.bark.length],
     matrix,
     castShadow: true,
     receiveShadow: true,
   }];
-  if (piece.foliageGeometry?.stems) {
+  if (foliage?.stems) {
     parts.push({
-      geometry: piece.foliageGeometry.stems,
+      geometry: foliage.stems,
       material: materials.leafStems,
       matrix,
     });
   }
-  if (piece.foliageGeometry?.greenLeaves) {
+  if (foliage?.greenLeaves) {
     parts.push({
-      geometry: piece.foliageGeometry.greenLeaves,
+      geometry: foliage.greenLeaves,
       material: materials.leaves,
       matrix,
     });
   }
-  if (piece.foliageGeometry?.oliveLeaves) {
+  if (foliage?.oliveLeaves) {
     parts.push({
-      geometry: piece.foliageGeometry.oliveLeaves,
+      geometry: foliage.oliveLeaves,
       material: materials.oliveLeaves,
       matrix,
     });
   }
-  if (piece.foliageGeometry?.dryLeaves) {
+  if (foliage?.dryLeaves) {
     parts.push({
-      geometry: piece.foliageGeometry.dryLeaves,
+      geometry: foliage.dryLeaves,
       material: materials.dryLeaves,
       matrix,
     });
@@ -269,6 +338,7 @@ const PALO_SANTO_SPEC = {
   buildZonePieces,
   ZoneDressing,
   renderPiece,
+  renderBreakDetail,
   dormantVisualParts,
   // Every limb's geometry is procedurally unique, so instanced batching
   // degenerates to one draw per part (227 uncullable calls in Post Office
@@ -303,6 +373,15 @@ const PALO_SANTO_SPEC = {
     contactBendBase: 0.062,
     contactBendSpeed: 0.009,
     windSway: 0.0025,
+    // Woody-tree breakage: the hammer finds a shoot before the trunk, heavy
+    // limbs drop rather than fly, shot damage follows thickness, a snapped
+    // limb hangs on its fibres for a moment, and a fallen limb stays whole.
+    hammerPreferBreakable: true,
+    releaseReferenceMass: 2.5,
+    shotgunSegmentTest: true,
+    breakHingeSeconds: 0.6,
+    breakHingeMaxAngle: 1.0,
+    weldReleasedSubtree: true,
   },
 };
 

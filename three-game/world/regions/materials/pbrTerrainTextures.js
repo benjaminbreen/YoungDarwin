@@ -16,6 +16,14 @@ export function setCompressedTextureProvider(provider) {
 const FLOREANA_PBR_BASE = '/assets/textures/world/floreana-pbr';
 
 export const FLOREANA_PBR_TEXTURES = {
+  // Additional stock option for dense, fractured lava interiors. Authored
+  // regions opt in explicitly; no existing material is replaced.
+  denseFracturedBasalt: {
+    albedo: '/assets/textures/world/coastal-basalt-preview/coastal-basalt-albedo.webp',
+    nrh: '/assets/textures/world/coastal-basalt-preview/coastal-basalt-nrh.webp',
+    scale: 0.8, normalStrength: 0.42, roughnessMix: 0.88,
+    fallbacks: { albedo: '#656965', nrh: [128, 128, 232, 128] },
+  },
   // Generated, height-aligned surfaces; provenance and deterministic packed
   // map bake live in assets-src/landscape-materials. Two samplers per layer.
   pahoehoe: {
