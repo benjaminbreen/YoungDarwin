@@ -40,8 +40,17 @@ import { recordMotion } from './motionRecorder';
 import { socialEntries } from '../fauna/behavior/socialField';
 import { activeBehaviorEpisodes } from '../fauna/behavior/behaviorEpisodes';
 import { getBehaviorBrain } from '../fauna/behavior/behaviorBrain';
+import { environmentLookTuning, setEnvironmentLookTuning } from '../world/environmentLook';
+import { setSolarLookTuning, solarLookTuning } from '../world/solarLook';
+import { cloudShadeTuning } from '../world/fogAtmosphere';
+import { postGradeTuning, setPostGradeTuning } from '../world/postGrade';
 
-const RECORDED_PROP_EVENTS = ['tool-swing', 'net-contact', 'net-brush', 'field-action-attempt', 'prop-struck'];
+const RECORDED_PROP_EVENTS = [
+  'tool-swing', 'net-contact', 'net-brush', 'field-action-attempt', 'prop-struck',
+  'player-push-contact', 'loose-footing-step', 'loose-footing-wobble', 'loose-footing-lost',
+  'rockfall-player-hit', 'rockfall-npc-hit',
+  'mature-cactus-impact', 'shotgun-impact', 'fauna-takeoff', 'hammer-shard-hit', 'rock-broken', 'fieldwork-foley',
+];
 const PROP_EVENT_LOG_MAX = 80;
 const propEventLog = [];
 
@@ -723,6 +732,21 @@ function createHarnessApi() {
     version: HARNESS_VERSION,
     isEnabled: () => true,
     getState: () => makeSnapshot(),
+    // The dev-panel lighting dials, so a lighting A/B can run in one session
+    // from one camera position instead of across two boots.
+    lightingLook: (patch = null) => {
+      if (patch?.environment) setEnvironmentLookTuning(patch.environment);
+      if (patch?.solar) setSolarLookTuning(patch.solar);
+      // `cloud: { maxStrength: 0 }` holds drifting cloud shadows off an A/B.
+      if (patch?.cloud) Object.assign(cloudShadeTuning, patch.cloud);
+      if (patch?.post) setPostGradeTuning(patch.post);
+      return {
+        environment: { ...environmentLookTuning },
+        solar: { ...solarLookTuning },
+        cloud: { ...cloudShadeTuning },
+        post: { ...postGradeTuning },
+      };
+    },
     getReadiness: () => makeReadiness(),
     waitForReadiness,
     getPlayerPose: () => makeSnapshot().playerPose,
@@ -860,7 +884,7 @@ function createHarnessApi() {
       return makeSnapshot();
     },
     setViewMode: viewMode => {
-      if (!['shoulder', 'hero', 'first', 'top'].includes(viewMode)) return makeSnapshot();
+      if (!['shoulder', 'hero', 'first', 'isometric', 'top'].includes(viewMode)) return makeSnapshot();
       useThreeGameStore.setState({ viewMode });
       return makeSnapshot();
     },

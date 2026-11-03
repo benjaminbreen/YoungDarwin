@@ -1372,7 +1372,7 @@ function WindborneSaltation({ enabled }) {
 // actually sparkles — instead of blinking on a timer. Peaks are pushed past
 // 1.0 for the bloom pass. Placement is biome-weighted with a bonus band along
 // the waterline for wet-sand glitter.
-function GroundSparkles({ enabled }) {
+function GroundSparkles({ enabled, shoreGlintBrightness, shoreGlintSize }) {
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const pointsRef = useRef(null);
   const spawnCenter = useRef(new THREE.Vector3(Infinity, 0, Infinity));
@@ -1395,6 +1395,7 @@ function GroundSparkles({ enabled }) {
     geo.setAttribute('aFacet', new THREE.BufferAttribute(facetArray, 3));
     geo.setAttribute('aSeed', new THREE.BufferAttribute(seedArray, 1));
     geo.setAttribute('aStrength', new THREE.BufferAttribute(strengthArray, 1));
+    geo.setAttribute('aShoreGlint', new THREE.BufferAttribute(new Float32Array(SPARKLE_COUNT), 1));
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -1404,39 +1405,53 @@ function GroundSparkles({ enabled }) {
         uSun: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
         uGate: { value: 0 },
         uPixelRatio: { value: typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2) },
+        uShoreGlintBrightness: { value: 1 },
+        uShoreGlintSize: { value: 1 },
+        uRenderPixelRatio: { value: 1 },
       },
       vertexShader: /* glsl */`
         attribute vec3 aFacet;
         attribute float aSeed;
         attribute float aStrength;
+        attribute float aShoreGlint;
         uniform float uTime;
         uniform vec3 uSun;
         uniform float uGate;
         uniform float uPixelRatio;
+        uniform float uShoreGlintBrightness;
+        uniform float uShoreGlintSize;
+        uniform float uRenderPixelRatio;
         varying float vAlpha;
         varying float vBright;
         void main() {
           vec3 viewDir = normalize(cameraPosition - position);
           vec3 hv = normalize(normalize(uSun) + viewDir);
           float alignment = max(dot(aFacet, hv), 0.0);
-          float directionalGlint = pow(alignment, 34.0);
+          float directionalGlint = mix(pow(alignment, 34.0), pow(alignment, 18.0), aShoreGlint);
           // A very sparse micro-flash floor keeps volcanic glass legible when
           // no random facet happens to hit the exact half-vector. Directional
           // glint still dominates as soon as the camera crosses the sun path.
           float flashPhase = 0.5 + 0.5 * sin(uTime * (0.55 + fract(aSeed * 0.41) * 0.9) + aSeed * 2.13);
           float surfaceFlash = clamp((aStrength - 0.58) * 1.45, 0.0, 1.0);
-          float glint = max(directionalGlint, pow(flashPhase, 20.0) * (0.035 + surfaceFlash * 0.09));
+          float glint = mix(max(directionalGlint, pow(flashPhase, 20.0) * (0.035 + surfaceFlash * 0.09)), directionalGlint, aShoreGlint);
           // Slow shimmer keeps grains alive while standing still (heat haze,
           // micro-movement) without turning into a blink pattern.
           float shimmer = 0.72 + 0.28 * sin(uTime * (1.1 + fract(aSeed * 0.29) * 1.6) + aSeed);
           float surfaceStrength = 0.32 + clamp(aStrength, 0.0, 1.35) * 0.78;
-          float intensity = glint * shimmer * uGate * surfaceStrength;
+          float shoreSun = clamp((uGate - 0.55) / 0.45, 0.0, 1.0);
+          float intensity = glint * mix(shimmer, 1.0, aShoreGlint) * uGate * surfaceStrength
+            * mix(1.0, 2.0 * shoreSun * uShoreGlintBrightness, aShoreGlint);
           vAlpha = clamp(intensity * 1.55, 0.0, 0.82);
           vBright = 1.0 + min(intensity, 1.0) * 0.9;
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           float perspective = clamp(160.0 / max(1.0, -mvPosition.z), 10.0, 110.0);
           float size = (0.032 + glint * 0.052) * mix(0.88, 1.08, clamp(aStrength, 0.0, 1.0));
-          gl_PointSize = size * perspective * uPixelRatio;
+          // A bounded optical flare stays legible at gameplay distance.
+          // Outside the landing patch, retain the existing tiny ground glitter.
+          float shoreSize = (3.0 + 13.0 * sqrt(glint))
+            * clamp(8.0 / max(1.0, -mvPosition.z), 0.4, 1.2)
+            * uRenderPixelRatio * uShoreGlintSize;
+          gl_PointSize = mix(size * perspective * uPixelRatio, shoreSize, aShoreGlint);
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -1481,6 +1496,7 @@ function GroundSparkles({ enabled }) {
     for (let index = 0; index < SPARKLE_COUNT; index += 1) {
       let placed = false;
       strengths[index] = 0;
+      geometry.attributes.aShoreGlint.setX(index, 0);
       for (let attempt = 0; attempt < SPARKLE_PLACEMENT_ATTEMPTS; attempt += 1) {
         const seed = seeds.current[index] + attempt * 89.3;
         const angle = seededUnit(seed) * Math.PI * 2;
@@ -1498,10 +1514,17 @@ function GroundSparkles({ enabled }) {
         positions[index * 3 + 1] = y + 0.05;
         positions[index * 3 + 2] = z;
         strengths[index] = weight;
+        // Keep the approved trial local to the landing shore; dry uplands
+        // and the other maps retain their original effect.
+        const shoreGlint = currentZoneId === 'POST_OFFICE_BAY'
+          && x >= -4 && x <= 25 && z >= -2 && z <= 12
+          && y + 0.05 >= -0.96 && y + 0.05 < 0.9 && weight >= 1;
+        geometry.attributes.aShoreGlint.setX(index, shoreGlint ? 1 : 0);
+        if (shoreGlint) positions[index * 3 + 1] += 0.07;
         // Mostly-up facet with a random tilt: low sun lights grains between
         // the camera and the sun path; high sun favours near-flat grains.
         const tiltAngle = seededUnit(seed + 11.7) * Math.PI * 2;
-        const tilt = seededUnit(seed + 13.9) * 0.55;
+        const tilt = seededUnit(seed + 13.9) * 0.55 * (shoreGlint ? 1.8 : 1);
         const nx = Math.cos(tiltAngle) * tilt;
         const nz = Math.sin(tiltAngle) * tilt;
         const invLen = 1 / Math.hypot(nx, 1, nz);
@@ -1516,10 +1539,14 @@ function GroundSparkles({ enabled }) {
     geometry.attributes.position.needsUpdate = true;
     geometry.attributes.aFacet.needsUpdate = true;
     geometry.attributes.aStrength.needsUpdate = true;
+    geometry.attributes.aShoreGlint.needsUpdate = true;
   }
 
-  useFrame(({ clock, camera }, delta) => {
+  useFrame(({ clock, camera, gl }, delta) => {
     const { timeOfDay, day } = useThreeGameStore.getState();
+    material.uniforms.uShoreGlintBrightness.value = shoreGlintBrightness;
+    material.uniforms.uShoreGlintSize.value = shoreGlintSize;
+    material.uniforms.uRenderPixelRatio.value = gl.getPixelRatio();
     const sky = skyState(timeOfDay ?? 12, day || 1);
     const airGate = Math.max(0, 1 - weatherEnv.overcast * 0.45)
       * Math.max(0, 1 - weatherEnv.rainIntensity * 0.98);
@@ -1554,7 +1581,7 @@ function GroundSparkles({ enabled }) {
   );
 }
 
-export function GroundedWorldFX({ enabled = true, terrainDust = true }) {
+export function GroundedWorldFX({ enabled = true, terrainDust = true, shoreGlintBrightness = 1, shoreGlintSize = 1 }) {
   return (
     <group userData={{ renderSource: 'grounded-world-fx', renderLabel: 'Grounded world FX', renderKind: 'ambient-vfx', noReflect: true }}>
       <SurfaceContactFX enabled={terrainDust} />
@@ -1562,7 +1589,7 @@ export function GroundedWorldFX({ enabled = true, terrainDust = true }) {
       <InsectMotes enabled={enabled} />
       <SunlitMotes enabled={enabled} />
       <WindborneSaltation enabled={enabled} />
-      <GroundSparkles enabled={enabled} />
+      <GroundSparkles enabled={enabled} shoreGlintBrightness={shoreGlintBrightness} shoreGlintSize={shoreGlintSize} />
       <Pollinators enabled={enabled} />
     </group>
   );

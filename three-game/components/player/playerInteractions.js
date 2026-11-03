@@ -1,7 +1,8 @@
 import {
   distanceToWalkableBoundary,
   getRegionTerrainConfig,
-  regionUsesRadialBounds,
+  regionBoundaryIsRadialAt,
+  regionEdgeRouteOpenAt,
 } from '../../world/terrain';
 import { EDGE_DIRECTIONS, getRegionEdgeHints } from '../../../game-core/regionMaps';
 import { nearestLocalTransitionPrompt } from '../../world/localTransitions';
@@ -69,7 +70,7 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
   // threshold — so corners produced no travel prompt at all, and even a
   // slightly off-axis approach fell outside the auto-travel range.
   const boundaryDistance = distanceToWalkableBoundary(position, regionId);
-  const radial = regionUsesRadialBounds(regionId);
+  const radial = regionBoundaryIsRadialAt(regionId, position);
   const distEast = config.width / 2 - position.x;
   const distWest = position.x + config.width / 2;
   const distSouth = config.depth / 2 - position.z;
@@ -96,6 +97,7 @@ export function nearestRegionEdgePrompt(regionId, position, facing) {
     const edge = hint.edge;
     const edgeDirection = EDGE_DIRECTIONS[edge];
     if (!edgeDirection) continue;
+    if (!regionEdgeRouteOpenAt(regionId, edge, position)) continue;
     // On a circle every edge is equally far from the boundary, so the edge is
     // chosen by which way the player is heading rather than by rectangle
     // distance — which is what makes corners work.
@@ -1085,7 +1087,13 @@ export function updatePlayerInteractions({
         if (!stateRef.current.action) {
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
-        currentState.collectRockSample?.(currentState.carryPrompt.sample);
+        const sample = currentState.carryPrompt.sample;
+        emitPropEvent('fieldwork-foley', {
+          kind: 'stow-sample',
+          material: sample?.material || null,
+          position: sample?.position,
+        });
+        currentState.collectRockSample?.(sample);
       } else if (currentState.carryPrompt.mode === 'harvest-crop') {
         if (!stateRef.current.action) {
           const clip = currentState.carryPrompt.crop?.pickClip === 'ground' ? 'kneelInspect' : 'gatherChestHeight';

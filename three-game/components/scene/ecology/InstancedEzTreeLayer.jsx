@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { applyFoliageMotion } from './foliageMotion';
 import { useThreeGameStore } from '../../../store';
+import { applyNatureSurface } from '../../../wildlife/natureTextures';
+import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { stabilizeFoliageMaterial, toMattePhong } from '../../assets/materialStability';
 import { createCameraCullState, shouldRunCameraCull } from '../cameraCull';
@@ -118,6 +120,12 @@ function cloneMaterial(material, geometry, variant, motion, isLeaf, cheap) {
     cloned.roughness = 0.9;
   }
   if (cheap) cloned = toMattePhong(cloned);
+  if (!isLeaf && variant.barkSurface) {
+    applyNatureSurface(cloned, variant.barkSurface, null, { repeat: true, fallback: '#c8bea3' });
+    // The new albedo supplies the bark's base color; preserve only a subtle
+    // authored variant tint instead of multiplying two dark base colors.
+    cloned.color.lerp(new THREE.Color('#ffffff'), 0.8);
+  }
   stabilizeFoliageMaterial(cloned, { doubleSide: isLeaf, forceCutout: isLeaf });
   // Bark and leaves come off the same generated tree; the push profile treats
   // the leaf pass as a crown so the canopy stirs while the trunk holds.
@@ -254,9 +262,7 @@ export function InstancedEzTreeLayer({
     };
   }, [ezTree, items.length, variants, motion, cheapMaterials]);
 
-  useLayoutEffect(() => () => {
-    disposePrimitives(variantPrimitives);
-  }, [variantPrimitives]);
+  useDeferredDisposal(variantPrimitives, disposePrimitives);
 
   const effectiveDistance = Number.isFinite(maxVisibleDistance) && maxVisibleDistance > 0
     ? maxVisibleDistance * foliageDrawScale

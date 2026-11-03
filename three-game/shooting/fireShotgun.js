@@ -73,7 +73,6 @@ export function tryFireShotgun({ position, facing }) {
     dirZ /= length;
   }
 
-  aim.recoilPending = true;
   aim.shellsLoaded = shellsLeft;
   aim.reloadingUntil = shellsLeft <= 0 ? now + SHOTGUN.reloadDuration : 0;
   emitPropEvent('shotgun-fired', {

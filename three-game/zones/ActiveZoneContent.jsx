@@ -10,6 +10,7 @@ import { WorldDetails } from '../components/scene/WorldDetails';
 import { ExaminableItems } from '../components/world/ExaminableItemActor';
 import { SpecimenActor } from '../components/world/SpecimenActor';
 import { AnimalDroppings } from '../components/world/AnimalDroppings';
+import { LooseRocks } from '../physics/props/LooseRocks';
 import { PhysicsProps } from '../physics/props/PhysicsProps';
 import { PricklyPearField } from '../physics/props/pricklyPear/PricklyPearField';
 import { LavaCactusField } from '../physics/props/lavaCactus/LavaCactusField';
@@ -21,6 +22,7 @@ import { WatkinsCabin } from '../physics/structures/WatkinsCabin';
 import { WesternLowlandsCampRuins } from '../physics/structures/WesternLowlandsCampRuins';
 import { PenalInmateCabin } from '../physics/structures/PenalInmateCabin';
 import { PenalWorkGangCabin } from '../physics/structures/PenalWorkGangCabin';
+import { PostOfficeWhalersRest } from '../components/scene/PostOfficeWhalersRest';
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
 import { StationaryNpcs } from '../components/world/StationaryNpc';
@@ -154,6 +156,9 @@ export function ActiveZoneContent({
         </Suspense>
       )}
       {bordersReady && settings.physicsObstacles !== false && <PhysicsObstacles />}
+      {/* Not gated on physicsProps: RockField and the obstacle list already
+          leave these rocks out, so skipping the bodies would delete them. */}
+      {physicsTerrainReady && bordersReady && <LooseRocks />}
       {/* Post-reveal families mount inside warm gates: invisible until an
           offscreen warm pass has paid their first-draw cost, then released
           together. See warmGateRuntime.js. */}
@@ -168,6 +173,7 @@ export function ActiveZoneContent({
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'W_LAVA' && <WarmGate><WesternLowlandsCampRuins /></WarmGate>}
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalInmateCabin /></WarmGate>}
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalWorkGangCabin /></WarmGate>}
+      {structuresReady && settings.physicsProps !== false && currentZoneId === 'POST_OFFICE_BAY' && <WarmGate><PostOfficeWhalersRest /></WarmGate>}
       {waterSplashesReady && settings.waterSplashes !== false && <WaterSplashes />}
       {interactablesReady && <AnimalDroppings />}
       {beagleReady && settings.beagle !== false && (

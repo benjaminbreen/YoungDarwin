@@ -13,8 +13,9 @@ export const SOLAR_LOOK_DEFAULTS = Object.freeze({
   opticsIntensity: 0.25,
   // Scales the DOM screen-glare wash strength (the camera-facing bloom).
   glareIntensity: 1.1,
-  // Multiplies outdoor tone-mapping exposure.
-  exposureScale: 0.87,
+  // Multiplies outdoor tone-mapping exposure. At 0.87 a clear 9-10am beach
+  // landed near 0.50 exposure under ACES and read grey-tan, not sunlit.
+  exposureScale: 1.0,
   // Warm/cool separation at low sun, deliberately independent of goldenBoost.
   //
   // goldenBoost damps the golden *tint* — the fully saturated version read as

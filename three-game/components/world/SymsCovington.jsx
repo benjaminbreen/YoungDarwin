@@ -278,6 +278,18 @@ export function SymsCovington({ motionPaused = false }) {
     reaction.targetZ = safe.z;
   }), [currentZoneId, obstacles]);
 
+  // Bowled over by a loose rock Darwin set rolling: scramble clear of it.
+  useEffect(() => onPropEvent('rockfall-npc-hit', event => {
+    if (event.npcId !== 'syms') return;
+    const reaction = reactionRef.current;
+    const position = motionRef.current.position;
+    const safe = chooseEscapeTarget(position, event.origin, event.severe ? 6 : 3.5, currentZoneId, obstacles);
+    reaction.mode = 'flee';
+    reaction.until = clockRef.current + (event.severe ? 6 : 3);
+    reaction.targetX = safe.x;
+    reaction.targetZ = safe.z;
+  }), [currentZoneId, obstacles]);
+
   // Any nearby report makes him duck aside even when the shot misses.
   useEffect(() => onPropEvent('shotgun-fired', event => {
     const reaction = reactionRef.current;

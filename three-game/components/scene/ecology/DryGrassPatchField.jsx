@@ -17,6 +17,8 @@ import {
 } from '../../../world/forageables';
 import { getPlayableMode } from '../../../playable/playableModes';
 import { useTrackedGLTF } from '../../assets/gltfCachePolicy';
+import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
+import { GENERATED_GRASS_FIBRES, disposeCreatureResources } from '../../../wildlife/natureTextures';
 
 const DEFAULT_PATH = '/assets/models/nature/runtime-animated-dry-grass.glb';
 const FORAGE_CELL_SIZE = 4.5;
@@ -26,6 +28,14 @@ const color = new THREE.Color();
 function loadBladeTexture(path) {
   if (!path || typeof window === 'undefined') return null;
   const texture = new THREE.TextureLoader().load(path);
+  // A valid neutral texel keeps the shader usable while the atlas loads.
+  const placeholder = document.createElement('canvas');
+  placeholder.width = placeholder.height = 1;
+  const context = placeholder.getContext('2d');
+  context.fillStyle = '#bcbcbc';
+  context.fillRect(0, 0, 1, 1);
+  texture.image = placeholder;
+  texture.name = 'Nature:grass-fibres';
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -90,16 +100,19 @@ function applyBladeAtlasTint(material, texture, strength = 0.26) {
         `#include <color_fragment>
         vec4 bladeAtlasTexel = texture2D(uDryGrassBladeAtlas, clamp(vDryGrassAtlasUv, vec2(0.0), vec2(1.0)));
         float bladeAtlasMask = smoothstep(0.18, 0.56, bladeAtlasTexel.a);
-        vec3 bladeAtlasColor = pow(max(bladeAtlasTexel.rgb, vec3(0.0)), vec3(2.2));
+        // The sRGB texture is decoded by WebGL sampling already.
+        vec3 bladeAtlasColor = bladeAtlasTexel.rgb;
         float bladeAtlasLuma = dot(bladeAtlasColor, vec3(0.299, 0.587, 0.114));
-        vec3 bladeAtlasFiber = mix(vec3(bladeAtlasLuma), bladeAtlasColor * vec3(1.08, 1.02, 0.84), 0.72);
-        vec3 bladeAtlasTinted = diffuseColor.rgb * mix(vec3(0.78, 0.88, 0.58), bladeAtlasFiber * 1.38, 0.68);
+        // Surface fibres modulate the authored green/dry instance tint rather
+        // than repainting every habitat with the atlas's straw palette.
+        float bladeFibreValue = clamp(bladeAtlasLuma * 2.1, 0.60, 1.35);
+        vec3 bladeAtlasTinted = diffuseColor.rgb * bladeFibreValue;
         diffuseColor.rgb = mix(diffuseColor.rgb, bladeAtlasTinted, bladeAtlasMask * uDryGrassBladeAtlasStrength);`,
       );
   };
   material.customProgramCacheKey = () => {
     const base = previousCacheKey ? previousCacheKey() : 'dry-grass-patch';
-    return `${base}|blade-atlas|${strength.toFixed(2)}`;
+    return `${base}|blade-atlas-linear-v2|${strength.toFixed(2)}`;
   };
   material.needsUpdate = true;
   return material;
@@ -323,7 +336,8 @@ export function DryGrassPatchField({
     }
     return clone;
   }, [scene, layer.items?.length]);
-  const bladeTexture = useMemo(() => loadBladeTexture(layer.bladeTexturePath), [layer.bladeTexturePath]);
+  const bladeTexturePath = layer.bladeTexturePath === false ? null : layer.bladeTexturePath || GENERATED_GRASS_FIBRES;
+  const bladeTexture = useMemo(() => loadBladeTexture(bladeTexturePath), [bladeTexturePath]);
   const material = useMemo(() => {
     if (!geometry) return null;
     const grassMaterial = new THREE.MeshStandardMaterial({
@@ -352,11 +366,8 @@ export function DryGrassPatchField({
     return applyForageVision(rootedMaterial, geometry);
   }, [geometry, layer, bladeTexture]);
 
-  useLayoutEffect(() => () => {
-    geometry?.dispose();
-    material?.dispose();
-    bladeTexture?.dispose();
-  }, [geometry, material, bladeTexture]);
+  const resources = useMemo(() => ({ geometry, material, bladeTexture }), [geometry, material, bladeTexture]);
+  useDeferredDisposal(resources, disposeCreatureResources);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;

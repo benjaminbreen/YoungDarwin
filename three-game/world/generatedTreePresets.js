@@ -49,6 +49,7 @@ export const generatedTreePresets = {
     variants: [
       {
         ...dryTreeBase,
+        barkSurface: 'palo-bark',
         basePreset: 'Bush 2',
         seed: 1868,
         forceX: 0.42,
@@ -73,6 +74,7 @@ export const generatedTreePresets = {
       },
       {
         ...dryTreeBase,
+        barkSurface: 'palo-bark',
         basePreset: 'Bush 3',
         seed: 1875,
         forceX: -0.36,
@@ -97,6 +99,7 @@ export const generatedTreePresets = {
       },
       {
         ...dryTreeBase,
+        barkSurface: 'palo-bark',
         basePreset: 'Oak Small',
         seed: 1881,
         forceX: 0.16,
@@ -286,6 +289,7 @@ export const generatedTreePresets = {
     variants: [
       {
         ...compactTreeBase,
+        barkSurface: 'humid-bark',
         basePreset: 'Aspen Small',
         seed: 1952,
         forceX: 0.04,
@@ -310,6 +314,7 @@ export const generatedTreePresets = {
       },
       {
         ...compactTreeBase,
+        barkSurface: 'humid-bark',
         basePreset: 'Aspen Small',
         seed: 1964,
         forceX: -0.12,
@@ -334,6 +339,7 @@ export const generatedTreePresets = {
       },
       {
         ...compactTreeBase,
+        barkSurface: 'humid-bark',
         basePreset: 'Ash Small',
         seed: 1977,
         forceX: 0.1,

@@ -80,7 +80,7 @@ import { NightlyDebriefModal } from './NightlyDebriefModal';
 import { getSpecimenRarity, rarityForTier } from '../rarity';
 import { RarityBadge } from './RarityBadge';
 import { SpecimenPortrait } from './SpecimenPortrait';
-import { playSightingSting } from '../audio/audioRuntime';
+import { playInterfaceCue, playSightingSting } from '../audio/audioRuntime';
 import { useZoneSpecimenProgress } from './useZoneSpecimenProgress';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
@@ -91,6 +91,7 @@ import {
   getIslandMapLocation,
   islandMapLocations,
 } from './expedition/map/islandLocations';
+import { devRoutesEnabled } from '../../app/devRoutes';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
 import { getNpcPoses } from '../world/npcRuntime';
 import { getInteriorDefinition, getInteriorQuickExit } from '../interiors/interiorRegistry';
@@ -917,8 +918,184 @@ function DirectiveTracker() {
   return null;
 }
 
+// Authoring shortcut: the zone and the clock in the objective banner open a
+// picker that jumps straight to a region or an hour. Dev builds only — in the
+// shipped game the three-day deadline has to be walked, not skipped.
+const BANNER_JUMP_ENABLED = devRoutesEnabled();
+
+const TIME_JUMP_PRESETS = [
+  { hour: 5.5, label: 'Before dawn' },
+  { hour: 6.25, label: 'Sunrise' },
+  { hour: 8, label: 'Morning' },
+  { hour: 10.5, label: 'Late morning' },
+  { hour: 12, label: 'Noon' },
+  { hour: 14.5, label: 'Afternoon' },
+  { hour: 16.5, label: 'Late afternoon' },
+  { hour: 17.75, label: 'Sunset' },
+  { hour: 19, label: 'Dusk' },
+  { hour: 22, label: 'Night' },
+];
+
+const FAST_TRAVEL_KIND_LABELS = {
+  land: 'Land',
+  water: 'Water',
+  anchorage: 'Anchorage',
+  summit: 'Summit',
+  shipInterior: 'Ship',
+  houseInterior: 'Interior',
+};
+
+// Alphabetical: the chart already gives the geography; this list is for
+// finding a name fast.
+const FAST_TRAVEL_LOCATIONS = [...islandMapLocations].sort((a, b) => a.name.localeCompare(b.name));
+
+function bannerJumpTriggerProps(kind, openMenu, onOpen) {
+  if (!BANNER_JUMP_ENABLED) return {};
+  const open = event => {
+    // The whole banner is the expand toggle; the trigger must not also fold it.
+    event.stopPropagation();
+    event.preventDefault();
+    onOpen(openMenu === kind ? null : kind);
+  };
+  return {
+    role: 'button',
+    tabIndex: 0,
+    'aria-haspopup': 'dialog',
+    'aria-expanded': openMenu === kind,
+    title: kind === 'time' ? 'Jump to a time' : 'Travel to a location',
+    onClick: open,
+    onKeyDown: event => {
+      if (event.key === 'Enter' || event.key === ' ') open(event);
+    },
+    className: 'pointer-events-auto cursor-pointer rounded-sm underline decoration-expedition-gold/0 decoration-dotted underline-offset-[3px] transition hover:decoration-expedition-gold/80 hover:text-expedition-goldbright focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70',
+  };
+}
+
+function hourFromTimeInput(value) {
+  const [hours, minutes] = String(value || '').split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours + minutes / 60;
+}
+
+function timeInputValue(timeOfDay) {
+  const totalMinutes = Math.floor((timeOfDay ?? 8) * 60);
+  return `${String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+}
+
+function BannerJumpMenu({ kind, onClose }) {
+  const panelRef = useDismissableOverlay(Boolean(kind), onClose, { sound: null });
+  const timeOfDay = useThreeGameStore(state => state.timeOfDay);
+  const currentZoneId = useThreeGameStore(state => state.currentZoneId);
+  const travelling = useThreeGameStore(state => Boolean(state.transition));
+  const setTimeOfDay = useThreeGameStore(state => state.setTimeOfDay);
+  const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
+  const [exactTime, setExactTime] = useState(() => timeInputValue(timeOfDay));
+
+  // Click outside closes it, like the map's popovers.
+  useEffect(() => {
+    if (!kind) return undefined;
+    const onPointerDown = event => {
+      if (!panelRef.current?.contains(event.target)) onClose();
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+  }, [kind, onClose, panelRef]);
+
+  if (!kind) return null;
+
+  const jumpToHour = hour => {
+    setTimeOfDay(hour);
+    onClose();
+  };
+  const travelTo = zoneId => {
+    if (zoneId !== currentZoneId && !travelling) {
+      beginZoneTransition(zoneId, { source: 'fast-travel', mode: 'island', minutes: 0, fatigue: 0 });
+    }
+    onClose();
+  };
+
+  return (
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label={kind === 'time' ? 'Jump to a time' : 'Travel to a location'}
+      tabIndex={-1}
+      data-hud="banner-jump-menu"
+      className="pointer-events-auto absolute left-1/2 top-full z-20 mt-1.5 w-[min(19rem,calc(100vw-2rem))] -translate-x-1/2 animate-hud-fade font-expedition motion-reduce:animate-none"
+    >
+      <ExpeditionPanel innerClassName="overflow-hidden">
+        <div className="px-3 pb-2.5 pt-2">
+          <div className={`${GOLD_LABEL} mb-1.5`}>{kind === 'time' ? 'Jump to time' : 'Fast travel'}</div>
+          {kind === 'time' ? (
+            <>
+              <div className="grid grid-cols-2 gap-1">
+                {TIME_JUMP_PRESETS.map(preset => (
+                  <button
+                    key={preset.hour}
+                    type="button"
+                    onClick={() => jumpToHour(preset.hour)}
+                    className="flex items-baseline justify-between gap-2 rounded-sm border border-expedition-brass/35 bg-black/20 px-2 py-1 text-left text-[12px] text-expedition-parchment transition hover:border-expedition-gold/70 hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70"
+                  >
+                    <span className="truncate">{preset.label}</span>
+                    <span className="shrink-0 text-[11px] text-expedition-goldbright/85">{formatExpeditionTime(preset.hour)}</span>
+                  </button>
+                ))}
+              </div>
+              <form
+                className="mt-2 flex items-center gap-1.5 border-t border-expedition-brass/35 pt-2"
+                onSubmit={event => {
+                  event.preventDefault();
+                  const hour = hourFromTimeInput(exactTime);
+                  if (hour !== null) jumpToHour(hour);
+                }}
+              >
+                <label className="text-[11px] uppercase tracking-[0.14em] text-expedition-faded" htmlFor="banner-jump-exact-time">Exact</label>
+                <input
+                  id="banner-jump-exact-time"
+                  type="time"
+                  value={exactTime}
+                  onChange={event => setExactTime(event.target.value)}
+                  className="min-w-0 flex-1 rounded-sm border border-expedition-brass/45 bg-black/30 px-1.5 py-0.5 text-[12px] text-expedition-parchment [color-scheme:dark] focus:border-expedition-gold/70 focus:outline-none"
+                />
+                <button type="submit" className={`${GOLD_BUTTON} px-2 py-0.5 text-[11px]`}>Go</button>
+              </form>
+            </>
+          ) : (
+            <ul className="m-0 max-h-[min(22rem,60vh)] list-none overflow-y-auto p-0 pr-0.5">
+              {FAST_TRAVEL_LOCATIONS.map(location => {
+                const here = location.id === currentZoneId;
+                return (
+                  <li key={location.id}>
+                    <button
+                      type="button"
+                      disabled={here || travelling}
+                      onClick={() => travelTo(location.id)}
+                      className={`flex w-full items-baseline justify-between gap-2 rounded-sm px-2 py-1 text-left text-[12.5px] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70 ${
+                        here
+                          ? 'cursor-default text-expedition-goldbright'
+                          : 'text-expedition-parchment hover:bg-expedition-gold/10 disabled:opacity-50'
+                      }`}
+                    >
+                      <span className="truncate">{location.name}</span>
+                      <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-expedition-faded">
+                        {here ? 'Here' : location.isTest ? 'Test' : FAST_TRAVEL_KIND_LABELS[location.kind] || location.kind}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </ExpeditionPanel>
+    </div>
+  );
+}
+
 function PolishedTopObjective({ objective, className = '' }) {
   const [expanded, setExpanded] = useState(false);
+  const [jumpMenu, setJumpMenu] = useState(null);
+  const closeJumpMenu = useCallback(() => setJumpMenu(null), []);
   const headlineRef = useRef(null);
   const directiveCompletedId = useThreeGameStore(state => state.directiveCompletedId);
   const clearCompletedDirective = useThreeGameStore(state => state.clearCompletedDirective);
@@ -996,11 +1173,11 @@ function PolishedTopObjective({ objective, className = '' }) {
                   Below xl both are already in the pill above it. */}
               <span className="hidden h-1 w-1 shrink-0 rotate-45 bg-expedition-brass/85 xl:block" />
               <span className="hidden min-w-0 truncate text-[12.5px] font-semibold tracking-[0.035em] text-expedition-parchment/95 xl:inline">
-                {zone.shortName || zone.name}
+                <span {...bannerJumpTriggerProps('place', jumpMenu, setJumpMenu)}>{zone.shortName || zone.name}</span>
               </span>
               <span className="hidden shrink-0 text-expedition-brass/70 xl:inline">·</span>
               <span className="hidden shrink-0 text-[11.5px] font-medium tracking-[0.04em] text-expedition-goldbright/90 xl:inline">
-                {formatExpeditionTime(timeOfDay)}
+                <span {...bannerJumpTriggerProps('time', jumpMenu, setJumpMenu)}>{formatExpeditionTime(timeOfDay)}</span>
               </span>
               <span className="hidden shrink-0 text-expedition-brass/70 xl:inline">·</span>
               <ExpeditionDayCount day={day} className="hidden shrink-0 text-[11.5px] font-medium tracking-[0.04em] xl:inline" />
@@ -1103,6 +1280,7 @@ function PolishedTopObjective({ objective, className = '' }) {
           </div>
         </div>
       </ExpeditionPanel>
+      {BANNER_JUMP_ENABLED && <BannerJumpMenu kind={jumpMenu} onClose={closeJumpMenu} />}
     </div>
   );
 }
@@ -3355,12 +3533,14 @@ const CAMERA_MODE_LABELS = {
   shoulder: 'Follow Camera',
   hero: 'Follow Camera',
   first: 'First Person',
+  isometric: 'Isometric View',
   top: 'Overhead Chart',
 };
 const CAMERA_MODE_SHORT_LABELS = {
   shoulder: 'Follow',
   hero: 'Follow',
   first: 'First person',
+  isometric: 'Isometric',
   top: 'Overhead',
 };
 
@@ -3984,10 +4164,13 @@ function SpecimenSightingToast() {
     setRendered(sighting);
     setVisible(false);
     playSightingSting(getSpecimenRarity(sighting).id);
+    // The name is underlined in pencil as the card settles.
+    const pencilTimer = window.setTimeout(() => playInterfaceCue('pencil', { gain: 0.04, playbackRate: 1.08 }), 380);
     const showTimer = window.setTimeout(() => setVisible(true), 20);
     const hideTimer = window.setTimeout(() => setVisible(false), 3600);
     const clearTimer = window.setTimeout(() => setRendered(null), 3950);
     return () => {
+      window.clearTimeout(pencilTimer);
       window.clearTimeout(showTimer);
       window.clearTimeout(hideTimer);
       window.clearTimeout(clearTimer);
@@ -4011,6 +4194,21 @@ function SpecimenSightingToast() {
             {rendered.name}
             {rendered.latin && <span className="ml-1.5 text-[11.5px] font-normal italic text-expedition-faded">{rendered.latin}</span>}
           </div>
+          {/* A hand-drawn pencil underline that writes itself in after the
+              card arrives, timed with the pencil sound. */}
+          <svg aria-hidden="true" viewBox="0 0 120 6" preserveAspectRatio="none" className="mt-0.5 block h-[5px] w-full overflow-visible">
+            <path
+              d="M1 3.6 C 18 2.2, 34 4.4, 52 3.1 S 88 2.1, 104 3.4 S 116 3.9, 119 2.6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.1"
+              strokeLinecap="round"
+              pathLength="1"
+              vectorEffect="non-scaling-stroke"
+              className="text-expedition-faded/80 transition-[stroke-dashoffset] duration-[520ms] ease-out motion-reduce:transition-none"
+              style={{ strokeDasharray: 1, strokeDashoffset: visible ? 0 : 1, transitionDelay: visible ? '360ms' : '0ms' }}
+            />
+          </svg>
         </div>
       </div>
     </div>

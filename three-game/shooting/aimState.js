@@ -38,8 +38,6 @@ export const shotgunAimState = {
   targetScore: 0,
   // Momentary aim intent from holding right mouse (read by equipment state).
   holdIntent: false,
-  // Set by tryFireShotgun, consumed by the controller as a camera impulse.
-  recoilPending: false,
   // Set by the resolver when Darwin shoots his own feet; consumed by the
   // controller (stumble + damage).
   selfHitPending: false,

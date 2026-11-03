@@ -23,6 +23,12 @@ export const ENVIRONMENT_LOOK_DEFAULTS = Object.freeze({
   // it is the term that does the work: at 2 a shaded coat read ~18% brighter
   // while open ground moved ~1%.
   groundBounce: 2,
+  // Overall weight of the sky light (the whole environment map) on PBR
+  // surfaces, as a multiple of the shipped 0.1 (night) to 0.25 (day) range.
+  // This is what fills cast shadows on open ground, which see the sky rather
+  // than the sand. 1.5 measured at Post Office Bay (cloud shadows held off):
+  // shaded rock ~+5%, open ground ~+3%, highlights unchanged, 9 AM and noon.
+  skyFill: 1.5,
 });
 
 export const environmentLookTuning = { ...ENVIRONMENT_LOOK_DEFAULTS, ...readUrlOverrides() };

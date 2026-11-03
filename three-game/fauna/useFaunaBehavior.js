@@ -7,7 +7,7 @@ import { createFaunaMotionController, habitatFor, seedFromKey, specimenSeedKey }
 import { specimenCollisionRadius } from './specimenCollision';
 import { getPlayableMode } from '../playable/playableModes';
 import { getWildlifeSpecies, normalizeWildlifeId } from '../wildlife/wildlifeCatalog';
-import { onPropEvent } from '../physics/props/propEvents';
+import { emitPropEvent, onPropEvent } from '../physics/props/propEvents';
 import { consumeSpecimenStimuli } from '../world/specimenRuntime';
 import { faunaDebugEnabled } from '../runtimeDebug';
 import { gameClockMinutes } from '../narrator/narratorEvents';
@@ -210,7 +210,13 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     yawRef.current = controller.state.yaw;
     pitchRef.current = controller.state.pitch || 0;
     rollRef.current = controller.state.roll || 0;
-    airborneRef.current = controller.state.airborne === true;
+    const airborne = controller.state.airborne === true;
+    // Leaving the ground is the soundscape's cue for wingbeats.
+    if (airborne && !airborneRef.current && controller.state.position) {
+      const { x, y, z } = controller.state.position;
+      emitPropEvent('fauna-takeoff', { zoneId: currentZoneId, speciesId, actorId, position: { x, y, z } });
+    }
+    airborneRef.current = airborne;
     animationRef.current = controller.state.animation;
     debugRef.current = controller.state.debug;
     return status;

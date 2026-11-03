@@ -41,7 +41,17 @@ export const CLOUD_SHADE_DEFAULTS = Object.freeze({
   // the pattern is visible under any sky while tuning.
   forceOn: false,
 });
-export const cloudShadeTuning = { ...CLOUD_SHADE_DEFAULTS };
+// `?noCloudShade` holds drifting cloud shadows off for one session, so look
+// runs can compare lighting without the pattern moving between shots.
+function readCloudShadeUrlOverride() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return new URLSearchParams(window.location.search).has('noCloudShade') ? { maxStrength: 0 } : null;
+  } catch {
+    return null;
+  }
+}
+export const cloudShadeTuning = { ...CLOUD_SHADE_DEFAULTS, ...readCloudShadeUrlOverride() };
 const CLOUD_SHADE_FREQUENCY = 1 / cloudShadeTuning.featureMeters;
 // The sin-based GLSL hash degrades at large coordinates, so the drift offset
 // wraps here (one visible pattern jump per ~10 h of continuous play).

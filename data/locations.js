@@ -149,7 +149,7 @@ export const locations = [
     // `defaultSpawn`, so editing postOfficeBay/terrain.js alone does nothing —
     // the two must be kept in step.
     playerStart: [-8.43, 0, 25.02],
-    specimens: ['barnacle','seaurchin','lavalizard','lavagull','parrotfish','mantaRay','hammerhead','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust'],
+    specimens: ['barnacle','seaurchin','lavalizard','lavagull','parrotfish','mantaRay','hammerhead','galapagoscarpenterbee','galapagossulphur','galapagosgulffritillary','galapagospaintedlocust','floreana_mockingbird','galapagos_dove','medium_ground_finch','galapagos_racer','scalesiavillosa'],
     specimenPlacements: [
       {
         // Shallowest submerged spot in the cove: the seabed here is -1.35,
@@ -229,6 +229,52 @@ export const locations = [
       { instanceId: 'post-office-sulphur', specimenId: 'galapagossulphur', position: [15.8, 0, 16.5], behavior: 'pollinate', habitatRadiusX: 1.7, habitatRadiusZ: 1.25 },
       { instanceId: 'post-office-fritillary', specimenId: 'galapagosgulffritillary', position: [20.5, 0, 20.2], behavior: 'pollinate', habitatRadiusX: 1.9, habitatRadiusZ: 1.4 },
       { instanceId: 'post-office-painted-locust-cotton-1', specimenId: 'galapagospaintedlocust', position: [17.2, 0, 18.8], behavior: 'hop-and-perch', sceneScale: 0.2, habitatRadiusX: 4.4, habitatRadiusZ: 3.3 },
+      // The inland valley behind the landing (see world/regions/postOfficeBay).
+      // Darwin took his Charles Island mockingbird here in September 1835;
+      // the racer, doves and finches were still common on the lowlands.
+      {
+        instanceId: 'post-office-mockingbird-dry-wash',
+        specimenId: 'floreana_mockingbird',
+        position: [14, 0, 66],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 8,
+        habitatRadiusZ: 6,
+      },
+      {
+        instanceId: 'post-office-galapagos-dove-whalers-track',
+        specimenId: 'galapagos_dove',
+        position: [-6, 0, 70],
+        behavior: 'forage-and-fly',
+        sceneScale: 1,
+        habitatRadiusX: 8.5,
+        habitatRadiusZ: 5.4,
+      },
+      {
+        instanceId: 'post-office-ground-finch-palo-santo',
+        specimenId: 'medium_ground_finch',
+        position: [-27, 0, 64],
+        behavior: 'curious',
+        sceneScale: 1,
+        habitatRadiusX: 6,
+        habitatRadiusZ: 4.5,
+      },
+      {
+        instanceId: 'post-office-floreana-racer-lava-tongue',
+        specimenId: 'galapagos_racer',
+        position: [-44, 0, 72],
+        behavior: 'bask',
+        sceneScale: 0.96,
+        habitatRadiusX: 10,
+        habitatRadiusZ: 7,
+      },
+      {
+        instanceId: 'post-office-scalesia-villosa-wash-bank',
+        specimenId: 'scalesiavillosa',
+        position: [22.4, 0, 64],
+        behavior: 'still',
+        sceneScale: 0.72,
+      },
     ],
     npcs: ['lascar_joe'],
     discoveries: [

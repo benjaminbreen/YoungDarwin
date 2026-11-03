@@ -974,6 +974,68 @@ export const useThreeGameStore = create((set, get) => ({
       },
     };
   }),
+  settleLooseRock: (rockKey, pose) => set(state => {
+    if (!rockKey || !pose) return {};
+    return { looseRockPoses: { ...state.looseRockPoses, [rockKey]: pose } };
+  }),
+
+  // A rock Darwin set rolling has caught him. severe = knocked off his feet.
+  applyRockfallDamage: (amount, { severe = false } = {}) => set(state => {
+    const message = severe
+      ? 'The rolling boulder slams into you and throws you down in the scree.'
+      : 'A tumbling rock cracks against your shins.';
+    const symsLine = severe
+      ? '"Sir! Never stand below a stone you have set moving!"'
+      : '"Mind the fall line, sir."';
+    return {
+      message,
+      symsLine,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'hazard')),
+      ...healthDamagePatch(state, { amount, source: 'rockfall' }),
+    };
+  }),
+
+  // Darwin trusted a loose stone and it went out from under him.
+  applyLooseFootingFall: (amount, { severe = false } = {}) => set(state => {
+    const message = severe
+      ? 'The stone lurches and rolls under your boot, and pitches you hard into the scree.'
+      : 'The stone rocks under your weight and you go down on one knee among the rocks.';
+    const symsLine = severe
+      ? '"Steady, sir! Loose stones won\'t hold a man\'s weight."'
+      : '"Mind your footing, sir."';
+    return {
+      message,
+      symsLine,
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'hazard')),
+      ...(amount > 0 ? healthDamagePatch(state, { amount, source: 'loose-footing' }) : {}),
+    };
+  }),
+
+  applyRockfallNpcHit: (npcId, { severe = false } = {}) => set(state => {
+    const syms = npcId === 'syms';
+    const who = syms ? 'Syms' : 'the islander';
+    const message = severe
+      ? `The boulder you set rolling bowls ${who} off his feet. He comes up bruised and furious.`
+      : `A loosened rock skips into ${syms ? 'Syms\'s' : 'the islander\'s'} legs. He hops clear, swearing.`;
+    const symsLine = syms
+      ? (severe ? '"You near broke my leg, sir! Look where you send those things!"' : '"Ow! Mind the stones, sir!"')
+      : '"Sir, you will have the whole island against us."';
+    return {
+      message,
+      symsLine,
+      localStanding: clamp((state.localStanding ?? 50) - (severe ? 6 : 2), 0, 100),
+      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
+        narration: message,
+        symsLine,
+      }, state, 'major-event')),
+    };
+  }),
   advanceTime: minutes => set(state => advanceTimeState(state, minutes)),
   setTimeOfDay: hour => set(state => {
     const timeOfDay = clamp(Number(hour) || 0, 0, HOURS_PER_DAY - 1 / 60);
@@ -1042,11 +1104,10 @@ export const useThreeGameStore = create((set, get) => ({
     }),
   })),
 
-  // The player has two views: the chase camera and first person. The
-  // shoulder and overhead rigs remain for the dev camera lab and interiors,
-  // but V only toggles between these two.
+  // Keep the straight-down and shoulder rigs available to interiors/dev tools.
   cycleViewMode: () => set(state => ({
-    viewMode: state.viewMode === 'first' ? 'hero' : 'first',
+    viewMode: state.viewMode === 'hero' ? 'first'
+      : state.viewMode === 'first' ? 'isometric' : 'hero',
   })),
 
   applyMovementCost: ({ running = false, walking = false, airborne = false, falling = 0, fatigueDelta = null } = {}) => set(state => {

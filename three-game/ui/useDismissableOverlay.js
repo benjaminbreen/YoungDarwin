@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { playOverlayCue } from '../audio/interfaceFoley';
 
 const FOCUSABLE = [
   'a[href]',
@@ -109,9 +110,12 @@ export function useOverlayOpen() {
  * topmost one, Tab cycles inside it instead of escaping into the scene behind
  * it, and focus returns to whatever opened it when it closes.
  *
+ * `sound` names the object the panel is heard as when it opens and closes:
+ * 'book', 'paper' (the default) or 'map'; null for silence.
+ *
  * Returns a ref to attach to the panel element.
  */
-export function useDismissableOverlay(open, onClose, { trapFocus = true, autoFocus = true } = {}) {
+export function useDismissableOverlay(open, onClose, { trapFocus = true, autoFocus = true, sound = 'paper' } = {}) {
   const containerRef = useRef(null);
   const restoreFocusRef = useRef(null);
   // Callers pass inline arrows (`onClose={() => setMapOpen(false)}`), so keeping
@@ -147,6 +151,12 @@ export function useDismissableOverlay(open, onClose, { trapFocus = true, autoFoc
     pushLayer({ id, containerRef, onCloseRef, trapFocus });
     return () => removeLayer(id);
   }, [open, trapFocus]);
+
+  useEffect(() => {
+    if (!open || !sound) return undefined;
+    playOverlayCue(sound, true);
+    return () => playOverlayCue(sound, false);
+  }, [open, sound]);
 
   return containerRef;
 }

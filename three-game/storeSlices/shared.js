@@ -898,6 +898,9 @@ export function createSceneSlice() {
     cheapMaterials: true,
     foliageDrawScale: 0.85,
     pushableObstacleOffsets: {},
+    // Where pushed loose rocks came to rest, by looseRockKey. Session-scoped
+    // like pushableObstacleOffsets.
+    looseRockPoses: {},
     specimenRuntimePositions: {},
     playerPose: {
       position: { ...INITIAL_PLAYER_POSE.position },

@@ -24,7 +24,7 @@ export const createShotgunActions = set => ({
           y: info.y ?? 0,
           z: info.z ?? 0,
           at: Date.now(),
-          method: 'shotgun',
+          method: info.method || 'shotgun',
         },
       },
     };

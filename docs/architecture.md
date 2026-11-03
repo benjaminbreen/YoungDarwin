@@ -114,8 +114,8 @@ Core player files:
   clip selection.
 - `three-game/components/player/PlayerAvatarModel.jsx`: playable animal avatar
   rendering and animation selection.
-- `three-game/components/player/usePlayerCameraRig.js`: third-person, status,
-  examine, and animal camera behavior.
+- `three-game/components/player/usePlayerCameraRig.js`: follow, first-person,
+  isometric, status, examine, and animal camera behavior.
 - `three-game/components/player/darwin5AnimationManifest.mjs`: Darwin5 clip
   metadata, fallbacks, and transition settings.
 
@@ -125,6 +125,9 @@ Darwin's primary runtime model is configured by
 legacy tooling.
 
 Camera behavior is visible cursor drag, `Z`/`X` rotate keys, and scroll zoom.
+`V` cycles Follow → First Person → Isometric. Isometric holds an elevated
+angle and a steady heading, with its own zoom distance; confined interiors use
+their authored close framing, and weapon aiming uses the shoulder sight line.
 
 ## Assets
 

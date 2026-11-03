@@ -282,9 +282,16 @@ const {
   clampReleaseLinearVelocity,
   createRestrainedReleaseImpulse,
   damageLeanAngle,
+  rayToSegmentMiss,
+  releaseMomentumMass,
   selectHammerImpactTargets,
   selectKnifeCutTargets,
 } = loadModule('three-game/physics/props/breakablePlant/breakablePhysics.js');
+const {
+  branchHitPoints,
+  branchShotDamageScale,
+  buildPaloSanto,
+} = loadModule('three-game/physics/props/paloSanto/paloSantoModel.js');
 const {
   selectPlantInteractionSiteIds,
 } = loadModule('three-game/physics/props/breakablePlant/breakablePlantLod.js');
@@ -435,7 +442,9 @@ const {
 } = loadModule('game-core/floreanaGeography.js');
 const {
   CONTEXTUAL_WORLD_AUDIO,
+  FIELD_FOLEY_AUDIO,
   HAMMER_STRIKE_AUDIO,
+  INTERFACE_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
   TOOL_FOLEY_AUDIO,
@@ -829,6 +838,8 @@ const { getNpcPlacement, getStationaryNpcsForZone } = loadModule('three-game/npc
 const { DIRECTIVES, resolveDirective } = loadModule('three-game/directives.js');
 const {
   distanceToWalkableBoundary,
+  regionBoundaryIsRadialAt,
+  regionEdgeRouteOpenAt,
   regionUsesRadialBounds,
 } = loadModule('three-game/world/terrain.js');
 const {
@@ -1099,6 +1110,12 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
     galapagossulphur: 1,
     galapagosgulffritillary: 1,
     galapagospaintedlocust: 1,
+    // The inland valley's own animals.
+    floreanamockingbird: 1,
+    galapagosdove: 1,
+    mediumgroundfinch: 1,
+    galapagosracer: 1,
+    scalesiavillosa: 1,
   });
 
   // The marine set does not count against the quiet opening: all of it sits
@@ -1114,6 +1131,10 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
     specimen.id === 'lavalizard' || specimen.id === 'barnacle'
   ));
   assert.equal(edgeSpecimens.length, 3);
+  // The valley's animals live well beyond the opening view as well.
+  const inland = specimens.filter(specimen => specimen.instanceId.includes(':post-office-') && specimen.spawnPoint[2] > 50);
+  assert.equal(inland.length, 5);
+  edgeSpecimens.push(...inland.filter(specimen => specimen.id !== 'scalesiavillosa'));
   // The resident lizards around them keep to the edges as well.
   const residents = everyone.filter(specimen => specimen.population);
   assert.ok(residents.length > 0);
@@ -1373,6 +1394,30 @@ test('structured transcript judgments adjust but do not rewrite canonical catego
   assert.match(outraged.gaps[0], /childish contempt/);
 });
 
+test('Post Office Bay runs inland to its full rectangle and only the coast leads off the sides', () => {
+  const interactionsSource = fs.readFileSync(path.resolve('three-game/components/player/playerInteractions.js'), 'utf8');
+  const { getRegionTerrainConfig, clampToWalkable } = loadModule('three-game/world/terrain.js');
+  const config = getRegionTerrainConfig('POST_OFFICE_BAY');
+  assert.ok(config.depth > config.width, 'the bay is deeper than it is wide');
+
+  // Behind the beach the circle no longer cuts the valley's corners off.
+  const inlandCorner = { x: config.width * 0.5 - 2, z: config.depth * 0.5 - 3 };
+  assert.equal(regionBoundaryIsRadialAt('POST_OFFICE_BAY', inlandCorner), false);
+  assert.ok(distanceToWalkableBoundary(inlandCorner, 'POST_OFFICE_BAY') > 1);
+  const clamped = clampToWalkable({ x: -7, z: config.depth }, null, 'POST_OFFICE_BAY');
+  assert.ok(clamped.z > config.depth * 0.5 - 2, 'the south edge is reachable on the Scrub Rise track');
+
+  // The coastal band still leads to the neighbouring shores...
+  assert.equal(regionEdgeRouteOpenAt('POST_OFFICE_BAY', 'west', { x: -58, z: 6 }), true);
+  assert.equal(regionEdgeRouteOpenAt('POST_OFFICE_BAY', 'east', { x: 58, z: 10 }), true);
+  assert.equal(regionEdgeRouteOpenAt('POST_OFFICE_BAY', 'south', { x: -8, z: 84 }), true);
+  // ...but the inland flanks are the lava tongue and the lookout: no coast to load.
+  assert.equal(regionEdgeRouteOpenAt('POST_OFFICE_BAY', 'west', { x: -58, z: 60 }), false);
+  assert.equal(regionEdgeRouteOpenAt('POST_OFFICE_BAY', 'east', { x: 58, z: 55 }), false);
+  assert.match(interactionsSource, /if \(!regionEdgeRouteOpenAt\(regionId, edge, position\)\) continue;/);
+  assert.equal(regionEdgeRouteOpenAt('NORTHERN_HIGHLANDS', 'west', { x: -50, z: 40 }), true);
+});
+
 test('map-edge distance follows the real movement boundary, not the terrain rectangle', () => {
   // Post Office Bay confines the player to a CIRCLE (clampToWalkable), but the
   // edge-travel prompt used to measure distance to the terrain RECTANGLE.
@@ -1380,11 +1425,15 @@ test('map-edge distance follows the real movement boundary, not the terrain rect
   // rectangle corner — outside the 16m prompt threshold entirely — so corners
   // offered no "continue to..." prompt at all, and an off-axis approach fell
   // outside auto-travel range and demanded a keypress.
+  //
+  // Only the seaward half is a circle now; the corner case lives out over the
+  // anchorage (negative z).
   assert.equal(regionUsesRadialBounds('POST_OFFICE_BAY'), true);
   const bounds = distanceToWalkableBoundary({ x: 0, z: 0 }, 'POST_OFFICE_BAY');
   assert.ok(bounds > 0, 'the cove has a radial boundary');
 
-  const pinnedAtCorner = { x: bounds * Math.SQRT1_2, z: bounds * Math.SQRT1_2 };
+  const pinnedAtCorner = { x: bounds * Math.SQRT1_2, z: -bounds * Math.SQRT1_2 };
+  assert.equal(regionBoundaryIsRadialAt('POST_OFFICE_BAY', pinnedAtCorner), true);
   assert.ok(
     distanceToWalkableBoundary(pinnedAtCorner, 'POST_OFFICE_BAY') < 0.001,
     'a player on the circle at 45 degrees is AT the walkable boundary',
@@ -2287,7 +2336,7 @@ test('environmental audio keeps coastal surf audible across region topology', ()
   const inlandEdge = surfPresenceForZone({ zone: coast, position: { x: 0, z: 34 }, resolveZone });
   const neighboringMap = surfPresenceForZone({ zone: adjacent, position: { x: 0, z: 0 }, resolveZone });
   assert.ok(shore > inlandEdge);
-  assert.ok(inlandEdge >= 0.14);
+  assert.ok(inlandEdge > neighboringMap, 'a coastal map keeps more surf than its inland neighbour');
   assert.equal(neighboringMap, 0.035);
   assert.ok(surfPresenceForZone({
     zone: {
@@ -2300,7 +2349,7 @@ test('environmental audio keeps coastal surf audible across region topology', ()
     },
     position: { x: 0, z: 0 },
     shorelineDistance: 30,
-  }) > 0.14);
+  }) > 0.035);
 
   const atShore = computeEnvironmentalAudioTargets({
     zone: coast,
@@ -2316,10 +2365,19 @@ test('environmental audio keeps coastal surf audible across region topology', ()
   });
   // Surf is a bed under Darwin's foley (grit steps peak at ~0.3 gain on a
   // louder recording), so these floors are relative to that mix.
-  assert.ok(atShore.surf >= 0.18, 'the rolling body of near-shore surf should remain clearly audible');
+  assert.ok(atShore.surf >= 0.14, 'the rolling body of near-shore surf should remain clearly audible');
   assert.ok(atShore.surf <= 0.24, 'near-shore surf must stay a bed under the footfalls, not over them');
+  const surfAt = shorelineDistance => computeEnvironmentalAudioTargets({
+    zone: coast,
+    position: { x: 0, z: 0 },
+    resolveZone,
+    shorelineDistance,
+    weather: { windSpeed: 0.8, rainIntensity: 0 },
+  }).surf;
+  assert.ok(surfAt(0) >= 0.18, 'full surf at the waterline');
+  assert.ok(surfAt(0) >= oneMapInland.surf * 3, 'surf should fall away clearly one map inland');
+  assert.ok(surfAt(20) <= surfAt(0) * 0.45, 'twenty metres up the beach the surf must sit well back (footsteps were buried)');
   assert.ok(oneMapInland.surf >= 0.05, 'an adjacent map should retain a light but audible surf bed');
-  assert.ok(atShore.surf >= oneMapInland.surf * 3, 'surf should fall away clearly one map inland');
 });
 
 test('environmental audio follows weather and suppresses dry insects in rain and interiors', () => {
@@ -2507,7 +2565,7 @@ test('hammer and insect-net Foley sprites are committed PCM assets with stable s
 
 test('every hammer material has a committed strike sprite sized to its slots', () => {
   const { HAMMER_MATERIAL_PROFILES } = loadModule('three-game/physics/props/rockSampling.js');
-  const keys = [...Object.keys(HAMMER_MATERIAL_PROFILES), 'split', 'wood', 'succulent', 'herb'];
+  const keys = [...Object.keys(HAMMER_MATERIAL_PROFILES), 'split', 'wood', 'succulent', 'herb', 'strain'];
   for (const key of keys) {
     const sprite = HAMMER_STRIKE_AUDIO[key];
     assert.ok(sprite, `${key} has a hammer strike sprite`);
@@ -2540,6 +2598,70 @@ test('hammer impacts are heard as the geology, timber or plant they meet', () =>
   // Metal and ceramic props keep their recorded impacts.
   assert.equal(hammerStrikeMaterial({ propId: 'tin-mug-1' }), 'metal');
   assert.equal(hammerStrikeMaterial({ propId: 'mystery-1' }), null);
+});
+
+test('knife, pellet and field-handling Foley sprites are committed and sized to their slots', () => {
+  for (const [key, asset] of Object.entries(FIELD_FOLEY_AUDIO)) {
+    const url = asset?.url || asset;
+    const filePath = path.join(process.cwd(), 'public', url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    const wav = fs.readFileSync(filePath);
+    assert.equal(wav.subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
+    const seconds = wav.readUInt32LE(40) / (wav.readUInt32LE(24) * 2);
+    if (asset?.url) {
+      assert.ok(Math.abs(seconds - asset.variants * asset.slotDuration) < 0.002, `${key} slots match its length`);
+    } else {
+      assert.ok(seconds >= 4, `${key} is a long enough loop`);
+    }
+  }
+});
+
+test('knife cuts, pellet impacts and acoustic spaces route by what was struck and where', () => {
+  const { acousticSpaceForZone, knifeCutMaterial, pelletImpactSound } = loadModule('three-game/audio/interactionMaterials.js');
+  assert.equal(knifeCutMaterial({ propId: 'FLOREANA:prickly-pear:site-1:pad-2' }), 'succulent');
+  assert.equal(knifeCutMaterial({ propId: 'mature-cactus' }), 'succulent');
+  assert.equal(knifeCutMaterial({ propId: 'FLOREANA:lecocarpus:site-1:twig-3' }), 'bark');
+  assert.equal(knifeCutMaterial({ propId: 'FLOREANA:delilia:site-1:stem-2' }), 'stem');
+  assert.equal(knifeCutMaterial({ propId: 'FLOREANA:sicyos:site-1:vine-1' }), 'stem');
+  assert.equal(pelletImpactSound({ surface: 'rock' }), 'rock');
+  assert.equal(pelletImpactSound({ surface: 'structure' }), 'wood');
+  assert.equal(pelletImpactSound({ surface: 'foliage' }), 'foliage');
+  assert.equal(pelletImpactSound({ surface: 'terrain', biome: 'black-lava-shelf' }), 'rock');
+  assert.equal(pelletImpactSound({ surface: 'terrain', biome: 'dry-scrub' }), 'earth');
+  assert.equal(pelletImpactSound({ surface: 'fauna' }), null);
+  assert.equal(acousticSpaceForZone({ type: 'caveInterior' }), 'cave');
+  assert.equal(acousticSpaceForZone({ type: 'promontory' }), 'cliff');
+  assert.equal(acousticSpaceForZone({ type: 'beach' }), null);
+});
+
+test('interface paper, pencil, bell and heartbeat sprites are committed and sized to their slots', () => {
+  for (const [key, asset] of Object.entries(INTERFACE_AUDIO)) {
+    const url = asset?.url || asset;
+    const filePath = path.join(process.cwd(), 'public', url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    const wav = fs.readFileSync(filePath);
+    assert.equal(wav.subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
+    const seconds = wav.readUInt32LE(40) / (wav.readUInt32LE(24) * 2);
+    if (asset?.url) {
+      assert.ok(Math.abs(seconds - asset.variants * asset.slotDuration) < 0.002, `${key} slots match its length`);
+    } else {
+      assert.ok(seconds >= 4, `${key} is a long enough loop`);
+    }
+  }
+});
+
+test('interface cues write only player and aboard entries and ring the dusk bell once', () => {
+  const { crossedDusk, journalEntryCue } = loadModule('three-game/audio/interfaceFoley.js');
+  assert.equal(journalEntryCue({ kind: 'note' })?.cue, 'pencil');
+  assert.equal(journalEntryCue({ kind: 'examination' })?.cue, 'pencil');
+  assert.equal(journalEntryCue({ kind: 'logistics' })?.cue, 'nib');
+  // Collection records already sound in the world as the field note and jar.
+  assert.equal(journalEntryCue({ method: 'net' }), null);
+  assert.equal(crossedDusk({ day: 3, timeOfDay: 17.9 }, { day: 3, timeOfDay: 18.05 }), true);
+  assert.equal(crossedDusk({ day: 3, timeOfDay: 18.05 }, { day: 3, timeOfDay: 18.2 }), false);
+  // A rest or a voyage that jumps the clock past six is not heard.
+  assert.equal(crossedDusk({ day: 3, timeOfDay: 16 }, { day: 3, timeOfDay: 19 }), false);
+  assert.equal(crossedDusk({ day: 3, timeOfDay: 17.9 }, { day: 4, timeOfDay: 18.05 }), false);
 });
 
 test('wildlife, weather, fieldwork, and shoreline sprites are committed PCM assets', () => {
@@ -2835,6 +2957,65 @@ test('hammer targeting follows a descending 3D swing instead of an XZ proximity 
     facing: { x: 0, z: -1 },
     maxHits: 1,
   }).map(hit => hit.piece.key), ['low-basal-pad']);
+});
+
+test('woody plants let the hammer find a shoot before the unbreakable trunk', () => {
+  const trunk = {
+    key: 'trunk',
+    unbreakable: true,
+    center: { x: 0, y: 1, z: -1.2 },
+    colliderArgs: [0.2, 1, 0.2],
+    rotation: [0, 0, 0],
+  };
+  const shoot = {
+    key: 'shoot',
+    center: { x: 0.35, y: 1.05, z: -1.35 },
+    colliderArgs: [0.035, 0.3, 0.035],
+    rotation: [0, 0, 0.6],
+  };
+  const swing = { origin: { x: 0, y: 0, z: 0 }, facing: { x: 0, z: -1 }, maxHits: 1 };
+  assert.deepEqual(selectHammerImpactTargets([trunk, shoot], swing).map(hit => hit.piece.key), ['trunk']);
+  assert.deepEqual(
+    selectHammerImpactTargets([trunk, shoot], { ...swing, preferBreakable: true }).map(hit => hit.piece.key),
+    ['shoot'],
+  );
+  assert.deepEqual(
+    selectHammerImpactTargets([trunk], { ...swing, preferBreakable: true }).map(hit => hit.piece.key),
+    ['trunk'],
+  );
+});
+
+test('a heavy limb shares a fixed release momentum instead of flying like a twig', () => {
+  assert.equal(releaseMomentumMass(40, null), 40);
+  assert.equal(releaseMomentumMass(1.2, 2.5), 1.2);
+  const heavy = createRestrainedReleaseImpulse({ mass: releaseMomentumMass(40, 2.5), direction: { x: 1, z: 0 }, speed: 8.5 });
+  assert.ok(heavy.linear.x / 40 < 0.6, 'a 40 kg limb leaves at well under a metre a second');
+});
+
+test('a shot is tested along a limb, not only near its midpoint', () => {
+  const origin = { x: 0, y: 1.4, z: 0 };
+  const dir = { x: 0, y: 0, z: -1 };
+  // A long limb whose midpoint is 1.6 m off the line of fire but whose tip
+  // crosses it.
+  const miss = rayToSegmentMiss(origin, dir, { x: -3.2, y: 1.4, z: -5 }, { x: 0.1, y: 1.4, z: -5 });
+  assert.ok(miss && miss.lateral < 0.15 && Math.abs(miss.along - 5) < 0.1);
+  assert.equal(rayToSegmentMiss(origin, dir, { x: 0, y: 1.4, z: 2 }, { x: 0, y: 1.4, z: 4 }), null);
+});
+
+test('every palo santo offers the hammer a shoot and reserves its limbs for real work', () => {
+  for (let index = 0; index < 24; index += 1) {
+    const tree = buildPaloSanto({ seed: `regression-${index}`, size: 0.72 + (index % 6) * 0.13 });
+    const reachable = tree.segments.filter(segment => (
+      segment.role !== 'trunk' && segment.position.y > 0.25 && segment.position.y < 1.6
+    ));
+    assert.ok(reachable.length >= 1, `tree ${index} has a breakable piece at hammer height`);
+    for (const segment of tree.segments) {
+      if (segment.role === 'trunk') continue;
+      const blasts = branchHitPoints(segment) / (2 * branchShotDamageScale(segment));
+      if (segment.radiusStart < 0.025) assert.ok(blasts <= 1, 'a thin shoot goes in one blast');
+      if (segment.radiusStart >= 0.1) assert.ok(blasts >= 8, 'a forearm-thick limb survives a few blasts');
+    }
+  }
 });
 
 test('knife targeting is a short selective arc that ignores woody plant pieces', () => {
@@ -3200,6 +3381,75 @@ test('carry drop candidates start grounded beyond the player collider', () => {
   assert.equal(candidates.length, 24);
 });
 
+test('shared texture sources preserve authored fallbacks and reject late loads after disposal', () => {
+  const THREE = projectRequire('three');
+  const { loadRepeatingTerrainTexture } = loadModule('three-game/world/regions/materials/pbrTerrainTextures.js');
+  const previousWindow = globalThis.window;
+  const previousBitmap = globalThis.createImageBitmap;
+  const previousLoad = THREE.ImageBitmapLoader.prototype.load;
+  const completions = [];
+  const textures = [];
+  let closed = 0;
+  try {
+    globalThis.window = { location: { search: '' } };
+    globalThis.createImageBitmap = async image => image;
+    THREE.ImageBitmapLoader.prototype.load = function mockLoad(url, complete) { completions.push(complete); };
+    const fallbackImage = { width: 768, height: 768 };
+    const make = () => {
+      const texture = loadRepeatingTerrainTexture('/__test__/nature-fallback.webp', { fallbackImage });
+      textures.push(texture);
+      return texture;
+    };
+    const first = make(), survivor = make();
+    assert.equal(completions.length, 1, 'one decode for a shared file');
+    assert.equal(first.source, survivor.source);
+    assert.equal(survivor.image, fallbackImage, 'keep the authored image while loading');
+    first.dispose();
+    completions[0]({ width: 1024, height: 1024, close() { closed++; } });
+    assert.equal(survivor.image.width, 1024);
+    assert.ok(survivor.version > 1, 'the surviving texture must upload the completed image');
+    survivor.dispose();
+    assert.equal(closed, 1);
+    const abandoned = make();
+    assert.equal(completions.length, 2, 'released entries must not be reused');
+    abandoned.dispose();
+    completions[1]({ width: 1024, height: 1024, close() { closed++; } });
+    assert.equal(closed, 2, 'an abandoned decode is closed instead of resurrecting its source');
+  } finally {
+    textures.forEach(texture => texture.dispose());
+    THREE.ImageBitmapLoader.prototype.load = previousLoad;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+    if (previousBitmap === undefined) delete globalThis.createImageBitmap;
+    else globalThis.createImageBitmap = previousBitmap;
+  }
+});
+
+test('shell UVs allocate texture space to steep margins without reshaping the animal', () => {
+  const { BufferGeometry, Float32BufferAttribute } = projectRequire('three');
+  const { mapShellUvsByMeridian } = loadModule('three-game/wildlife/tortoiseShellUvs.js');
+  const vertices = [];
+  for (let ring = 0; ring <= 2; ring++) for (let segment = 0; segment <= 4; segment++) {
+    const angle = segment / 4 * Math.PI * 2;
+    vertices.push(Math.cos(angle) * ring / 2, ring === 2 ? 0 : 1, Math.sin(angle) * ring / 2);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute('uv', new Float32BufferAttribute(new Float32Array(30), 2));
+  const original = geometry.attributes.position.array.slice();
+  mapShellUvsByMeridian(geometry, 2, 4);
+  const uv = geometry.attributes.uv;
+  const midRadius = (uv.getX(5) - 0.5) * 2;
+  assert.ok(Math.abs(midRadius - 0.5 / (0.5 + Math.hypot(0.5, 1))) < 1e-6);
+  assert.ok(midRadius < 0.5, 'the steep outer band needs more texture space than the flat inner band');
+  assert.equal(uv.getX(0), 0.5);
+  assert.equal(uv.getY(0), 0.5);
+  assert.equal(uv.getX(10), 1);
+  assert.ok(Math.abs(uv.getX(10) - uv.getX(14)) < 1e-6, 'the meridian seam stays closed');
+  assert.deepEqual(geometry.attributes.position.array, original);
+  geometry.dispose();
+});
+
 test('period prop UVs keep narrow wood grain and barrel staves at physical scale', () => {
   const { BoxGeometry, CylinderGeometry } = projectRequire('three');
   const { metricBoxUvs, metricCylinderUvs } = loadModule('three-game/world/regions/materials/periodMaterialUvs.js');
@@ -3239,6 +3489,157 @@ test('procedural rock obstacles share visual bounds and traversal support', () =
         `${zoneId}:${obstacle.id} walk-over support should stay near visual top`,
       );
     }
+  }
+});
+
+test('procedural rock support follows the rendered ellipsoid, not a bounding circle', () => {
+  const zoneId = 'N_SHORE';
+  const elongated = getRuntimeObstacles(zoneId)
+    .filter(obstacle => obstacle.kind === 'rock' && obstacle.ellipsoid && isWalkOverTraversalObstacle(obstacle))
+    .filter(obstacle => obstacle.ellipsoid.rx > obstacle.ellipsoid.rz * 1.25)
+    .filter(obstacle => obstacle.ellipsoid.cy > 0.05);
+  assert.ok(elongated.length > 0, 'N_SHORE should have an elongated walk-over rock');
+  for (const rock of elongated) {
+    const obstacles = [rock];
+    const { rx, ry, rz, cy } = rock.ellipsoid;
+    const cos = Math.cos(rock.yaw);
+    const sin = Math.sin(rock.yaw);
+    // Rock-local (lx, lz) to world, matching the instanced mesh's yaw.
+    const world = (lx, lz) => ({ x: rock.x + lx * cos + lz * sin, z: rock.z - lx * sin + lz * cos });
+    const baseY = obstacleBaseY(rock);
+    const supportAt = ({ x, z }) => getObstacleSupportHeight(x, z, baseY, 0.28, obstacles);
+
+    const tip = world(rx * 0.8, 0);
+    const tipY = supportAt(tip);
+    const expectedTipY = baseY + cy + ry * Math.sqrt(1 - 0.64);
+    if (expectedTipY > terrainHeight(tip.x, tip.z, zoneId) + 0.05) {
+      assert.ok(tipY !== null, `${rock.id} long-axis tip should give support`);
+      assert.ok(Math.abs(tipY - expectedTipY) < 1e-6, `${rock.id} tip support should sit on the ellipsoid`);
+    }
+    const beside = world(0, rz * 1.08);
+    assert.equal(supportAt(beside), null, `${rock.id} should not hover beside its narrow side`);
+  }
+});
+
+test('loose rocks are only the realistically movable ones, and leave the static world', () => {
+  const {
+    LOOSE_ROCK_ZONES,
+    classifyRock,
+    isLooseRock,
+    rockMass,
+    rockfallPlayerDamage,
+  } = loadModule('three-game/world/looseRocks.js');
+  const { getEcology } = loadModule('three-game/world/ecology/index.js');
+  const zoneId = 'C_HIGH';
+  assert.ok(LOOSE_ROCK_ZONES.has(zoneId));
+  const at = (x, z) => ({ x, z, y: terrainHeight(x, z, zoneId), yaw: 0 });
+
+  const buried = { ...at(0, 0), id: 't-buried', radiusX: 0.3, radiusY: 0.3, radiusZ: 0.3, sink: 0.12 };
+  assert.equal(classifyRock(buried, zoneId).reason, 'buried');
+  const pebble = { ...at(0, 0), id: 't-pebble', radiusX: 0.15, radiusY: 0.08, radiusZ: 0.15, sink: 0 };
+  assert.equal(classifyRock(pebble, zoneId).reason, 'pebble');
+  const stone = { ...at(0, 0), id: 't-stone', radiusX: 0.28, radiusY: 0.2, radiusZ: 0.25, sink: 0.02 };
+  assert.ok(rockMass(stone) <= 150);
+  assert.equal(classifyRock(stone, zoneId).state, 'loose', 'a light stone can be shoved anywhere');
+  const block = { ...at(0, 0), id: 't-block', radiusX: 1.2, radiusY: 0.7, radiusZ: 1.0, sink: 0.05 };
+  assert.equal(classifyRock(block, zoneId).state, 'fixed', 'a two-tonne block stays put');
+  const boulder = { ...at(0, 0), id: 't-boulder', radiusX: 0.5, radiusY: 0.4, radiusZ: 0.45, sink: 0.04 };
+  assert.equal(classifyRock(boulder, zoneId).state, 'fixed', 'an 800 kg boulder on level ground stays put');
+  assert.equal(classifyRock({ ...boulder, id: 't-perched', y: boulder.y + 0.4 }, zoneId).reason, 'perched');
+  assert.equal(classifyRock({ ...stone, id: 't-authored', loose: false }, zoneId).state, 'fixed');
+  assert.equal(classifyRock(stone, 'N_SHORE').reason, 'zone', 'loose rocks are trialled per zone');
+
+  const looseIds = new Set(getEcology(zoneId).rocks
+    .filter(rock => isLooseRock(rock, zoneId))
+    .map(rock => rock.id));
+  assert.ok(looseIds.size > 0, 'Cerro Pajas should have loose rocks on its slopes');
+  for (const obstacle of getRuntimeObstacles(zoneId)) {
+    assert.ok(!obstacle.sourceRock || !looseIds.has(obstacle.sourceRock.id), `${obstacle.id} is loose and must not stay static`);
+  }
+
+  assert.equal(rockfallPlayerDamage(30), 0, 'a nudge does not hurt');
+  assert.ok(rockfallPlayerDamage(300) > 0);
+  assert.ok(rockfallPlayerDamage(5000) <= 60, 'a rockfall alone never kills outright');
+});
+
+test('loose rock support follows the live rigid-body pose', () => {
+  const { looseRockSurfaceY, footingResponse, FOOTING_WOBBLE_SPEED, FOOTING_FALL_SPEED } = loadModule('three-game/world/looseRocks.js');
+  const radii = [0.4, 0.2, 0.3];
+  const level = { x: 1, y: 2, z: 3, qx: 0, qy: 0, qz: 0, qw: 1 };
+  assert.ok(Math.abs(looseRockSurfaceY(level, radii, 1, 3) - 2.2) < 1e-9, 'crown is centre + ry');
+  assert.equal(looseRockSurfaceY(level, radii, 1.45, 3), null, 'off the rim there is no support');
+  const halfWay = Math.sqrt(1 - 0.25) * 0.2;
+  assert.ok(Math.abs(looseRockSurfaceY(level, radii, 1.2, 3) - (2 + halfWay)) < 1e-9);
+  // Rolled a quarter turn about z: the long x radius now stands upright.
+  const s = Math.SQRT1_2;
+  const rolled = { ...level, qz: s, qw: s };
+  assert.ok(Math.abs(looseRockSurfaceY(rolled, radii, 1, 3) - 2.4) < 1e-9, 'a rolled rock stands taller');
+  assert.equal(looseRockSurfaceY(rolled, radii, 1.3, 3), null, 'and its footprint narrows');
+  assert.equal(footingResponse(FOOTING_WOBBLE_SPEED * 0.5), null, 'a settled stone holds');
+  assert.equal(footingResponse(FOOTING_WOBBLE_SPEED), 'wobble');
+  assert.equal(footingResponse(FOOTING_FALL_SPEED), 'fall');
+});
+
+test('Post Office Bay has loose stones to test on, and they leave the static world', () => {
+  const { isLooseRock } = loadModule('three-game/world/looseRocks.js');
+  const { getEcology } = loadModule('three-game/world/ecology/index.js');
+  const zoneId = 'POST_OFFICE_BAY';
+  const loose = getEcology(zoneId).rocks.filter(rock => isLooseRock(rock, zoneId));
+  const ids = new Set(loose.map(rock => rock.id));
+  for (const id of ['loose-knoll-cobble', 'loose-east-boulder', 'loose-rocking-slab', 'loose-perched-stone']) {
+    assert.ok([...ids].some(rockId => rockId.endsWith(id)), `${id} should be a loose rock`);
+  }
+  for (const obstacle of getRuntimeObstacles(zoneId)) {
+    assert.ok(!obstacle.sourceRock || !ids.has(obstacle.sourceRock.id), `${obstacle.id} is loose and must not stay static`);
+  }
+});
+
+test('rock contact sounds recognise every rock Darwin can touch, and nothing else', () => {
+  const { isRockBody } = loadModule('three-game/audio/contactTargets.js');
+  const obstacles = getRuntimeObstacles('POST_SCRUB_RISE');
+  const rocks = obstacles.filter(obstacle => obstacle.kind === 'rock' || obstacle.kind === 'stone');
+  assert.ok(rocks.length > 40, 'Scrub Rise should give its rocks bodies');
+  for (const rock of rocks) assert.ok(isRockBody(rock), `${rock.id} should sound like rock underfoot`);
+  assert.ok(isRockBody({ id: 'POST_OFFICE_BAY:loose-rock:x', kind: 'loose-rock' }));
+  assert.ok(isRockBody({ id: 'POST_OFFICE_BAY:loose-rock:x', kind: 'physics-loose-rock' }));
+  assert.equal(isRockBody({ id: 'lava-cactus-3', kind: 'cactus' }), false);
+  assert.equal(isRockBody({ id: 'mature-cactus:lava-cactus', kind: 'cactus' }), false);
+  assert.equal(isRockBody({ id: 'beach-hut-whalers-hut', kind: 'structure' }), false);
+  assert.equal(isRockBody(null), false);
+});
+
+test('loose rock colliders join prop separation for wildlife and NPCs', () => {
+  const {
+    getZonePropCollisionProps,
+    publishLooseRockCollider,
+    removeLooseRockCollider,
+  } = loadModule('three-game/physics/props/propRuntime.js');
+  const crate = { id: 'crate', x: 0, z: 0, collider: { shape: 'ball', radius: 0.3 } };
+  publishLooseRockCollider('TEST_ZONE', 'rock-a', { id: 'rock-a', x: 2, y: 1, z: 0, collider: { shape: 'ball', radius: 0.5 } });
+  const props = getZonePropCollisionProps('TEST_ZONE', [crate]);
+  assert.deepEqual(props.map(prop => prop.id), ['crate', 'rock-a']);
+  removeLooseRockCollider('TEST_ZONE', 'rock-a');
+  assert.deepEqual(getZonePropCollisionProps('TEST_ZONE', [crate]).map(prop => prop.id), ['crate']);
+});
+
+test('low rocks below a layout collider filter still give walk-over support', () => {
+  const obstacles = getRuntimeObstacles('N_OUTCROP');
+  const stones = obstacles.filter(obstacle => obstacle.kind === 'stone');
+  assert.ok(stones.length > 0, 'N_OUTCROP should expose support stones');
+  for (const stone of stones) {
+    assert.equal(stone.supportOnly, true);
+    assert.ok(isWalkOverTraversalObstacle(stone), `${stone.id} should be walk-over only`);
+    assert.equal(stone.pushable, false);
+    const baseY = obstacleBaseY(stone);
+    const supportY = getObstacleSupportHeight(stone.x, stone.z, baseY, 0.28, [stone]);
+    if (supportY === null) continue;
+    assert.ok(Math.abs(supportY - (baseY + stone.colliderTop)) < 1e-6, `${stone.id} crown should match its visual top`);
+    const inside = new Vector3(stone.x + 0.05, baseY, stone.z);
+    assert.equal(
+      resolveObstacleCollision(inside, inside, { obstacles: [stone] }),
+      null,
+      `${stone.id} should never push Darwin sideways`,
+    );
   }
 });
 
@@ -3706,6 +4107,36 @@ test('baked terrain occlusion darkens hollows, leaves open ground, and fades at 
   assert.ok(trench.every(Number.isFinite));
 });
 
+test('ground footprints mark the soil under plants and around rocks', () => {
+  const { rasterizeGroundFootprints, collectGroundFootprints } = loadModule('three-game/world/groundFootprints.js');
+  const { getEcology } = loadModule('three-game/world/ecology/index.js');
+  const raster = rasterizeGroundFootprints({
+    canopies: [{ x: 0, z: 0, radius: 2, strength: 1 }],
+    rocks: [{ x: 10, z: 0, radiusX: 1, radiusZ: 1, yaw: 0 }],
+  });
+  const at = (x, z, channel) => {
+    const { bounds, width, height, data } = raster;
+    const column = Math.min(width - 1, Math.floor((x - bounds.minX) / (bounds.maxX - bounds.minX) * width));
+    const row = Math.min(height - 1, Math.floor((z - bounds.minZ) / (bounds.maxZ - bounds.minZ) * height));
+    return data[(row * width + column) * 4 + channel] / 255;
+  };
+  assert.ok(at(0, 0, 0) > 0.9 && at(0, 0, 2) > 0.9, 'full canopy and stem at the trunk');
+  assert.equal(at(0, 3, 0), 0, 'canopy ends just past the crown');
+  assert.equal(at(0, 1.5, 2), 0, 'packed soil stays tight to the stem');
+  assert.ok(at(11.2, 0, 1) > 0.3, 'grit banked against the rock');
+  assert.equal(at(13, 0, 1), 0, 'collar is a skirt, not a moat');
+  assert.equal(at(10, 0, 0), 0, 'rocks leave the canopy channel alone');
+  assert.equal(rasterizeGroundFootprints({ canopies: [], rocks: [] }), null);
+
+  // Post Office Bay feeds real plants and rocks through, at bounded size.
+  const footprints = collectGroundFootprints(getEcology('POST_OFFICE_BAY'), 'POST_OFFICE_BAY');
+  assert.ok(footprints.canopies.length > 40, `canopies ${footprints.canopies.length}`);
+  assert.ok(footprints.rocks.length > 20, `rocks ${footprints.rocks.length}`);
+  assert.ok(footprints.canopies.every(item => item.radius >= 0.25 && item.radius <= 6));
+  const pob = rasterizeGroundFootprints(footprints);
+  assert.ok(pob.width <= 512 && pob.height <= 512, `${pob.width}x${pob.height}`);
+});
+
 test('heavy authored regions stay within the seamless-travel terrain budget', () => {
   assert.equal(regionMaps.N_SHORE.terrain.segments, 192);
   assert.equal(regionMaps.PENAL_COLONY.terrain.segments, 192);
@@ -4041,36 +4472,6 @@ test('Gabriel cave papers are readable, rendered in English, and read rather tha
       // Pages with no language (initials, tallies) have nothing to render.
       if (page.language && page.language !== 'English') {
         assert.equal(page.translation?.length, page.lines.length, `${item.typeId} renders each ${page.language} line into English`);
-test('ground footprints mark the soil under plants and around rocks', () => {
-  const { rasterizeGroundFootprints, collectGroundFootprints } = loadModule('three-game/world/groundFootprints.js');
-  const { getEcology } = loadModule('three-game/world/ecology/index.js');
-  const raster = rasterizeGroundFootprints({
-    canopies: [{ x: 0, z: 0, radius: 2, strength: 1 }],
-    rocks: [{ x: 10, z: 0, radiusX: 1, radiusZ: 1, yaw: 0 }],
-  });
-  const at = (x, z, channel) => {
-    const { bounds, width, height, data } = raster;
-    const column = Math.min(width - 1, Math.floor((x - bounds.minX) / (bounds.maxX - bounds.minX) * width));
-    const row = Math.min(height - 1, Math.floor((z - bounds.minZ) / (bounds.maxZ - bounds.minZ) * height));
-    return data[(row * width + column) * 4 + channel] / 255;
-  };
-  assert.ok(at(0, 0, 0) > 0.9 && at(0, 0, 2) > 0.9, 'full canopy and stem at the trunk');
-  assert.equal(at(0, 3, 0), 0, 'canopy ends just past the crown');
-  assert.equal(at(0, 1.5, 2), 0, 'packed soil stays tight to the stem');
-  assert.ok(at(11.2, 0, 1) > 0.3, 'grit banked against the rock');
-  assert.equal(at(13, 0, 1), 0, 'collar is a skirt, not a moat');
-  assert.equal(at(10, 0, 0), 0, 'rocks leave the canopy channel alone');
-  assert.equal(rasterizeGroundFootprints({ canopies: [], rocks: [] }), null);
-
-  // Post Office Bay feeds real plants and rocks through, at bounded size.
-  const footprints = collectGroundFootprints(getEcology('POST_OFFICE_BAY'), 'POST_OFFICE_BAY');
-  assert.ok(footprints.canopies.length > 40, `canopies ${footprints.canopies.length}`);
-  assert.ok(footprints.rocks.length > 20, `rocks ${footprints.rocks.length}`);
-  assert.ok(footprints.canopies.every(item => item.radius >= 0.25 && item.radius <= 6));
-  const pob = rasterizeGroundFootprints(footprints);
-  assert.ok(pob.width <= 512 && pob.height <= 512, `${pob.width}x${pob.height}`);
-});
-
       }
     }
     const action = resolveFieldAction({ toolId: 'hammer', target: { id: `item:${item.typeId}`, kind: 'item', readable: true, name: item.name } });
@@ -6349,6 +6750,12 @@ test('automatic graphics quality is conservative for unknown and integrated GPUs
     deviceMemory: 8,
     hardwareConcurrency: 10,
     renderer: 'ANGLE Metal Renderer: Apple M1 Pro',
+  }), 'desktopLight');
+  // Safari masks the chip as "Apple GPU", shared with iPads: plain Light.
+  assert.equal(classifyAutomaticGraphicsQuality({
+    deviceMemory: undefined,
+    hardwareConcurrency: 10,
+    renderer: 'Apple GPU',
   }), 'mobile');
   assert.equal(classifyAutomaticGraphicsQuality({
     deviceMemory: 8,
@@ -6396,7 +6803,10 @@ test('every graphics choice maps onto a preset and the low tier cuts real work',
   assert.match(low, /postprocessing: false/);
   assert.match(low, /reflections: false/);
   assert.match(low, /shadowQuality: 'low'/);
-  assert.match(low, /dprMode: '1x'/);
+  assert.match(low, /dprMode: '1x'/);  const desktopLight = presetsBlock.slice(presetsBlock.indexOf('\n  desktopLight: {'), presetsBlock.indexOf('\n  performance: {'));
+  assert.match(desktopLight, /reflections: true/);
+  assert.match(desktopLight, /shadowQuality: 'standard'/);
+  assert.match(desktopLight, /dprMode: '1.25x'/);
 });
 
 test('adaptive DPR ladder removes device-clamped no-op rungs', () => {
@@ -6932,17 +7342,19 @@ test('post office bay procedural ecology forms a coastal-to-inland flora gradien
   const darwiniothamnus = ecology.proceduralFlora.find(layer => layer.speciesId === DARWINIOTHAMNUS_SPECIES.id);
   const pricklyPear = ecology.interactiveFlora.find(layer => layer.speciesId === OPUNTIA_MEGASPERMA_SPECIES.id);
   const authoredCacti = ecology.flora
-    .filter(layer => layer.id === 'opuntia' || layer.id === 'post-office-bay-candelabra-cactus')
+    .filter(layer => layer.id === 'opuntia' || layer.id.endsWith('candelabra-cactus'))
     .flatMap(layer => layer.items);
 
-  assert.equal(ecology.flora.length, 3);
-  assert.equal(croton.items.length, 72);
-  assert.equal(croton.placementStats.generatedPatchCount, 8);
-  assert.equal(darwiniothamnus.items.length, 54);
-  assert.equal(darwiniothamnus.placementStats.generatedPatchCount, 6);
+  // Coast flora plus the inland valley's Castela understorey, knoll
+  // candelabras and wash-bank Scalesia.
+  assert.equal(ecology.flora.length, 6);
+  assert.equal(croton.items.length, 118);
+  assert.equal(croton.placementStats.generatedPatchCount, 13);
+  assert.equal(darwiniothamnus.items.length, 84);
+  assert.equal(darwiniothamnus.placementStats.generatedPatchCount, 9);
   assert.equal(new Set(darwiniothamnus.items.map(item => item.variantIndex)).size, 9);
-  assert.equal(pricklyPear.sites.length, 6);
-  assert.equal(pricklyPear.placementStats.generatedPatchCount, 2);
+  assert.equal(pricklyPear.sites.length, 9);
+  assert.equal(pricklyPear.placementStats.generatedPatchCount, 3);
 
   const shoreDistance = item => item.z - postOfficeBayCoastZ(item.x);
   const meanShoreDistance = items => (
@@ -6967,7 +7379,7 @@ test('post office bay procedural ecology forms a coastal-to-inland flora gradien
   }
 
   const resolvedPricklyPearSites = getPricklyPearSites('POST_OFFICE_BAY');
-  assert.equal(resolvedPricklyPearSites.length, 10);
+  assert.equal(resolvedPricklyPearSites.length, 13);
   assert.deepEqual(
     resolvedPricklyPearSites.slice(-pricklyPear.sites.length).map(site => site.id),
     pricklyPear.sites.map(site => site.id),
@@ -7001,7 +7413,7 @@ test('procedural Opuntia overlays mix mature trees with nearby breakable juvenil
     assert.ok(young, `${ecology.zoneId} has interactive juvenile Opuntia`);
     assert.ok(mature, `${ecology.zoneId} has mature Opuntia`);
     assert.equal(mature.speciesId, OPUNTIA_MEGASPERMA_SPECIES.id);
-    assert.equal(mature.items.length, 4);
+    assert.equal(mature.items.length, ecology.zoneId === 'POST_OFFICE_BAY' ? 6 : 4);
     assert.match(mature.path, /runtime-big-opuntia\.glb$/);
     for (const item of mature.items) {
       const juvenileDistance = Math.min(...young.sites.map(site => (
@@ -8238,6 +8650,67 @@ test('every repertoire behaviour is well formed and every response has a reactio
     for (const reactionId of Object.values(repertoire.responses || {})) {
       assert.ok(repertoireModule.findBehavior(speciesId, reactionId), `${speciesId} response ${reactionId}`);
     }
+  }
+});
+
+test('held shotgun aim survives the firing lock and releases normally', () => {
+  const source = fs.readFileSync('three-game/components/player/playerEquipmentState.js', 'utf8');
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  for (const input of ['mouse', 'keyboard']) {
+    let now = 1000;
+    let shots = 0;
+    const aim = { holdIntent: input === 'mouse' };
+    const dependencies = {
+      './playerConfig': { ACTION_DURATION: {} },
+      './playerInputState': { pulseEquippedToolOnUse() {} },
+      '../../input/touchControls': { triggerToolUse() {} },
+      '../../shooting/fireShotgun': { tryFireShotgun() { shots += 1; return 'fired'; } },
+      '../../shooting/shotgunConfig': { SHOTGUN: { refireDelay: 0.5, fireActionDuration: 0.55 } },
+      '../../shooting/aimState': { shotgunAimState: aim },
+    };
+    const exports = {};
+    new Function('exports', 'require', 'performance', compiled)(
+      exports, id => { assert.ok(dependencies[id], id); return dependencies[id]; },
+      { now: () => now },
+    );
+    const stateRef = { current: { aimKeyHeldSince: null } };
+    const actions = [];
+    const context = {
+      keys: { useTool: input === 'keyboard' }, stateRef,
+      lastButtons: { current: {} }, lastToolId: { current: 'shotgun' },
+      lastFirePulse: { current: 0 }, firePulseRef: { current: 0 },
+      aimActiveRef: { current: false }, activeToolId: 'shotgun',
+      riflePressed: false, preInputMovementLocked: false,
+      startAction(clip) { stateRef.current.action = clip; actions.push(clip); },
+    };
+    const update = () => exports.updatePlayerEquipmentState(context);
+    update();
+    now += 300;
+    update();
+    assert.equal(context.aimActiveRef.current, true, input);
+    stateRef.current.action = null; // equip finishes
+    context.firePulseRef.current += 1;
+    update();
+    assert.equal(shots, 1, input);
+    assert.equal(stateRef.current.action, 'fireRifle');
+    context.preInputMovementLocked = true;
+    for (let frame = 0; frame < 10; frame += 1) {
+      now += 16;
+      update();
+      assert.equal(context.aimActiveRef.current, true, `${input}: firing frame ${frame}`);
+    }
+    assert.deepEqual(actions, ['rifleEquip', 'fireRifle']);
+    aim.holdIntent = false;
+    context.keys.useTool = false;
+    update();
+    assert.equal(context.aimActiveRef.current, false, `${input}: released during shot`);
+    assert.equal(shots, 1);
+    // A locked hip shot does not grant entry into aim mode.
+    aim.holdIntent = true;
+    update();
+    assert.equal(context.aimActiveRef.current, false, `${input}: locked entry`);
   }
 });
 

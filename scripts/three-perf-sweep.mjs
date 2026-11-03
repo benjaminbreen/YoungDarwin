@@ -38,6 +38,7 @@ const OUT_ROOT = path.join(process.cwd(), 'test-results', 'perf-lab');
 // which of them mattered.
 export const VARIANTS = {
   baseline: { params: {}, note: 'current defaults' },
+  'no-darwin-fabric': { params: { noDarwinFabric: '1' }, note: 'Darwin coat microrelief off' },
   'no-post': { params: { noPost: '1' }, note: 'entire post chain off' },
   'no-reflections': { params: { noReflections: '1' }, note: 'water planar reflection off' },
   'no-terrain-ao': { params: { noTerrainAo: '1' }, note: 'baked terrain occlusion off' },
@@ -62,6 +63,13 @@ export const VARIANTS = {
   'no-details': { params: { noDetails: '1' }, note: 'world detail props off' },
   'no-specimens': { params: { noSpecimens: '1' }, note: 'collectable fauna off' },
   'shadow-low': { params: { shadowQuality: 'low' }, note: 'small shadow map' },
+  // The Light tier as Automatic hands it to desktop Apple Silicon, and the
+  // same tier with the two features the 2026-08-04 ablation measured as free.
+  light: { params: { quality: 'mobile' }, note: 'Light tier' },
+  'light-full-shading': {
+    params: { quality: 'mobile', reflections: '1', shadowQuality: 'standard' },
+    note: 'Light tier + water reflection + 4096 shadows',
+  },
   'no-shadows': { params: { noShadows: '1' }, note: 'shadows off' },
 };
 

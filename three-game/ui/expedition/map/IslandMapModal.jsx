@@ -477,7 +477,7 @@ export function IslandMapModal({ open, onClose }) {
   const [tab, setTab] = useState('island');
   const [selectedId, setSelectedId] = useState(null);
   const day = useThreeGameStore(state => state.day);
-  const panelRef = useDismissableOverlay(open, onClose);
+  const panelRef = useDismissableOverlay(open, onClose, { sound: 'map' });
 
   useEffect(() => {
     if (!open || !selectedId) return;

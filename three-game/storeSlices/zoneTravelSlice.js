@@ -157,6 +157,7 @@ export const createZoneTravelActions = (set, get) => ({
         }
         : null,
       pushableObstacleOffsets: state.pushableObstacleOffsets,
+      looseRockPoses: state.looseRockPoses,
       carryPrompt: null,
       carriedObjectId: null,
       carryDropRequest: null,

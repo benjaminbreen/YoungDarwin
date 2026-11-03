@@ -43,7 +43,7 @@ export function MultiplayerLobby({ onCancel, onAdmitted }) {
   // A panel inside the launch menu rather than a modal over the world: Escape
   // backs out the way the Back button does, but focus is deliberately NOT
   // trapped — the menu around it is still the page.
-  const lobbyRef = useDismissableOverlay(true, onCancel, { trapFocus: false, autoFocus: false });
+  const lobbyRef = useDismissableOverlay(true, onCancel, { trapFocus: false, autoFocus: false, sound: null });
   const explanation = useMemo(() => (
     mode === 'create'
       ? 'Create an expedition, then copy its code from the in-game room panel.'

@@ -6,6 +6,8 @@ export const CONTEXT_PROMPT_PRIORITY = Object.freeze({
   fieldTool: 92,
   carry: 90,
   item: 70,
+  // Below examine prompts on the same spot; loose rocks are often beside finds.
+  push: 60,
   fieldObserve: 65,
   traversal: 40,
 });

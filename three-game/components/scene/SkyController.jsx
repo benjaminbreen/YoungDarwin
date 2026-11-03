@@ -55,7 +55,7 @@ const C = {
   keyDay: new THREE.Color('#ffe6b8'),     // warm tropical sunlight (was near-white)
   keyGolden: new THREE.Color('#ff9b4d'),
   hemiSkyNight: new THREE.Color('#0b1a33'),
-  hemiSkyDay: new THREE.Color('#b9dfef'),  // cooler sky fill; the key light carries the warmth
+  hemiSkyDay: new THREE.Color('#a9d2f6'),  // clear blue sky fill: cast shade reads sky-lit; the key light carries the warmth
   // Golden hour splits warm/cool: shadowed surfaces are lit only by blue sky
   // (cooler fill) while the ground bounce goes honeyed — the graded morning
   // look, driven entirely by these two lerp targets.
@@ -73,7 +73,7 @@ const C = {
   // mostly by the sky half — keep their contrast.
   hemiGroundSunlit: new THREE.Color('#c9a97c'),
   ambNight: new THREE.Color('#2a3a5c'),
-  ambDay: new THREE.Color('#e4e7de'),      // neutral daylight floor, slightly cool in shadows
+  ambDay: new THREE.Color('#dbe4ef'),      // daylight floor, faintly sky-blue so shade does not go grey
   fogNight: new THREE.Color('#0c1830'),
   fogMidnight: new THREE.Color('#03112b'),
   fogDay: new THREE.Color('#7fc4f2'),

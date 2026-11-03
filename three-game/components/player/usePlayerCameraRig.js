@@ -106,6 +106,7 @@ export function usePlayerCameraRig() {
   // value with shoulder/overhead/ADS. One shared value forced hero to rescale
   // a 2.8-22 range into a 2m band, so the wheel barely did anything.
   const heroZoomRef = useRef(CAMERA_DEV_INITIAL_HERO_DISTANCE);
+  const isometricZoomRef = useRef(CAMERA.isometricDistance);
   const cameraProfileRef = useRef(null);
   const draggingRef = useRef(false);
   const panningRef = useRef(false);
@@ -384,7 +385,9 @@ export function usePlayerCameraRig() {
         const look = getPlayerPreferences();
         const pitchDelta = dy * CAMERA.pitchSpeed * cameraDev.dragPitchScale * look.lookSensitivity * (look.invertY ? -1 : 1);
         yawRef.current -= dx * CAMERA.rotateSpeed * cameraDev.dragRotateScale * look.lookSensitivity;
-        pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - pitchDelta, CAMERA.minPitch, CAMERA.maxPitch);
+        if (useThreeGameStore.getState().viewMode !== 'isometric' || cameraProfileRef.current?.confined) {
+          pitchRef.current = THREE.MathUtils.clamp(pitchRef.current - pitchDelta, CAMERA.minPitch, CAMERA.maxPitch);
+        }
         manualOrbitUntilRef.current = performance.now() / 1000 + cameraDev.manualHold;
       }
     };
@@ -424,6 +427,14 @@ export function usePlayerCameraRig() {
       // Hero dollies in metres on its own value; every other mode shares the
       // historical zoom scalar (which ADS and the opening shot also read).
       const confined = cameraProfileRef.current?.confined === true;
+      if (wheelViewMode === 'isometric' && !confined) {
+        isometricZoomRef.current = THREE.MathUtils.clamp(
+          isometricZoomRef.current + normalizedDelta * 1.8,
+          CAMERA.isometricMinDistance,
+          CAMERA.isometricMaxDistance,
+        );
+        return;
+      }
       if (wheelViewMode === 'hero' && !confined) {
         heroZoomRef.current = THREE.MathUtils.clamp(
           heroZoomRef.current + normalizedDelta * cameraDev.heroZoomStep,
@@ -596,6 +607,9 @@ export function usePlayerCameraRig() {
     // aim, so the browser allows it; touch refuses quietly), leaving releases
     // it. Esc drops the lock without leaving aim — drag-aim still works.
     const aiming = aimActiveRef.current;
+    // Confined spaces retain their authored close camera; aiming still gets
+    // the ordinary shoulder sight line. Returning outside restores the view.
+    const isometricActive = viewMode === 'isometric' && !cameraProfile?.confined && !aiming;
     if (aiming !== wasAimingRef.current && typeof document !== 'undefined') {
       wasAimingRef.current = aiming;
       if (aiming) {
@@ -632,7 +646,7 @@ export function usePlayerCameraRig() {
       : THREE.MathUtils.damp(cameraFollowYRef.current, cameraTargetY, 7, delta);
     const cameraAnchor = scratch.cameraAnchor.copy(playerPosition);
     cameraAnchor.y = cameraFollowYRef.current;
-    const flightCamera = flying ? cameraProfile?.flight : null;
+    const flightCamera = flying && !isometricActive ? cameraProfile?.flight : null;
     const manualOrbitActive = now < manualOrbitUntilRef.current;
     manualOrbitBlendRef.current = THREE.MathUtils.damp(
       manualOrbitBlendRef.current,
@@ -1143,13 +1157,8 @@ export function usePlayerCameraRig() {
       const breathe = Math.sin(now * 1.6) * cameraDev.fpBreathe * (1 - bobAmpRef.current) * embodiment;
       const bobRight = scratch.cameraRight.set(1, 0, 0).applyAxisAngle(UP, yawRef.current);
       desired.addScaledVector(bobRight, bobSide);
-      // Impacts duck the head; recoil throws the muzzle up instead. Both ride
-      // the impulse envelope the chase camera already shakes on, so neither
-      // needs its own timer.
-      const recoilImpulse = cameraImpulse.kind === 'recoil';
-      const impactFade = recoilImpulse ? 0 : impulseFade;
-      const recoilFade = recoilImpulse ? impulseFade : 0;
-      desired.y += bobY + breathe - impactFade * cameraDev.fpLandingDip * embodiment;
+      // Impacts duck the head. Weapon recoil stays in the firing animation.
+      desired.y += bobY + breathe - impulseFade * cameraDev.fpLandingDip * embodiment;
       // Swimming, the eye belongs at the waterline rather than a head's height
       // above a body that is floating in it.
       if (swimCamera > 0.001) {
@@ -1161,12 +1170,8 @@ export function usePlayerCameraRig() {
       }
       camera.position.copy(desired);
       const pitchLimit = Math.max(0.2, cameraDev.fpPitchLimit);
-      // The recoil kick is deliberately a view offset, not a write to pitchRef:
-      // the muzzle rises and settles on its own without the shot permanently
-      // moving where the player was aiming.
       const lookPitch = THREE.MathUtils.clamp(
-        ((cameraProfile?.confined ? cameraProfile.defaultPitch : CAMERA.defaultPitch) - pitchRef.current) * cameraDev.fpPitchScale
-          + recoilFade * cameraDev.fpRecoilKick,
+        ((cameraProfile?.confined ? cameraProfile.defaultPitch : CAMERA.defaultPitch) - pitchRef.current) * cameraDev.fpPitchScale,
         -pitchLimit,
         pitchLimit,
       );
@@ -1182,6 +1187,17 @@ export function usePlayerCameraRig() {
       } else {
         camera.rotation.set(lookPitch, yawRef.current, lookRoll);
       }
+    } else if (isometricActive) {
+      const distance = isometricZoomRef.current;
+      const pitch = CAMERA.isometricPitch;
+      const pivot = scratch.rawPivot.copy(cameraAnchor);
+      pivot.y += cameraProfile?.pivotY ?? 1.22;
+      pivot.add(panOffsetRef.current);
+      const eye = scratch.top.set(0, Math.sin(pitch) * distance, Math.cos(pitch) * distance)
+        .applyAxisAngle(UP, yawRef.current).add(pivot);
+      eye.y = Math.max(eye.y, collisionAdapter.terrainHeight(eye.x, eye.z) + CAMERA_GROUND_CLEARANCE);
+      camera.position.lerp(eye.add(cameraShake), 1 - Math.exp(-8 * delta));
+      camera.lookAt(pivot);
     } else if (viewMode === 'top') {
       const height = cameraProfile?.topHeight
         ?? THREE.MathUtils.clamp(zoomRef.current * cameraDev.topHeightScale, 10, CAMERA.topMaxHeight);
@@ -1499,7 +1515,7 @@ export function usePlayerCameraRig() {
       if (Math.abs(skidRollRef.current) > 0.0005) camera.rotateZ(skidRollRef.current);
     }
     if (!statusViewOpen && !focusSession && statusLookRef.current) {
-      if (viewMode === 'first' || viewMode === 'top') {
+      if (viewMode === 'first' || viewMode === 'top' || isometricActive) {
         // These two set an exact rotation of their own. Easing a lookAt on top
         // of it fights them, and in first person the eye sits on the pivot
         // being looked at, so the direction is degenerate — closing the journal
@@ -1528,7 +1544,9 @@ export function usePlayerCameraRig() {
     const firstPersonFov = viewMode === 'first' && !flightCamera && !statusViewOpen && !focusSession
       ? cameraDev.fpFovBonus
       : 0;
-    const targetFov = THREE.MathUtils.lerp(embodiedFov, SHOTGUN.ads.fov, adsBlendRef.current)
+    const targetFov = isometricActive && !statusViewOpen && !focusSession && !openingCameraActive
+      ? CAMERA.isometricFov
+      : THREE.MathUtils.lerp(embodiedFov, SHOTGUN.ads.fov, adsBlendRef.current)
       + (sprintBlendRef.current * SPRINT.fovBonus + surgePop + firstPersonFov) * (1 - adsBlendRef.current);
     if (Math.abs(camera.fov - targetFov) > 0.02) {
       camera.fov = targetFov;

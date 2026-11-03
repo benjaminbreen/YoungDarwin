@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { baseSpecimens } from '../data/specimens';
 import { getThreeIslandLocation } from '../three-game/data';
 import { setTypingMode } from '../three-game/input/typingMode';
+import { playPageTurn } from '../three-game/audio/interfaceFoley';
 import { useThreeGameStore } from '../three-game/store';
 import { PanelTabs } from '../three-game/ui/expedition/ExpeditionPanel';
 import { downloadExpeditionText, openExpeditionPrintReport } from '../three-game/ui/expeditionExport';
@@ -539,6 +540,7 @@ function JournalPanel({ onClose, onOpenMap }) {
   const goToPage = index => {
     const key = pageKeys[Math.min(pageKeys.length - 1, Math.max(0, index))];
     if (!key || key === selectedKey) return;
+    playPageTurn();
     setSelectedKey(key);
     setMobileView('page');
   };
@@ -617,7 +619,7 @@ function JournalPanel({ onClose, onOpenMap }) {
   };
 
   return (
-    <ExpeditionModal title="Journal" subtitle="My observations and notes" onClose={onClose} width="min(100rem, 98vw)">
+    <ExpeditionModal title="Journal" subtitle="My observations and notes" onClose={onClose} width="min(100rem, 98vw)" sound="book">
       <div className="relative grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 px-2.5 pb-2.5 sm:px-4 sm:pb-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <EntryList
           className={mobileView === 'page' ? 'hidden lg:flex' : 'flex'}

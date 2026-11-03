@@ -427,7 +427,7 @@ function SpecimenCaseTab() {
 
 export function InventoryModal({ open, onClose, initialTab = 'tools' }) {
   const [tab, setTab] = useState(initialTab);
-  const panelRef = useDismissableOverlay(open, onClose);
+  const panelRef = useDismissableOverlay(open, onClose, { sound: null });
   const closeCaseReleaseMode = useThreeGameStore(state => state.closeCaseReleaseMode);
 
   useEffect(() => {

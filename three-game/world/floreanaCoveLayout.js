@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { terrainBiomeAt, terrainHeight, terrainSlopeAt, terrainSurfaceNoise } from './terrain';
-import { POST_OFFICE_BAY_TRAIL, coveWaterMask, islandMask, postOfficeTrailInfluence } from './regions/postOfficeBay/terrain';
-import { buildRockObstacles } from './proceduralRocks';
+import {
+  POST_OFFICE_BAY_LOOKOUT,
+  POST_OFFICE_BAY_TRAIL,
+  coveWaterMask,
+  islandMask,
+  postOfficeArroyoInfo,
+  postOfficeTrailInfluence,
+  postOfficeWestLavaMask,
+} from './regions/postOfficeBay/terrain';
+import { buildRockObstacles, seatRockInTerrain } from './proceduralRocks';
 import { caveCliffObstacle } from './caveCliffObstacle';
 import { POST_OFFICE_BAY_SEA_TUBE, postOfficeSeaTubeWorld } from './regions/postOfficeBay/seaTube';
 
@@ -49,6 +57,13 @@ export const floreanaTrailMarkers = [
   ...POST_OFFICE_BAY_TRAIL.map(([x, z], index) => [x, z, index === 0 ? -0.35 : index < 3 ? -0.18 : 0.05]),
 ];
 
+// islandMask describes the cove's shoreline only; well behind the beach it
+// grows past 1 over plainly dry ground, so it must not be read as "offshore"
+// there.
+function offshore(x, z) {
+  return z < 20 && islandMask(x, z) > 1.0;
+}
+
 function smoothBand(value, min, max, feather = 2.5) {
   return Math.min(
     THREE.MathUtils.smoothstep(value, min - feather, min),
@@ -61,7 +76,7 @@ function trailInfluence(x, z) {
 }
 
 export function dryGrassSuitability(x, z, y = terrainHeight(x, z)) {
-  if (islandMask(x, z) > 1.0 || coveWaterMask(x, z) > 0.58 || y < -0.48 || y > 6.2) return 0;
+  if (offshore(x, z) || coveWaterMask(x, z) > 0.58 || y < -0.48 || y > 6.2) return 0;
   const biome = terrainBiomeAt(x, z, y);
   const slope = terrainSlopeAt(x, z).grade;
   if (slope > 0.78) return 0;
@@ -98,10 +113,18 @@ function insideCoveBoulder(x, z) {
 
 function acceptedForLayer(layer, x, z, y) {
   if (insideCoveBoulder(x, z)) return false;
-  if (islandMask(x, z) > 1.0 || coveWaterMask(x, z) > 0.58 || y < -0.55) return false;
+  if (offshore(x, z) || coveWaterMask(x, z) > 0.58 || y < -0.55) return false;
   const biome = terrainBiomeAt(x, z, y);
   const noise = terrainSurfaceNoise(x, z);
   if (layer === 'basalt') return (biome === 'wet-basalt' || biome === 'black-lava') && noise > -0.35;
+  // Blocky aa heaped along the west lava tongue, clear of the whalers' track.
+  if (layer === 'aa-block') return postOfficeWestLavaMask(x, z) > 0.55 && trailInfluence(x, z) < 0.05 && noise > -0.5;
+  // Larger cobbles and fallen bank blocks along the dry wash, never on the
+  // ford the lookout spur crosses.
+  if (layer === 'wash-boulder') {
+    const arroyo = postOfficeArroyoInfo(x, z);
+    return arroyo.channel > 0.25 && arroyo.depth > 0.6 && trailInfluence(x, z) < 0.05;
+  }
   if (layer === 'scree') return biome === 'tuff-ridge' || (z > 8 && noise > 0.05);
   // Post Office Bay's overlapping coastal blend intentionally resolves much
   // of the dry shelf to wet-basalt as its strongest single biome. Vegetation
@@ -180,6 +203,23 @@ export function getPostOfficeBayOpuntiaHazards() {
   return postOfficeBayOpuntiaHazards;
 }
 
+// Hand-placed loose stones round the Post Office Bay landing, where the
+// scattered basalt is all settled into the dirt. Ground stones take their y
+// from the terrain; the perched one sits on top of basalt-30.
+const POST_OFFICE_BAY_LOOSE_ROCKS = Object.freeze([
+  // Round cobbles on the steep fall below the landing knoll.
+  { id: 'loose-knoll-cobble', x: -6.0, z: 19.5, radiusX: 0.28, radiusY: 0.25, radiusZ: 0.27, yaw: 0.4 },
+  { id: 'loose-north-cobble', x: -5.2, z: 30.8, radiusX: 0.24, radiusY: 0.21, radiusZ: 0.23, yaw: 1.9 },
+  // A heavy round boulder high on the eastern fall: hard work, then trouble.
+  { id: 'loose-east-boulder', x: -6.5, z: 13.5, radiusX: 0.45, radiusY: 0.4, radiusZ: 0.42, yaw: 2.6 },
+  // A flat slab on level ground that rocks underfoot.
+  { id: 'loose-rocking-slab', x: -9.4, z: 22.7, radiusX: 0.42, radiusY: 0.16, radiusZ: 0.34, yaw: 0.9 },
+  // A small stone to shove about on the flat.
+  { id: 'loose-flat-stone', x: -11.0, z: 30.6, radiusX: 0.2, radiusY: 0.17, radiusZ: 0.19, yaw: 5.1 },
+  // Perched on the crown of basalt-30.
+  { id: 'loose-perched-stone', x: -15.96, z: 16.31, radiusX: 0.3, radiusY: 0.18, radiusZ: 0.26, yaw: 1.2, perchedOn: 'basalt-30' },
+]);
+
 export function getPostOfficeBayBasaltBlocks() {
   if (postOfficeBayBasaltBlocks) return postOfficeBayBasaltBlocks;
   postOfficeBayBasaltBlocks = makeFloreanaScatter('basalt', 54, 4, {
@@ -196,8 +236,101 @@ export function getPostOfficeBayBasaltBlocks() {
     radiusZ: item.scale * 0.9,
     centerLift: item.scale * 0.34,
     sink: item.scale * 0.08,
-  })).concat(SEA_TUBE_TALUS.map(seaTubeTalusBlock));
+  }))
+    .concat(inlandBlocks())
+    .map(block => seatRockInTerrain(block, terrainHeight))
+    // The talus is hand-placed to frame the tube mouth; leave its seating alone.
+    .concat(SEA_TUBE_TALUS.map(seaTubeTalusBlock));
+  postOfficeBayBasaltBlocks = postOfficeBayBasaltBlocks.concat(
+    POST_OFFICE_BAY_LOOSE_ROCKS.map(stone => looseStoneBlock(stone, postOfficeBayBasaltBlocks)),
+  );
   return postOfficeBayBasaltBlocks;
+}
+
+// loose: true hands these to Rapier (world/looseRocks.js). A perched stone
+// rests on its host's visual crown instead of the terrain.
+function looseStoneBlock(stone, blocks) {
+  const host = stone.perchedOn ? blocks.find(block => block.id === stone.perchedOn) : null;
+  const y = host
+    ? host.y + (host.radiusY || 0) * 2 - (host.sink || 0) * 2 - 0.02
+    : terrainHeight(stone.x, stone.z);
+  return {
+    ...stone,
+    y,
+    sink: 0.02,
+    scale: Math.max(stone.radiusX, stone.radiusY, stone.radiusZ),
+    color: '#5b564b',
+    loose: true,
+  };
+}
+
+// The inland valley's stone: clinkery aa blocks on the west tongue (dark, with
+// the rust of oxidised clinker on a few), rounded cobbles washed down the dry
+// wash, and a broken crown of pale tuff round the lookout's summit hollow.
+function inlandBlocks() {
+  const aa = makeFloreanaScatter('aa-block', 44, 31, {
+    minX: -59,
+    maxX: -34,
+    minZ: 30,
+    maxZ: 84,
+    scale: [0.34, 1.05],
+  }).map(item => ({
+    ...item,
+    id: `aa-${item.id}`,
+    color: item.tone > 0.82 ? '#5e3a2c' : item.tone > 0.45 ? '#2f2d29' : '#3c3933',
+    radiusX: item.scale * 1.15,
+    radiusY: item.scale * 0.7,
+    radiusZ: item.scale * 1.0,
+    centerLift: item.scale * 0.38,
+    sink: item.scale * 0.1,
+  }));
+  const wash = makeFloreanaScatter('wash-boulder', 16, 37, {
+    minX: 4,
+    maxX: 30,
+    minZ: 38,
+    maxZ: 80,
+    scale: [0.26, 0.62],
+  }).map(item => ({
+    ...item,
+    id: `wash-${item.id}`,
+    color: item.tone > 0.5 ? '#4d4a43' : '#5d574c',
+    radiusX: item.scale * 1.2,
+    radiusY: item.scale * 0.5,
+    radiusZ: item.scale * 0.95,
+    centerLift: item.scale * 0.28,
+    sink: item.scale * 0.12,
+    // Water-worn: rounded and matte, not fresh glassy fracture.
+    materialKey: 'mutedBasalt',
+  }));
+  const crown = Array.from({ length: 9 }, (_, index) => {
+    const angle = index * 0.71 + seeded(index, 41) * 0.4 - 0.9;
+    const reach = 4.6 + seeded(index, 43) * 1.8;
+    const x = POST_OFFICE_BAY_LOOKOUT.x + 1.5 + Math.cos(angle) * reach;
+    const z = POST_OFFICE_BAY_LOOKOUT.z + 1.2 + Math.sin(angle) * reach * 0.86;
+    const scale = 0.42 + seeded(index, 47) * 0.62;
+    return {
+      id: `lookout-crown-${index}`,
+      x,
+      y: terrainHeight(x, z),
+      z,
+      scale,
+      yaw: seeded(index, 53) * Math.PI * 2,
+      variant: index % 4,
+      tone: seeded(index, 59),
+      color: index % 3 === 0 ? '#8c7a5e' : '#7a6d58',
+      radiusX: scale * 1.3,
+      radiusY: scale * 0.82,
+      radiusZ: scale * 1.05,
+      centerLift: scale * 0.4,
+      sink: scale * 0.14,
+      materialKey: 'mutedBasalt',
+    };
+  // The north arc stays open so the view from the hollow down to the
+  // anchorage is not walled off.
+  }).filter(block => block.z > POST_OFFICE_BAY_LOOKOUT.z - 1.5);
+  // Clinker interlocks, cobbles sit bedded in the wash and the crown is
+  // weathered out of the knoll itself: none of them creep when shouldered.
+  return [...aa, ...wash, ...crown].map(block => ({ ...block, fixed: true }));
 }
 
 // Fallen blocks heaped round the sea-tube mouth, so that from the shore it

@@ -15,7 +15,7 @@ const CAMERA_CONTROLS = [
   'Scroll: zoom',
   'Z / X: turn the camera left / right',
   'Tab: put the camera back behind you',
-  'V: switch between the follow camera and first person',
+  'V: cycle follow camera, first person, and isometric view',
 ];
 
 const INTERFACE_CONTROLS = polished => [
@@ -75,6 +75,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'Space: jump',
       'C: crouch (while running: slide)',
       'Q: climb up or down a wall or boulder',
+      'P (hold): push a loose rock when the prompt shows',
     ]],
     ['Camera', CAMERA_CONTROLS],
     ['Fieldwork', [

@@ -16,6 +16,9 @@ export const POST_GRADE_DEFAULTS = Object.freeze({
   vignetteStrength: 1.2,
   // VignetteEffect offset: how far from the edges the darkening reaches.
   vignetteOffset: 0.46,
+  // Multiplies the time-of-day split tone from colorGrade.js (warm lit
+  // faces and cool shade at dawn, amber and violet at dusk). 0 disables it.
+  splitToneStrength: 1,
 });
 
 export const postGradeTuning = { ...POST_GRADE_DEFAULTS };

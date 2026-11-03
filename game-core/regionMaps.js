@@ -71,7 +71,10 @@ const AUTHORED_REGION_TERRAIN = {
   COLONIST_RANCHO: { preset: 'colonist-rancho-interior', segments: 24, width: 5.8, depth: 4.4 },
   // The cove's broad analytic forms and shoreline remain stable at 288; the
   // former 360 grid spent ~36% more terrain triangles on sub-texel detail.
-  POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 288 },
+  // The map runs 172 m north-south so the land behind the beach reaches a
+  // real inland valley; the grid is square, so 320 keeps the long axis near
+  // the old ~0.5 m cell.
+  POST_OFFICE_BAY: { preset: 'floreana-cove', segments: 320, depth: 172 },
   ALT_POST_OFFICE_BAY: { preset: 'floreana-cove-alt', segments: 420 },
   POST_SCRUB_RISE: { preset: 'post-office-scrub-rise', segments: 280 },
   COASTAL_SCRUBLAND: { preset: 'eastern-coastal-scrubland', segments: 248 },

@@ -130,6 +130,13 @@ export const LANDING_DUST = {
 };
 
 export const CAMERA = {
+  // A fixed elevated angle and a narrower lens give the overhead view its
+  // isometric feel while retaining the scene's perspective-camera effects.
+  isometricPitch: Math.PI * 0.3,
+  isometricDistance: 24,
+  isometricMinDistance: 12,
+  isometricMaxDistance: 48,
+  isometricFov: 35,
   minZoom: 2.8,
   maxZoom: 22,
   // Top view has its own long zoom range. At the maximum this lifts the

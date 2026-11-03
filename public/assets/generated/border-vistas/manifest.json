@@ -59,7 +59,7 @@
     },
     "NW_REEF": {
       "file": "nw_reef.bin",
-      "bytes": 391896
+      "bytes": 391900
     },
     "N_SHORE": {
       "file": "n_shore.bin",
@@ -71,7 +71,7 @@
     },
     "POST_OFFICE_BAY": {
       "file": "post_office_bay.bin",
-      "bytes": 777900
+      "bytes": 730688
     },
     "POST_SCRUB_RISE": {
       "file": "post_scrub_rise.bin",

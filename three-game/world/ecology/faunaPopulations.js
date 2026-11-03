@@ -11,7 +11,8 @@
 //
 // Counts are modest on purpose: every actor is a live rig and a brain.
 
-import { isWalkableTerrain } from '../terrain';
+import { isWalkableTerrain, terrainHeight } from '../terrain';
+import { getRuntimeObstacles, obstacleSurfaceHeightForActor } from '../obstacles';
 import { buildAmbientWildlifeLayer } from './ambientWildlife';
 import { getSpecimenById, specimenActorId } from '../../../game-core/specimens';
 
@@ -20,6 +21,14 @@ export const FAUNA_POPULATIONS = {
   POST_OFFICE_BAY: [
     { speciesId: 'lavalizard', count: 3, center: [44, 17], spread: [5, 4], habitat: [3.4, 2.6] },
     { speciesId: 'lavalizard', count: 2, center: [-51, 17], spread: [4, 4], habitat: [3.4, 2.6] },
+    // The inland valley, around the animals authored there in
+    // data/locations.js: a second mockingbird along the wash, a second finch
+    // in the palo santo, lizards on the lava tongue and locusts in the grass
+    // of the wash's fan.
+    { speciesId: 'floreanamockingbird', count: 1, center: [12, 72], spread: [7, 5], habitat: [6.4, 4.4] },
+    { speciesId: 'mediumgroundfinch', count: 1, center: [-31, 68], spread: [5, 4], habitat: [5.2, 3.2] },
+    { speciesId: 'lavalizard', count: 2, center: [-47, 58], spread: [4, 7], habitat: [3.4, 2.6] },
+    { speciesId: 'galapagospaintedlocust', count: 2, center: [30, 53], spread: [4, 3], habitat: [4.2, 3.2] },
   ],
   LAVA_FLATS: [
     { speciesId: 'lavalizard', count: 4, center: [7.6, -7.2], spread: [6, 5], habitat: [3.4, 2.6] },
@@ -73,9 +82,25 @@ function seedFor(zoneId, index) {
   return 50000 + (hash % 40000);
 }
 
+// Rocks, cactus and props an animal must not be scattered inside. Read lazily:
+// obstacles.js reaches this module back through the ecology.
+function insideObstacle(obstacles, x, z, zoneId) {
+  const ground = terrainHeight(x, z, zoneId);
+  return obstacles.some(obstacle => {
+    if (Math.hypot((obstacle.x ?? 0) - x, (obstacle.z ?? 0) - z) > (obstacle.radius || 1) + 0.5) return false;
+    const top = obstacleSurfaceHeightForActor(obstacle, x, z, 0);
+    return Number.isFinite(top) && top > ground + 0.25;
+  });
+}
+
 export function buildFaunaPopulationLayers(zoneId) {
   const entries = FAUNA_POPULATIONS[zoneId];
   if (!entries) return [];
+  let obstacles = null;
+  const clear = (x, z) => {
+    obstacles ||= getRuntimeObstacles(zoneId);
+    return !insideObstacle(obstacles, x, z, zoneId);
+  };
   return entries.map((entry, index) => buildAmbientWildlifeLayer(zoneId, {
     id: `population-${entry.speciesId}-${index}`,
     speciesId: entry.speciesId,
@@ -89,7 +114,7 @@ export function buildFaunaPopulationLayers(zoneId) {
     },
     scale: [0.94, 1.06],
     maxGrade: 0.6,
-    accept: (biome, x, z) => isWalkableTerrain(x, z, zoneId),
+    accept: (biome, x, z) => isWalkableTerrain(x, z, zoneId) && clear(x, z),
     habitatRadiusX: entry.habitat[0],
     habitatRadiusZ: entry.habitat[1],
   })).filter(layer => layer.items.length);

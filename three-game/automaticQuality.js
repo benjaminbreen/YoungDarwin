@@ -7,6 +7,10 @@
 // identifies hardware that is very likely discrete.
 
 const SOFTWARE_RENDERER_PATTERN = /swiftshader|llvmpipe|software|mesa offscreen|microsoft basic render/i;
+// Apple Silicon Macs report the chip by name through ANGLE/Metal in Chromium
+// and Firefox ("Apple M1 Pro"). Safari masks it as "Apple GPU", which also
+// covers iPads, so that string stays on the plain Light tier.
+const APPLE_SILICON_RENDERER_PATTERN = /apple m\d/i;
 const INTEGRATED_RENDERER_PATTERN = /apple m\d|apple gpu|intel(?:\(r\))? (?:uhd|hd|iris)|adreno|mali|powervr|tegra/i;
 const DISCRETE_RENDERER_PATTERN = /nvidia|geforce|quadro|rtx|gtx|radeon (?:rx|pro)|amd radeon pro|intel(?:\(r\))? arc/i;
 
@@ -49,6 +53,9 @@ export function classifyAutomaticGraphicsQuality({
   if (Number.isFinite(cores) && cores > 0 && cores <= 4) return 'low';
   if (rendererName && SOFTWARE_RENDERER_PATTERN.test(rendererName)) return 'low';
   if (!rendererName) return 'mobile';
+  // Light's resolution, with the reflection and full shadow map back: on this
+  // hardware the perf lab measured both as free (docs/perf-lab.md).
+  if (APPLE_SILICON_RENDERER_PATTERN.test(rendererName)) return 'desktopLight';
   if (INTEGRATED_RENDERER_PATTERN.test(rendererName)) return 'mobile';
   return DISCRETE_RENDERER_PATTERN.test(rendererName) ? 'performance' : 'mobile';
 }

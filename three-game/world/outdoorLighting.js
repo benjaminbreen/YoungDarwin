@@ -55,10 +55,12 @@ export function computeOutdoorLightRig({
       * (1 - underwater * 0.22),
   );
 
+  // Hard clear sun still eases the fill, but only gently: a bright beach sky
+  // and sand keep shadow sides lit, so a mid-morning frame must not go murky.
   const hemiIntensity = Math.max(
     0.16,
     (0.32
-      + d * (0.84 + weatherSoftness * 0.58 - g * 0.25 - hardSun * 0.42 - clearVivid * 0.06)
+      + d * (0.84 + weatherSoftness * 0.58 - g * 0.25 - hardSun * 0.24 - clearVivid * 0.06)
       + cloud * 0.08)
       * (1 - dim * 0.18)
       * (1 - underwater * 0.2),
@@ -67,7 +69,7 @@ export function computeOutdoorLightRig({
   const ambientIntensity = Math.max(
     0.12,
     (0.22
-      + d * (0.1 + weatherSoftness * 0.22 + mistAmount * 0.06 - g * 0.08 - hardSun * 0.15 - clearVivid * 0.04)
+      + d * (0.1 + weatherSoftness * 0.22 + mistAmount * 0.06 - g * 0.08 - hardSun * 0.08 - clearVivid * 0.04)
       + (1 - d) * 0.04)
       * (1 - underwater * 0.24),
   );
@@ -75,7 +77,7 @@ export function computeOutdoorLightRig({
   const fillIntensity = Math.max(
     0.04,
     (0.12
-      + d * (0.1 + weatherSoftness * 0.38 + g * 0.13 - hardSun * 0.21 - clearVivid * 0.04))
+      + d * (0.1 + weatherSoftness * 0.38 + g * 0.13 - hardSun * 0.12 - clearVivid * 0.04))
       * (1 - dim * 0.32)
       * (1 - underwater * 0.34),
   );
@@ -95,9 +97,12 @@ export function computeOutdoorLightRig({
   const shadowRadius = lerp(0.95, 3.5, shadowSoftness);
   // Capped below 1 so even a hard clear-day sun leaves shadowed surfaces some
   // readable fill rather than crushing to full black. Low raking sun casts
-  // *stronger* shadows, not weaker — goldenSideLight adds here.
+  // *stronger* shadows, not weaker — goldenSideLight adds here. Under hard
+  // clear sun the cap rises: whatever sun leaks past it lands in the shadow as
+  // warm key light, which kept shade brown-grey when a real clear-sky shadow is
+  // lit by the blue sky alone. The sky fill carries that shade instead.
   const shadowIntensity = Math.min(
-    0.78,
+    0.78 + hardSun * 0.12,
     clamp01(0.7 - weatherSoftness * 0.38 + goldenSideLight * 0.12 + hardSun * 0.12 + clearVivid * 0.03),
   );
   // Normal bias creates a visible receiver/caster gap at raking sun angles.

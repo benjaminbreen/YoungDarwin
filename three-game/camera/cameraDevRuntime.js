@@ -116,9 +116,6 @@ export const CAMERA_DEV_DEFAULTS = {
   // into a hard turn (a multiple of the shared skid roll).
   fpLandingDip: 0.16,
   fpRollScale: 1.6,
-  // Radians the view throws up on a recoil impulse. A view offset only — the
-  // shot does not move where the player was aiming.
-  fpRecoilKick: 0.11,
   // Height of the eye above the waterline while swimming. Without it the head
   // floats a full body-height above a body that is lying in the water.
   fpSwimEyeAbove: 0.12,

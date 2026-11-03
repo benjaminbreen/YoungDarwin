@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { isInsidePostOfficeSeaTubeRock } from './seaTube';
+import { postScrubRiseHeight } from '../postScrubRise/terrain';
 import {
   WATER_LEVEL,
   crackNoise,
@@ -189,15 +190,21 @@ export const POST_OFFICE_BAY_TRAIL = [
   [-58, 6, 2.1],
 ];
 
-// The inland fork continues to the south transition seam so the visible route
-// actually joins Post Office Scrub Rise. The older west branch remains as a
-// secondary trail through the bay's lava shelf.
+// The inland fork climbs the valley behind the beach to the south transition
+// seam, so the visible route actually joins Post Office Scrub Rise. This is
+// the track the whalers wore hauling tortoises down from the highlands: it
+// keeps to the valley floor, west of the dry wash, and passes their resting
+// place under the palo santo. The older west branch remains as a secondary
+// trail through the bay's lava shelf.
 export const POST_OFFICE_BAY_SCRUB_TRAIL = [
   [-9, 28, 2.3],
   [-10, 39, 2.05],
-  [-8, 49, 1.9],
+  [-7.5, 49, 1.95],
+  [-10, 58, 1.9],
+  [-12, 66, 1.85],
+  [-9.5, 76, 1.8],
   pathPoint(POST_OFFICE_SCRUB_RISE_SEAM.source.point, 1.78),
-  [-6.6, 83, 1.72],
+  [-6.6, 112, 1.72],
 ];
 
 // The coastal track forks east toward Northern Shore, then continues beyond
@@ -207,10 +214,23 @@ export const POST_OFFICE_BAY_NORTH_SHORE_TRAIL = [
   [1, 20, 2.25],
   [14, 27, 2.15],
   [29, 25, 2.05],
-  [44, 17, 1.94],
+  [44, 19, 1.94],
   pathPoint(POST_OFFICE_NORTH_SHORE_SEAM.source.point, 1.82),
-  [70, 9, 1.76],
-  [84, 13, 1.7],
+  [70, 12, 1.76],
+  [84, 15, 1.7],
+];
+
+// A fainter spur leaves the whalers' track, fords the dry wash on its cobble
+// bed and climbs the lookout, from where the whole anchorage and the Beagle
+// lie below.
+export const POST_OFFICE_BAY_LOOKOUT_SPUR = [
+  [-7.5, 49, 1.45],
+  [2, 52, 1.35],
+  [10, 55, 1.3],
+  [17.5, 57.2, 1.4],
+  [25, 59.4, 1.3],
+  [31, 61.6, 1.25],
+  [36.5, 63.4, 1.3],
 ];
 
 export const POST_OFFICE_BAY_BARREL_SPUR = [
@@ -219,12 +239,127 @@ export const POST_OFFICE_BAY_BARREL_SPUR = [
   [0.0, 8.5, 2.15],
 ];
 
+// --- The inland valley ------------------------------------------------------
+//
+// Behind the landing the ground rises gently south toward the highlands, as
+// it does behind the real bay: a shallow valley of grey, nearly leafless dry
+// forest (Darwin's "stunted trees", palo santo above all) between an old
+// black lava tongue on the west and a weathered tuff knoll on the east. A dry
+// wash comes down the valley floor and spreads into a fan before it reaches
+// the beach scrub.
+
+// Dry wash centreline [x, z]. The head lies just inside the south edge; the
+// channel dies out on its fan before the north-shore track.
+export const POST_OFFICE_BAY_ARROYO = [
+  [17, 84],
+  [14, 77],
+  [19, 67],
+  [15.5, 57],
+  [20, 48],
+  [16, 40],
+  [15, 35],
+];
+const ARROYO_BED_HALF_WIDTH = 2.1;
+const ARROYO_BANK = 2.6;
+
+// The lookout: an eroded tuff knoll with a shallow summit hollow.
+export const POST_OFFICE_BAY_LOOKOUT = { x: 37, z: 64, radiusX: 17, radiusZ: 15, height: 7.4 };
+
+// Where the tortoise haulers rested: a level patch beside the track with a
+// blackened hearth ring and the shells of animals eaten there.
+export const POST_OFFICE_BAY_WHALERS_REST = { x: -17, z: 62.5, radius: 4.4 };
+
+// The densest stand of palo santo, on the gentle slope between the track and
+// the lava tongue.
+export const POST_OFFICE_BAY_WOODLAND = { x: -31, z: 64, radiusX: 17, radiusZ: 17 };
+
+export function postOfficeArroyoInfo(x, z) {
+  if (z < 30 || z > 90 || x < 4 || x > 30) return { distance: Infinity, depth: 0, bed: 0, channel: 0 };
+  let distance = Infinity;
+  for (let i = 0; i < POST_OFFICE_BAY_ARROYO.length - 1; i += 1) {
+    const [ax, az] = POST_OFFICE_BAY_ARROYO[i];
+    const [bx, bz] = POST_OFFICE_BAY_ARROYO[i + 1];
+    distance = Math.min(distance, pointSegmentDistance(x, z, ax, az, bx, bz));
+  }
+  // Deepest through the middle reach; shoals out on the fan and at the head.
+  const depth = 1.55
+    * THREE.MathUtils.smoothstep(z, 36, 52)
+    * (1 - THREE.MathUtils.smoothstep(z, 73, 84));
+  const wobble = Math.sin(z * 0.37) * 0.35;
+  const bedHalf = ARROYO_BED_HALF_WIDTH + wobble;
+  const channel = 1 - THREE.MathUtils.smoothstep(distance, bedHalf, bedHalf + ARROYO_BANK);
+  const bed = 1 - THREE.MathUtils.smoothstep(distance, bedHalf * 0.55, bedHalf + 0.6);
+  return { distance, depth, bed: bed * Math.min(1, depth * 1.6), channel };
+}
+
+export function postOfficeWoodlandMask(x, z) {
+  const d = ellipseDistance(x, z, POST_OFFICE_BAY_WOODLAND.radiusX, POST_OFFICE_BAY_WOODLAND.radiusZ, POST_OFFICE_BAY_WOODLAND.x, POST_OFFICE_BAY_WOODLAND.z);
+  return 1 - THREE.MathUtils.smoothstep(d, 0.55, 1.15);
+}
+
+export function postOfficeLookoutMask(x, z) {
+  const { x: cx, z: cz, radiusX, radiusZ } = POST_OFFICE_BAY_LOOKOUT;
+  return Math.max(0, 1 - ellipseDistance(x, z, radiusX, radiusZ, cx, cz));
+}
+
+// The old aa tongue along the west side of the valley.
+export function postOfficeWestLavaMask(x, z) {
+  return THREE.MathUtils.smoothstep(-x + Math.sin(z * 0.09) * 3.2, 38, 50)
+    * THREE.MathUtils.smoothstep(z, 26, 40);
+}
+
+// Weight of the inland valley (0 on the coast, 1 beyond z ~ 44).
+export function postOfficeInlandMask(z) {
+  return THREE.MathUtils.smoothstep(z, 30, 46);
+}
+
+function postOfficeInlandRelief(x, z, movementSurface) {
+  const inland = postOfficeInlandMask(z);
+  if (inland <= 0) return 0;
+  const broad = elevationNoise(x * 0.05 - 3, z * 0.05 + 7);
+  // Gentle climb toward the highlands.
+  let relief = THREE.MathUtils.smoothstep(z, 36, 82) * 1.35;
+  // West lava tongue: a raised, blocky shoulder.
+  const lava = postOfficeWestLavaMask(x, z);
+  if (lava > 0) {
+    relief += lava * (2.6 + broad * 1.1);
+    relief += lava * crackNoise(x * 0.31 + 2, z * 0.27 - 4) * (movementSurface ? 0.16 : 0.42);
+  }
+  // East flank rises into the knoll and the high ground beyond.
+  relief += THREE.MathUtils.smoothstep(x, 44, 57) * THREE.MathUtils.smoothstep(z, 32, 48) * 2.1;
+  const lookout = postOfficeLookoutMask(x, z);
+  if (lookout > 0) {
+    const dome = Math.pow(THREE.MathUtils.smoothstep(lookout, 0, 1), 1.25);
+    // A worn summit hollow, the last trace of the vent.
+    const dx = (x - POST_OFFICE_BAY_LOOKOUT.x - 1.5) / 4.2;
+    const dz = (z - POST_OFFICE_BAY_LOOKOUT.z - 1.2) / 3.6;
+    const hollow = Math.exp(-(dx * dx + dz * dz)) * 0.9;
+    relief += dome * POST_OFFICE_BAY_LOOKOUT.height - hollow * dome;
+  }
+  // Valley floor stays a little lower than its sides.
+  relief -= Math.exp(-Math.pow((x - 4) / 16, 2)) * THREE.MathUtils.smoothstep(z, 40, 70) * 0.45;
+  return relief * inland;
+}
+
+// The last stretch before the south edge eases onto Scrub Rise's own northern
+// edge, so the two maps meet at the same ground rather than a step that the
+// border preview has to hide. (x, z) on this edge maps to Scrub Rise's north
+// edge at the same normalized position.
+const SCRUB_RISE_SEAM_BLEND = [70, 86];
+
+function scrubRiseEdgeHeight(x, movementSurface) {
+  const scrubRiseWidth = 112;
+  const scrubRiseNorthZ = -52;
+  return postScrubRiseHeight(x * scrubRiseWidth / 118, scrubRiseNorthZ + 0.5, { movementSurface });
+}
+
 export const POST_OFFICE_BAY_BARREL_CLEARING = { x: 0.0, z: 8.5, radius: 4.8 };
 export const POST_OFFICE_BAY_PATH_POINTS = [
   POST_OFFICE_BAY_TRAIL,
   POST_OFFICE_BAY_SCRUB_TRAIL,
   POST_OFFICE_BAY_NORTH_SHORE_TRAIL,
   POST_OFFICE_BAY_BARREL_SPUR,
+  POST_OFFICE_BAY_LOOKOUT_SPUR,
 ];
 
 function pathSegmentInfo(px, pz, ax, az, aw, bx, bz, bw) {
@@ -327,7 +462,7 @@ function postOfficeTerrainBlend(x, z, y = postOfficeTerrainHeight(x, z)) {
   const clearing = 1 - THREE.MathUtils.smoothstep(clearingDistance, POST_OFFICE_BAY_BARREL_CLEARING.radius * 0.52, POST_OFFICE_BAY_BARREL_CLEARING.radius);
   const trail = Math.max(postOfficeTrailInfluence(x, z, 2.6, 6.8), clearing * 0.9) * (1 - water);
 
-  return {
+  const blend = {
     water,
     wetBasalt,
     tuffRidge,
@@ -337,6 +472,25 @@ function postOfficeTerrainBlend(x, z, y = postOfficeTerrainHeight(x, z)) {
     trail,
     ashSlope: 0.72 * (1 - water),
   };
+  const inland = postOfficeInlandMask(z);
+  if (inland <= 0) return blend;
+  // Inland the coastal bands (which all saturate a few metres behind the
+  // beach) give way to the valley's own ground: grey dry forest on the floor
+  // and the woodland slope, black aa on the west tongue, cobbles in the wash,
+  // and weathered tuff only on the knoll's upper slopes.
+  const lava = postOfficeWestLavaMask(x, z);
+  const arroyo = postOfficeArroyoInfo(x, z);
+  const woodland = postOfficeWoodlandMask(x, z);
+  const knoll = THREE.MathUtils.smoothstep(postOfficeLookoutMask(x, z), 0.38, 0.72);
+  const keep = 1 - inland;
+  blend.water *= keep;
+  blend.wetBasalt *= keep;
+  blend.tuffRidge = blend.tuffRidge * keep + inland * knoll * 1.05;
+  blend.blackLava = Math.max(blend.blackLava * keep, inland * Math.max(lava * 1.08, arroyo.bed * 1.1));
+  blend.paloSanto = blend.paloSanto * keep + inland * (0.62 + woodland * 0.5) * (1 - lava) * (1 - knoll);
+  blend.dryScrub = blend.dryScrub * keep + inland * 0.74 * (1 - lava * 0.8) * (1 - woodland * 0.5);
+  blend.ashSlope = 0.72 * (1 - blend.water) * (1 - inland * 0.2);
+  return blend;
 }
 
 function strongestPostOfficeBiome(blend) {
@@ -360,6 +514,20 @@ function strongestPostOfficeBiome(blend) {
 
 export function postOfficeTerrainBiomeAt(x, z, y = postOfficeTerrainHeight(x, z)) {
   return strongestPostOfficeBiome(postOfficeTerrainBlend(x, z, y));
+}
+
+// The rest site is levelled to the ground height at its own centre, sampled
+// once with the levelling switched off so it cannot depend on itself.
+let restLevel = null;
+let samplingRestLevel = false;
+function postOfficeRestLevel() {
+  if (restLevel === null) {
+    samplingRestLevel = true;
+    const { x, z } = POST_OFFICE_BAY_WHALERS_REST;
+    restLevel = postOfficeTerrainHeight(x, z, { movementSurface: true }) + 0.04;
+    samplingRestLevel = false;
+  }
+  return restLevel;
 }
 
 export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) {
@@ -408,6 +576,25 @@ export function postOfficeTerrainHeight(x, z, { movementSurface = false } = {}) 
   y -= seaFalloff * 15.5;
   y += continuity * 0.35;
   y += THREE.MathUtils.smoothstep(z, 20, 52) * 1.2;
+  if (z > 30) {
+    y += postOfficeInlandRelief(x, z, movementSurface);
+    const rest = POST_OFFICE_BAY_WHALERS_REST;
+    const restDistance = Math.hypot(x - rest.x, z - rest.z);
+    if (!samplingRestLevel && restDistance < rest.radius * 1.6) {
+      const level = 1 - THREE.MathUtils.smoothstep(restDistance, rest.radius * 0.5, rest.radius * 1.6);
+      y = THREE.MathUtils.lerp(y, postOfficeRestLevel(), level * 0.8);
+    }
+    const seam = THREE.MathUtils.smoothstep(z, SCRUB_RISE_SEAM_BLEND[0], SCRUB_RISE_SEAM_BLEND[1]);
+    if (seam > 0) {
+      y = THREE.MathUtils.lerp(y, scrubRiseEdgeHeight(x, movementSurface), seam);
+    }
+    const arroyo = postOfficeArroyoInfo(x, z);
+    if (arroyo.channel > 0) {
+      y -= arroyo.channel * arroyo.depth;
+      // Cobbles lying in the bed.
+      y += arroyo.bed * crackNoise(x * 0.9, z * 0.9) * (movementSurface ? 0.03 : 0.09);
+    }
+  }
 
   if (z < -24) y -= Math.abs(z + 24) * 0.18;
   if (mask > 1.08) y -= (mask - 1.08) * 18 * (1 - continuity);
@@ -460,6 +647,9 @@ export function isPostOfficeRegion(regionId) {
 
 export function isPostOfficeWalkable(x, z) {
   if (isInsidePostOfficeSeaTubeRock(x, z)) return false;
+  // The inland valley is all dry ground; the coastal masks below were never
+  // authored this far from the cove.
+  if (z > 34) return true;
   const y = postOfficeTerrainHeight(x, z, { movementSurface: true });
   const mask = islandMask(x, z);
   const cove = coveWaterMask(x, z);
@@ -497,7 +687,7 @@ export const postOfficeBayRegion = {
     defaultFacing: [0.97, 0, -0.22],
     defaultCameraFacing: [0.96, 0, -0.29],
     entrySpawns: {
-      south: [-7, 0, 53],
+      south: [-8, 0, 81.5],
       // Out of the sea tube onto the ledge above the cove.
       'from-gabriels-cave': [-28.4, 0, 1.4],
     },

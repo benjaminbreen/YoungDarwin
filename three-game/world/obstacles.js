@@ -10,6 +10,7 @@ import {
 } from './facetedBoulders';
 import { getEcology } from './ecology';
 import { buildMatureCactusObstacles } from './ecology/matureCactusInteractions';
+import { isLooseRock } from './looseRocks';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
 const WALK_OVER_CROWN = 0.42;
@@ -282,7 +283,10 @@ function defaultTraversalForObstacle(obstacle) {
   if (obstacle.kind !== 'rock' && obstacle.kind !== 'boulder') return null;
   const top = obstacle.colliderTop ?? obstacle.height ?? 0;
   const radius = obstacle.radius ?? 0;
-  if (top < 0.18 || top > WALK_OVER_TRAVERSAL_MAX_HEIGHT || radius < 0.38) return null;
+  // Small rocks with an ellipsoid get exact support rather than a round
+  // blocking wall whose circle the long tips of the stone poke through.
+  const minRadius = obstacle.ellipsoid ? 0 : 0.38;
+  if (top < 0.18 || top > WALK_OVER_TRAVERSAL_MAX_HEIGHT || radius < minRadius) return null;
   // Rock traversal should feel arcade-like: the player keeps normal walk/run
   // locomotion and the obstacle contributes ground support instead of starting
   // a locked vault or mantle clip.
@@ -378,6 +382,8 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   const withMobility = obstacles => obstacles.map(applyObstacleMobility);
   const regional = (REGION_OBSTACLE_SOURCES[zoneId] || [])
     .flatMap(source => source())
+    // Loose rocks are Rapier rigid bodies; the KCC meets them directly.
+    .filter(obstacle => !obstacle.sourceRock || !isLooseRock(obstacle.sourceRock, zoneId))
     .map(obstacle => applyRuntimeObstacleOffset(obstacle, zoneId, offsets));
   // Mature cactus GLBs render through ecology instancing, but their collision
   // bounds must enter this shared source so Rapier, analytic movement,
@@ -699,8 +705,30 @@ function walkOverTraversalLift(distance, radius, height) {
   return height * Math.sqrt(Math.max(0, 1 - shoulder * shoulder));
 }
 
+// Procedural rocks carry the ellipsoid their crag mesh is scaled from, so
+// support follows the rendered outline (long axis, short axis, yaw) instead of
+// a bounding circle that hovers past the narrow sides and misses the tips.
+// Where the curved flank dips under the local terrain the ground wins.
+function ellipsoidSupportHeightAt(obstacle, x, z) {
+  const { rx, ry, rz, cy } = obstacle.ellipsoid;
+  const dx = x - obstacle.x;
+  const dz = z - obstacle.z;
+  const cos = Math.cos(obstacle.yaw || 0);
+  const sin = Math.sin(obstacle.yaw || 0);
+  const lx = (dx * cos - dz * sin) / rx;
+  const lz = (dx * sin + dz * cos) / rz;
+  const u = lx * lx + lz * lz;
+  if (u >= 1) return null;
+  const surface = obstacleBaseY(obstacle) + cy + ry * Math.sqrt(1 - u);
+  if (surface <= terrainHeight(x, z, obstacle.zoneId) + 0.02) return null;
+  return surface;
+}
+
 function traversalSupportHeightAt(obstacle, x, z, playerRadius = 0.42) {
   if (!obstacle.traversal) return null;
+  if (obstacle.ellipsoid && isWalkOverTraversalObstacle(obstacle)) {
+    return ellipsoidSupportHeightAt(obstacle, x, z);
+  }
   const base = obstacleBaseY(obstacle);
   const radius = Math.max(0.1, obstacle.radius + playerRadius * 0.45);
   const distance = Math.hypot(x - obstacle.x, z - obstacle.z);
@@ -775,6 +803,9 @@ export function getObstacleSupport(x, z, playerY, playerRadius = 0.42, obstacles
       if (!supported || traversalTop > supported.height) supported = { height: traversalTop, obstacle };
       continue;
     }
+    // Off the ellipsoid there is no rock underfoot; the round collider's flat
+    // top would only reintroduce the hover beside narrow rocks.
+    if (obstacle.ellipsoid && isWalkOverTraversalObstacle(obstacle)) continue;
     const top = obstacleTopAt(obstacle, x, z, playerRadius, { strictSupport: true });
     if (top === null) continue;
     const standable = obstacle.jumpable && isStandableObstacleTop(obstacle, top) && playerY >= top - 0.42;

@@ -2,6 +2,7 @@
 
 import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useThreeGameStore } from '../../../store';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { rockRenderTransform, rockVisualBounds } from '../../../world/proceduralRocks';
@@ -19,26 +20,59 @@ const rockFractureTint = new THREE.Color();
 const rockFractureBase = new THREE.Color('#565d61');
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
+// Two basalt finishes, chosen per rock by materialKey:
+//  - glittering: fresh glassy black lava. The dark-basalt-gravel set with its
+//    roughness map multiplied in (median ~0.34, so mostly glossy) and albedo
+//    all but removed: what you see is sky and sun glinting off the fine normal
+//    detail across hard flat facets, shimmering as the camera moves. Every
+//    rock looked like this until 2026-10-31 partly by accident (the geometry
+//    had no vertex colours, so WebGL multiplied the albedo by black); this
+//    keeps it on purpose, with a little albedo so it never goes flat black.
+//  - muted: weathered stone. A dense crag with creased smooth normals that
+//    reads soft and matte. Needs geometryQuality 'refined' (the default);
+//    otherwise it falls back to the faceted crag.
+const GLITTERING_BASALT = {
+  textureKey: 'darkBasaltGravel',
+  normalScale: 0.42,
+  roughness: 0.9,
+  roughnessMode: 'multiply',
+  albedoScale: 0.08,
+  finish: 'glittering',
+};
+const MUTED_BASALT = {
+  textureKey: 'weatheredHighlandBasalt',
+  normalScale: 0.48,
+  roughness: 0.94,
+  finish: 'muted',
+};
+
 const ROCK_MATERIAL_PROFILES = {
-  darkBasaltGravel: {
-    textureKey: 'weatheredHighlandBasalt',
+  glitteringBasalt: GLITTERING_BASALT,
+  mutedBasalt: MUTED_BASALT,
+  // Legacy keys: the default stays the glittering look rocks always had.
+  darkBasaltGravel: GLITTERING_BASALT,
+  weatheredHighlandBasalt: MUTED_BASALT,
+  denseFracturedBasalt: {
+    textureKey: 'denseFracturedBasalt',
+    textureScale: 0.8,
     normalScale: 0.42,
     roughness: 0.9,
-  },
-  weatheredHighlandBasalt: {
-    textureKey: 'weatheredHighlandBasalt',
-    normalScale: 0.48,
-    roughness: 0.94,
+    finish: 'muted',
   },
   oxidizedScoriaceousBasalt: {
     textureKey: 'weatheredScoria',
     textureScale: 2 / 3,
     normalScale: 0.85,
     roughness: 0.96,
+    finish: 'muted',
   },
 };
 
-function rockMaterialKey(rock) {
+export function rockFinishIsSmooth(materialKey, refined) {
+  return refined && ROCK_MATERIAL_PROFILES[materialKey]?.finish === 'muted';
+}
+
+export function rockMaterialKey(rock) {
   return ROCK_MATERIAL_PROFILES[rock.materialKey] ? rock.materialKey : 'darkBasaltGravel';
 }
 
@@ -78,8 +112,58 @@ function withWhiteVertexColors(geo) {
   return geo;
 }
 
-function makeCraggyRockGeometry(seed) {
-  const geo = new THREE.IcosahedronGeometry(1, 3);
+// Fracture cuts flatten everything beyond a plane, leaving a broad, truly flat
+// face. 'smooth' (muted) takes two shallow ones; 'chiseled' (glittering) takes
+// a ring of deeper ones, so a dense mesh still reads as split stone with hard
+// planes instead of either a blob or a low-poly triangle crag.
+function rockFracturePlanes(seed, style) {
+  if (style !== 'chiseled') {
+    return [
+      { normal: new THREE.Vector3(Math.cos(seed), 0.24, Math.sin(seed)).normalize(), limit: 0.96 },
+      { normal: new THREE.Vector3(-Math.sin(seed), -0.12, Math.cos(seed)).normalize(), limit: 0.99 },
+    ];
+  }
+  const planes = [];
+  const count = 9;
+  for (let i = 0; i < count; i += 1) {
+    // Golden-angle spread round the rock, tilted toward the top: fresh blocks
+    // split along steep joints and a few low-angle beds.
+    const azimuth = seed * 1.7 + i * 2.39996;
+    const lift = -0.25 + ((i * 0.61803 + seed * 0.37) % 1) * 1.05;
+    const wobble = Math.sin(seed * 3.3 + i * 1.9);
+    planes.push({
+      normal: new THREE.Vector3(Math.cos(azimuth), lift, Math.sin(azimuth)).normalize(),
+      limit: 0.84 + wobble * 0.06,
+    });
+  }
+  return planes;
+}
+
+function trimRockFractureFaces(geometry, seed, style) {
+  const planes = rockFracturePlanes(seed, style);
+  const position = geometry.attributes.position;
+  const point = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    point.fromBufferAttribute(position, i);
+    for (const plane of planes) {
+      const excess = point.dot(plane.normal) - plane.limit;
+      if (excess > 0) point.addScaledVector(plane.normal, -excess);
+    }
+    position.setXYZ(i, point.x, point.y, point.z);
+  }
+}
+
+// style: false (low-poly flat facets), true / 'smooth' (muted), or 'chiseled'.
+const CREASE_ANGLE = { smooth: Math.PI / 10, chiseled: Math.PI / 7 };
+function finishRockGeometry(geo, seed, style) {
+  const key = style === true ? 'smooth' : style;
+  if (key) trimRockFractureFaces(geo, seed, key);
+  geo.computeVertexNormals();
+  return withWhiteVertexColors(key ? toCreasedNormals(geo, CREASE_ANGLE[key]) : geo);
+}
+
+export function makeCraggyRockGeometry(seed, detail = 3, smooth = false) {
+  const geo = new THREE.IcosahedronGeometry(1, detail);
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < position.count; i += 1) {
@@ -89,16 +173,15 @@ function makeCraggyRockGeometry(seed) {
     v.normalize().multiplyScalar(1 + n * 0.22 + chip);
     position.setXYZ(i, v.x, v.y, v.z);
   }
-  geo.computeVertexNormals();
-  return withWhiteVertexColors(geo);
+  return finishRockGeometry(geo, seed, smooth);
 }
 
 // Boulder-scale rocks get their own denser geometry: the unit-scale crag noise
 // above stretches featureless at 2-3m, which is why the big rocks read as
 // smooth blobs. Finer facets, horizontal stratification, and raised ridge
 // creases keep them craggy at hero size.
-function makeHeroCraggyRockGeometry(seed) {
-  const geo = new THREE.IcosahedronGeometry(1, 4);
+export function makeHeroCraggyRockGeometry(seed, detail = 4, smooth = false) {
+  const geo = new THREE.IcosahedronGeometry(1, detail);
   const position = geo.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < position.count; i += 1) {
@@ -110,20 +193,25 @@ function makeHeroCraggyRockGeometry(seed) {
     v.normalize().multiplyScalar(1 + lobe * 0.16 + shelf * 0.07 + ridge * ridge * 0.14 + chip);
     position.setXYZ(i, v.x, v.y, v.z);
   }
-  geo.computeVertexNormals();
-  return withWhiteVertexColors(geo);
+  return finishRockGeometry(geo, seed, smooth);
 }
 
-// Geometry pool indices: 0-2 standard crag variants, 3-4 hero variants.
-const HERO_FOOTPRINT = 1.1;
+// Geometry pool indices: 0-2 standard crag variants, 3-4 hero variants in the
+// glittering finish (chiseled when refined, low-poly faceted otherwise); the
+// same five again at +5 in the smooth (muted) finish.
+export const HERO_FOOTPRINT = 1.1;
+const SMOOTH_GEOMETRY_OFFSET = 5;
 
-function rockGeometryIndex(rock, index) {
-  return rockFootprint(rock) >= HERO_FOOTPRINT ? 3 + (index % 2) : index % 3;
+function rockGeometryIndex(rock, index, refined) {
+  const base = rockFootprint(rock) >= HERO_FOOTPRINT ? 3 + (index % 2) : index % 3;
+  return rockFinishIsSmooth(rockMaterialKey(rock), refined) ? base + SMOOTH_GEOMETRY_OFFSET : base;
 }
 
-function createProceduralRockMaterial(materialKey, dust = null) {
+export function createProceduralRockMaterial(materialKey, dust = null, refined = false) {
   const profile = ROCK_MATERIAL_PROFILES[materialKey] || ROCK_MATERIAL_PROFILES.darkBasaltGravel;
-  return createTriplanarRockMaterial(profile, dust);
+  // Refined geometry carries its own creased normals (hard plane edges, soft
+  // elsewhere); only the low-poly fallback needs flat shading for its facets.
+  return createTriplanarRockMaterial(refined ? { ...profile, flatShading: false } : profile, dust);
 }
 
 const disposeGeometry = geometry => geometry.dispose();
@@ -229,7 +317,7 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
-  }, [items]);
+  }, [items, geometry, material]);
   return (
     <instancedMesh
       ref={ref}
@@ -282,13 +370,17 @@ function RockContactShadows({ rocks }) {
   return <ContactShadowField shadows={contactShadows} yOffset={0.026} strength={0.62} />;
 }
 
-export function RockField({ rocks, dust = null, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks' }) {
+// excludeIds: rocks drawn elsewhere (loose rocks live as Rapier bodies). They
+// are skipped like broken rocks so every other rock keeps its variant index.
+export function RockField({ rocks, excludeIds = null, dust = null, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks', geometryQuality = 'refined' }) {
+  const refined = geometryQuality === 'refined';
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const rockDamage = useThreeGameStore(state => state.rockDamage);
-  const { brokenIds, damagedById } = useMemo(
-    () => matchRockDamage(rocks, rockDamage, currentZoneId),
-    [rocks, rockDamage, currentZoneId],
-  );
+  const { brokenIds, damagedById } = useMemo(() => {
+    const matched = matchRockDamage(rocks, rockDamage, currentZoneId);
+    if (!excludeIds?.size) return matched;
+    return { ...matched, brokenIds: new Set([...matched.brokenIds, ...excludeIds]) };
+  }, [rocks, rockDamage, currentZoneId, excludeIds]);
   const visibleRocks = useMemo(
     () => (brokenIds.size ? rocks.filter(rock => !brokenIds.has(rock.id)) : rocks),
     [rocks, brokenIds],
@@ -300,7 +392,7 @@ export function RockField({ rocks, dust = null, sourceId = 'ecology-rocks', sour
     const grouped = new Map();
     rocks.forEach((rock, index) => {
       if (brokenIds.has(rock.id) || damagedById.has(rock.id)) return;
-      const geometryIndex = rockGeometryIndex(rock, index);
+      const geometryIndex = rockGeometryIndex(rock, index, refined);
       const materialKey = rockMaterialKey(rock);
       const castShadow = rockCastsRealShadow(rock);
       const key = `${geometryIndex}:${materialKey}:${castShadow ? 'shadow' : 'contact'}`;
@@ -309,36 +401,45 @@ export function RockField({ rocks, dust = null, sourceId = 'ecology-rocks', sour
       else grouped.set(key, { items: [rock], geometryIndex, materialKey, castShadow });
     });
     return Array.from(grouped.values());
-  }, [rocks, brokenIds, damagedById]);
+  }, [rocks, brokenIds, damagedById, refined]);
   const damagedRocks = useMemo(() => (
     damagedById.size
       ? rocks
-        .map((rock, index) => ({ rock, variant: rockGeometryIndex(rock, index), damage: damagedById.get(rock.id) }))
+        .map((rock, index) => ({ rock, variant: rockGeometryIndex(rock, index, refined), damage: damagedById.get(rock.id) }))
         .filter(entry => entry.damage)
       : []
-  ), [rocks, damagedById]);
+  ), [rocks, damagedById, refined]);
   const renderUserData = useMemo(() => ({
     renderSource: sourceId,
     renderLabel: sourceLabel || sourceId,
     renderKind: sourceKind,
     renderPath: null,
   }), [sourceId, sourceKind, sourceLabel]);
-  const geometries = useMemo(
-    () => [
-      makeCraggyRockGeometry(1.7),
-      makeCraggyRockGeometry(4.2),
-      makeCraggyRockGeometry(8.9),
-      makeHeroCraggyRockGeometry(2.9),
-      makeHeroCraggyRockGeometry(6.1),
-    ],
-    [],
-  );
   const usedMaterialKeys = useMemo(() => Array.from(new Set(
     rocks.map(rockMaterialKey),
   )).sort(), [rocks]);
-  const materialKeySignature = `${usedMaterialKeys.join('|')}${dust?.color ? `|dust:${dust.color}:${dust.strength ?? ''}` : ''}`;
+  // The dense smooth pool is only built when a muted rock is actually present.
+  const needsSmooth = usedMaterialKeys.some(materialKey => rockFinishIsSmooth(materialKey, refined));
+  const geometries = useMemo(
+    () => [
+      makeCraggyRockGeometry(1.7, refined ? 12 : 3, refined && 'chiseled'),
+      makeCraggyRockGeometry(4.2, refined ? 12 : 3, refined && 'chiseled'),
+      makeCraggyRockGeometry(8.9, refined ? 12 : 3, refined && 'chiseled'),
+      makeHeroCraggyRockGeometry(2.9, refined ? 16 : 4, refined && 'chiseled'),
+      makeHeroCraggyRockGeometry(6.1, refined ? 16 : 4, refined && 'chiseled'),
+      ...(needsSmooth ? [
+        makeCraggyRockGeometry(1.7, 6, true),
+        makeCraggyRockGeometry(4.2, 6, true),
+        makeCraggyRockGeometry(8.9, 6, true),
+        makeHeroCraggyRockGeometry(2.9, 6, true),
+        makeHeroCraggyRockGeometry(6.1, 6, true),
+      ] : []),
+    ],
+    [needsSmooth, refined],
+  );
+  const materialKeySignature = `${refined}|${usedMaterialKeys.join('|')}${dust?.color ? `|dust:${dust.color}:${dust.strength ?? ''}` : ''}`;
   const materials = useMemo(() => Object.fromEntries(
-    usedMaterialKeys.map(materialKey => [materialKey, createProceduralRockMaterial(materialKey, dust)]),
+    usedMaterialKeys.map(materialKey => [materialKey, createProceduralRockMaterial(materialKey, dust, refined)]),
   // The signature is the stable semantic dependency; the array is recreated
   // only when the ecology source itself changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps

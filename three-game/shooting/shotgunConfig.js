@@ -34,7 +34,6 @@ export const SHOTGUN = {
   wingedScore: 0.42,
   // Fauna within this radius of the muzzle startle and flee on every shot.
   panicRadius: 26,
-  recoil: { intensity: 0.34, duration: 0.26 },
   // Visual pellet scatter: extra impact bursts faked around the primary hit.
   scatterImpacts: 5,
   scatterRadius: 0.85,

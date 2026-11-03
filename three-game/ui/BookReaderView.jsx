@@ -11,6 +11,7 @@ import {
 import { tokenizeLibraryText } from '../library/searchCore';
 import { useThreeGameStore } from '../store';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { playPageTurn } from '../audio/interfaceFoley';
 
 // Used only until the spread has been measured; every book then renders at the
 // scale that fits its own leaf into the space available. The old fixed 1.08 took
@@ -617,7 +618,7 @@ export function BookReaderView() {
     }
     closeReadableBook();
   }, [closeReadableBook, noteOpen]);
-  const readerRef = useDismissableOverlay(Boolean(book), dismiss, { autoFocus: false });
+  const readerRef = useDismissableOverlay(Boolean(book), dismiss, { autoFocus: false, sound: 'book' });
 
   const manifestBook = useMemo(
     () => library?.manifest?.books?.find(entry => entry.id === book?.id) || null,
@@ -699,6 +700,15 @@ export function BookReaderView() {
   useEffect(() => {
     if (book) setReadableBookPage(book.id, page);
   }, [book, page, setReadableBookPage]);
+
+  // A leaf turns when the page moves within the same book; opening the book
+  // at its saved place is the cover's sound, not a turn.
+  const turnedFromRef = useRef(null);
+  useEffect(() => {
+    const previous = turnedFromRef.current;
+    turnedFromRef.current = book ? { bookId: book.id, page } : null;
+    if (book && previous?.bookId === book.id && previous.page !== page) playPageTurn();
+  }, [book, page]);
 
   if (!book || !session) return null;
   const queryTokens = tokenizeLibraryText(searchedQuery || '');

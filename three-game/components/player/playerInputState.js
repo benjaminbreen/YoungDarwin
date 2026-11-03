@@ -30,6 +30,7 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   const rotateLeftPressed = Boolean(keys.rotateLeft);
   const rotateRightPressed = Boolean(keys.rotateRight);
   const climbPressed = Boolean(keys.climb || touch.climb);
+  const pushPressed = Boolean(keys.push || touch.push);
   const dodgePressed = Boolean(keys.dodge || touch.dodge);
   const jumpPressed = Boolean(keys.jump || touch.jump);
   const anyDirectActionPressed = Boolean(
@@ -48,6 +49,7 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
     rotateLeftPressed,
     rotateRightPressed,
     climbPressed,
+    pushPressed,
     dodgePressed,
     jumpPressed,
     anyDirectActionPressed,

@@ -56,11 +56,14 @@ export const POST_OFFICE_SCRUB_RISE_SEAM = createRouteSeam(
   -7,
 );
 
+// Authored as z=7 when the bay was 118 m deep. The bay now runs 172 m, and
+// this keeps the same normalized point so Northern Shore's end of the track
+// does not move.
 export const POST_OFFICE_NORTH_SHORE_SEAM = createRouteSeam(
   'POST_OFFICE_BAY',
   'N_SHORE',
   'east',
-  7,
+  7 * 172 / 118,
 );
 
 export const POST_SCRUB_RISE_NORTHERN_HIGHLANDS_SEAM = createRouteSeam(

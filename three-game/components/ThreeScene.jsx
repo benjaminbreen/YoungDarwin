@@ -137,6 +137,8 @@ export function ThreeScene({
         </Suspense>
       </PhysicsProvider>
       {outdoors && <GroundedWorldFX
+        shoreGlintBrightness={settings.shoreGlintBrightness ?? 1}
+        shoreGlintSize={settings.shoreGlintSize ?? 1}
         enabled={environmentReady && settings.worldDetails !== false}
         terrainDust={settings.playerFX !== false && settings.terrainDust !== false}
         waterRipples={environmentReady && settings.water !== false && settings.waterSplashes !== false}

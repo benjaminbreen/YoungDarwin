@@ -8,14 +8,21 @@ import {
   makeFloreanaScatter,
 } from '../floreanaCoveLayout';
 import { POST_OFFICE_BAY_SEA_TUBE } from '../regions/postOfficeBay/seaTube';
-import { varyScatterTransforms } from '../scatter';
+import { makeZoneScatter, varyScatterTransforms } from '../scatter';
 import { terrainHeight } from '../terrain';
 import {
   coveWaterMask,
+  postOfficeArroyoInfo,
   postOfficeBayCoastZ,
   POST_OFFICE_BAY_BARREL_CLEARING,
+  POST_OFFICE_BAY_LOOKOUT,
+  POST_OFFICE_BAY_WHALERS_REST,
+  postOfficeInlandMask,
   postOfficeLandingBeachMask,
+  postOfficeLookoutMask,
   postOfficePathInfo,
+  postOfficeWestLavaMask,
+  postOfficeWoodlandMask,
 } from '../regions/postOfficeBay/terrain';
 import { buildDryVolcanicLitterLayer } from './dryVolcanicLitter';
 import { buildBeachFindLayer } from './beachFinds';
@@ -58,7 +65,7 @@ function smoothstep01(value, edge0, edge1) {
 }
 
 function postOfficeDryness({ x, z, biome, tone, path }) {
-  const outerEdge = Math.max(Math.abs(x) / 54, Math.max(0, z - 12) / 34);
+  const outerEdge = Math.max(Math.abs(x) / 54, Math.min(1.1, Math.max(0, z - 12) / 34));
   return clamp01(
     0.26
     + tone * 0.18
@@ -74,6 +81,15 @@ const EDGE_GRASS_CLUSTERS = [
   { x: -18, z: 34, rx: 13, rz: 4.8, strength: 0.7 },
   { x: 25, z: 31, rx: 11, rz: 6, strength: 0.82 },
   { x: 37, z: 19, rx: 7.5, rz: 8, strength: 0.78 },
+  // Inland the dry-season grass survives in openings between the scrub, on
+  // the wash's fan and along the foot of the knoll.
+  { x: -1, z: 45, rx: 9, rz: 6, strength: 0.8 },
+  { x: 9, z: 37, rx: 8, rz: 5, strength: 0.9 },
+  { x: 6, z: 66, rx: 9, rz: 7, strength: 0.75 },
+  { x: 27, z: 47, rx: 8, rz: 6, strength: 0.82 },
+  { x: -4, z: 80, rx: 10, rz: 5, strength: 0.72 },
+  { x: 27, z: 79, rx: 9, rz: 5.5, strength: 0.7 },
+  { x: 49, z: 52, rx: 6, rz: 9, strength: 0.66 },
 ];
 
 function edgeClusterStrength(x, z) {
@@ -106,9 +122,9 @@ export function buildPostOfficeBayDryGrassLayer() {
   const items = buildStandardDryGrassPatchItems({
     zoneId: POST_OFFICE_BAY,
     idPrefix: 'post-office-bay-dry-grass',
-    count: 120,
+    count: 190,
     seed: 6185,
-    bounds: { minX: -58, maxX: 42, minZ: 4, maxZ: 36 },
+    bounds: { minX: -58, maxX: 56, minZ: 4, maxZ: 84 },
     pathInfo: postOfficePathInfo,
     rejectBiomes: ['water'],
     pathCenterMax: 0,
@@ -212,7 +228,57 @@ function buildFlora() {
     }))
     : [];
 
+  const valley = (layer, count, seed, options) => makeZoneScatter(POST_OFFICE_BAY, layer, count, seed, options);
+
+  // Jasminocereus keeps to the knoll's rocky flanks, where the soil is thinnest.
+  const knollCandelabra = varied(valley('knoll-candelabra', 5, 6701, {
+    minX: 18, maxX: 56, minZ: 46, maxZ: 80, scale: [2.9, 3.8], maxGrade: 0.7,
+    accept: (biome, x, z) => {
+      const knoll = postOfficeLookoutMask(x, z);
+      return knoll > 0.12 && knoll < 0.62 && postOfficePathInfo(x, z).distance > 4;
+    },
+  }).map(item => ({ ...item, id: `knoll-${item.id}`, y: item.y + 0.02, tint: '#6f8a4e' })), 6703, {
+    width: [0.94, 1.06],
+    height: [0.94, 1.08],
+    depth: [0.94, 1.06],
+    maxLean: 0.012,
+  });
+
+  // Scalesia villosa, the Floreana lowland scalesia, along the banks of the
+  // dry wash where run-off lingers longest after the rains.
+  const scalesiaVillosa = varied(valley('scalesia-villosa', 9, 6709, {
+    minX: 2, maxX: 32, minZ: 38, maxZ: 82, scale: [0.52, 0.86], maxGrade: 0.7,
+    accept: (biome, x, z) => {
+      const arroyo = postOfficeArroyoInfo(x, z);
+      return arroyo.distance > 3.4 && arroyo.distance < 7.5 && postOfficePathInfo(x, z).distance > 3;
+    },
+  }), 6711);
+
   return [
+    buildCastelaUnderstorey(),
+    {
+      id: 'post-office-bay-knoll-candelabra-cactus',
+      path: `${NATURE}runtime-candelabra-cactus.glb`,
+      items: knollCandelabra,
+      tintStrength: 0.12,
+      castShadow: true,
+      maxVisibleDistance: 110,
+      motion: { wind: 0.25, bend: 0.05, bendRadius: 1.5 },
+      loadTier: 2,
+    },
+    {
+      id: 'post-office-bay-scalesia-villosa',
+      label: 'Floreana scalesia / Scalesia villosa',
+      path: `${NATURE}runtime-scalesia.glb`,
+      items: scalesiaVillosa,
+      sink: 0.08,
+      tint: '#7d8a58',
+      tintStrength: 0.16,
+      castShadow: false,
+      maxVisibleDistance: 92,
+      motion: { wind: 1.2, bend: 0.3, bendRadius: 1.35 },
+      loadTier: 2,
+    },
     {
       id: 'opuntia',
       label: 'Mature Floreana prickly pear / Opuntia megasperma',
@@ -298,13 +364,24 @@ function postOfficeInlandHabitat({ biome, x, z }) {
       || landing > 0.1
       || shoreDistance < 10
       || path.distance < path.width * 1.72
-      || clearingDistance < POST_OFFICE_BAY_BARREL_CLEARING.radius * 1.45,
+      || clearingDistance < POST_OFFICE_BAY_BARREL_CLEARING.radius * 1.45
+      || postOfficeValleyKeepClear(x, z),
   };
+}
+
+// Inland ground that stays open: the wash bed, the whalers' rest and the
+// lookout's summit, from which the anchorage must stay in view.
+function postOfficeValleyKeepClear(x, z, { bedOnly = false } = {}) {
+  if (z < 34) return false;
+  if (postOfficeArroyoInfo(x, z).channel > (bedOnly ? 0.7 : 0.45)) return true;
+  const rest = POST_OFFICE_BAY_WHALERS_REST;
+  if (Math.hypot(x - rest.x, z - rest.z) < rest.radius * 1.35) return true;
+  return postOfficeLookoutMask(x, z) > 0.8;
 }
 
 function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
   const authoredCacti = authoredFlora
-    .filter(layer => layer.id === 'opuntia' || layer.id === 'post-office-bay-candelabra-cactus')
+    .filter(layer => layer.id === 'opuntia' || layer.id.endsWith('candelabra-cactus'))
     .flatMap(layer => layer.items || []);
   const crotonHabitatAt = sample => {
     const base = postOfficeInlandHabitat(sample);
@@ -375,11 +452,11 @@ function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
       species: CROTON_SCOULERI_SPECIES,
       asset: { path: `${NATURE}runtime-croton.glb` },
       seed: 6481,
-      count: 72,
-      bounds: { minX: -50, maxX: 50, minZ: 13, maxZ: 54 },
+      count: 118,
+      bounds: { minX: -56, maxX: 56, minZ: 13, maxZ: 84 },
       habitatAt: crotonHabitatAt,
       placement: {
-        patchCount: 8,
+        patchCount: 13,
         patchRadius: [4.2, 7.8],
         minPatchSeparation: 7.5,
         maxGrade: 0.74,
@@ -404,11 +481,11 @@ function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
         variantCount: 9,
       },
       seed: 6529,
-      count: 54,
-      bounds: { minX: -48, maxX: 48, minZ: 21, maxZ: 54 },
+      count: 84,
+      bounds: { minX: -56, maxX: 56, minZ: 21, maxZ: 84 },
       habitatAt: darwiniothamnusHabitatAt,
       placement: {
-        patchCount: 6,
+        patchCount: 9,
         patchRadius: [3.4, 6.8],
         minPatchSeparation: 8,
         maxGrade: 0.72,
@@ -430,12 +507,12 @@ function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
       species: OPUNTIA_MEGASPERMA_SPECIES,
       asset: { path: MATURE_OPUNTIA_PATH },
       seed: 6553,
-      count: 4,
-      bounds: { minX: -48, maxX: 48, minZ: 28, maxZ: 54 },
+      count: 6,
+      bounds: { minX: -54, maxX: 54, minZ: 28, maxZ: 84 },
       habitatAt: matureOpuntiaHabitatAt,
       placement: {
         ...MATURE_OPUNTIA_PLACEMENT,
-        patchCount: 2,
+        patchCount: 3,
         minPatchSeparation: 14,
         minItemSeparation: 8,
       },
@@ -454,7 +531,7 @@ function buildProceduralFlora(authoredFlora, interactiveFlora = []) {
 
 function buildInteractiveFlora(authoredFlora) {
   const authoredCacti = authoredFlora
-    .filter(layer => layer.id === 'opuntia' || layer.id === 'post-office-bay-candelabra-cactus')
+    .filter(layer => layer.id === 'opuntia' || layer.id.endsWith('candelabra-cactus'))
     .flatMap(layer => layer.items || []);
   const rocks = getPostOfficeBayBasaltBlocks();
   const habitatAt = sample => {
@@ -493,12 +570,15 @@ function buildInteractiveFlora(authoredFlora) {
     const obstacleClear = rocks.every(rock => (
       Math.hypot(sample.x - rock.x, sample.z - rock.z) > (rock.radiusX || rock.scale || 0.4) + 2.1
     ));
+    // The stand is thickest on the woodland slope west of the track.
+    const woodland = postOfficeWoodlandMask(sample.x, sample.z);
     return {
       ...base,
       biomeSuitability,
-      localSuitability: clamp01(0.22 + base.inland * 0.78),
+      localSuitability: clamp01((0.22 + base.inland * 0.78) * (0.45 + woodland * 0.55)),
       excluded: base.excluded
         || biomeSuitability <= 0
+        || postOfficeWestLavaMask(sample.x, sample.z) > 0.7
         || base.path.distance < base.path.width * 2.45
         || distanceToNearestItem(authoredCacti, sample.x, sample.z) < 7
         || !obstacleClear,
@@ -512,11 +592,11 @@ function buildInteractiveFlora(authoredFlora) {
       species: OPUNTIA_MEGASPERMA_SPECIES,
       runtime: 'prickly-pear',
       seed: 6577,
-      count: 6,
-      bounds: { minX: -45, maxX: 45, minZ: 33, maxZ: 53 },
+      count: 9,
+      bounds: { minX: -50, maxX: 54, minZ: 33, maxZ: 82 },
       habitatAt,
       placement: {
-        patchCount: 2,
+        patchCount: 3,
         patchRadius: [7.5, 11],
         minPatchSeparation: 18,
         minItemSeparation: 5,
@@ -532,14 +612,16 @@ function buildInteractiveFlora(authoredFlora) {
       species: PALO_SANTO_SPECIES,
       runtime: 'palo-santo',
       seed: 6599,
-      count: 4,
-      bounds: { minX: -46, maxX: 46, minZ: 35, maxZ: 54 },
+      // Each tree is a full interactive palo santo (~90k tris dormant), so the
+      // grove is a few trees thickened out by the Castela beneath them.
+      count: 10,
+      bounds: { minX: -50, maxX: 50, minZ: 35, maxZ: 84 },
       habitatAt: paloSantoHabitatAt,
       placement: {
-        patchCount: 2,
-        patchRadius: [7, 11],
-        minPatchSeparation: 16,
-        minItemSeparation: 9,
+        patchCount: 3,
+        patchRadius: [7, 13],
+        minPatchSeparation: 14,
+        minItemSeparation: 5.5,
         maxGrade: 0.52,
       },
       siteFromItem: item => ({ leafiness: 0.16 + item.tone * 0.36 }),
@@ -552,9 +634,9 @@ function buildSurfaceLitter() {
     zoneId: POST_OFFICE_BAY,
     id: 'post-office-bay-basalt-shingle',
     itemIdPrefix: 'post-office-bay-basalt-chip',
-    count: 260,
+    count: 380,
     seed: 6311,
-    bounds: { minX: -38, maxX: 40, minZ: -22, maxZ: 36 },
+    bounds: { minX: -58, maxX: 56, minZ: -22, maxZ: 84 },
     scale: [0.52, 1.32],
     maxVisibleDistance: 44,
     variantOptions: [
@@ -635,11 +717,56 @@ function buildSurfaceLitter() {
     ),
   });
 
+  // Rounded cobbles and grit lying in the bed of the dry wash.
+  const washCobbles = buildDryVolcanicLitterLayer({
+    zoneId: POST_OFFICE_BAY,
+    id: 'post-office-bay-wash-cobbles',
+    itemIdPrefix: 'post-office-bay-wash-cobble',
+    count: 150,
+    seed: 6437,
+    bounds: { minX: 4, maxX: 30, minZ: 34, maxZ: 84 },
+    scale: [0.6, 1.5],
+    sizeVariation: [0.8, 1.14],
+    maxVisibleDistance: 44,
+    variantOptions: [
+      { variant: 'basalt-pebble', weight: 0.68, colors: ['#3b3934', '#4b463e', '#5a544a'] },
+      { variant: 'weathered-basalt-chip', weight: 0.26, colors: ['#857d6f', '#968a74'] },
+      { variant: 'oxidized-scoria-chip', weight: 0.06, colors: ['#74463a', '#83503c'] },
+    ],
+    accept: (biome, x, z) => postOfficeArroyoInfo(x, z).bed > 0.32 && postOfficePathInfo(x, z).tread < 0.3,
+  });
+
   return [
     { ...basalt, loadTier: 1 },
     { ...strandline, loadTier: 1 },
     { ...boulderSkirts, loadTier: 1 },
+    { ...washCobbles, loadTier: 1 },
   ];
+}
+
+// Galapagos bitterbush (Castela galapageia), the thorny understorey of the
+// valley's dry forest, in loose clumps under and between the palo santo.
+function buildCastelaUnderstorey() {
+  const items = makeZoneScatter(POST_OFFICE_BAY, 'castela', 26, 6743, {
+    minX: -52, maxX: 40, minZ: 42, maxZ: 84, scale: [0.18, 0.31], maxGrade: 0.5,
+    accept: (biome, x, z) => {
+      const path = postOfficePathInfo(x, z);
+      if (path.distance < path.width * 1.8 || postOfficeValleyKeepClear(x, z)) return false;
+      return postOfficeWoodlandMask(x, z) > 0.2 || (biome === 'palo-santo' && postOfficeLookoutMask(x, z) < 0.3);
+    },
+  });
+  return {
+    id: 'post-office-bay-castela',
+    label: 'Galapagos bitterbush / Castela galapageia',
+    path: `${NATURE}runtime-palo-santo.glb`,
+    items: varied(items, 6757),
+    sink: 0.06,
+    tintStrength: 0.22,
+    castShadow: true,
+    maxVisibleDistance: 96,
+    motion: { wind: 0.54, bend: 0.28, bendRadius: 1.5 },
+    loadTier: 2,
+  };
 }
 
 // Cove life. The bay floor drops to -4 beyond the sandbar, so the adults

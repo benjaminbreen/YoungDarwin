@@ -20,6 +20,7 @@ import {
 } from '../../world/terrain';
 import { getSurfaceContactProfile } from '../../world/surfaceContact';
 import { createCollisionAdapter } from '../../physics/collisionAdapter';
+import { PLAYER_COLLIDER_GROUPS } from '../../physics/collisionGroups';
 import {
   computePushAmount,
   downhillGrade,
@@ -59,6 +60,8 @@ import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
+import { findLooseRockPushTarget } from './playerLooseRocks';
+import { CONTEXT_PROMPT_PRIORITY } from '../../ui/contextPromptService';
 import { registerPlayerHarnessBridge } from '../../e2e/playerHarnessBridge';
 import {
   cactusSpineInjuryChance,
@@ -101,6 +104,9 @@ import {
 import { getInteriorCameraProfile } from '../../interiors/interiorRegistry';
 
 const PUSH_ANIMATION_COOLDOWN = 0.34;
+// Stride acceleration passed into a loose rock is capped so a frame hitch
+// can't kick it.
+const LOOSE_FOOTING_MAX_ACCEL = 12;
 // Tallest step Darwin climbs just by walking into it (metres).
 const AUTO_TRAVERSE_MAX_HEIGHT = 0.75;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
@@ -173,6 +179,7 @@ function PlayerPhysicsCollider({ colliderConfig, colliderRef }) {
         ref={colliderRef}
         args={[colliderConfig.halfHeight, colliderConfig.radius]}
         position={[0, colliderConfig.centerY, 0]}
+        collisionGroups={PLAYER_COLLIDER_GROUPS}
       />
     );
   }
@@ -181,6 +188,7 @@ function PlayerPhysicsCollider({ colliderConfig, colliderRef }) {
       ref={colliderRef}
       args={[colliderConfig.halfHeight, colliderConfig.radius]}
       position={[0, colliderConfig.centerY, 0]}
+      collisionGroups={PLAYER_COLLIDER_GROUPS}
     />
   );
 }
@@ -298,10 +306,7 @@ export function PlayerController({
   const flightState = useRef({ active: false, phase: 'grounded', phaseUntil: 0, lastFlapAt: -10, bankYaw: null });
   // Accumulates drowning damage so the store isn't hit every frame.
   const drownDamage = useRef(0);
-  // `kind` separates impacts (the camera should duck) from recoil (it should
-  // kick up). Everything that hits the ground or takes a blow is an impact, so
-  // that is the default and only the exceptions carry a kind.
-  const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1, kind: 'impact' });
+  const cameraImpulse = useRef({ startedAt: -10, intensity: 0, duration: 0.34, seed: 1 });
   const finchDroppingCamera = useRef({ startedAt: -10, until: -10, sequence: 0 });
   const lastTeeterAt = useRef(0);
   const lastWallRunAt = useRef(0);
@@ -462,6 +467,9 @@ export function PlayerController({
     recoverAction: null,
     climbMotion: null,
     climbPromptProbe: { lastAt: -10, published: false },
+    pushPromptProbe: { lastAt: -10, published: false, target: null },
+    supportObstacle: null,
+    looseFooting: { key: null, vx: 0, vz: 0 },
     traverseMotion: null,
     rollMotion: null,
     turnMotion: null,
@@ -634,6 +642,33 @@ export function PlayerController({
     triggerAction: triggerActionAt,
   } = usePlayerActions(stateRef, lastButtons);
 
+  // A rolling loose rock caught Darwin (physics/props/LooseRocks.jsx). The
+  // store has already taken the health; the frame loop plays the knockdown.
+  const pendingRockfallHit = useRef(null);
+  useEffect(() => onPropEvent('rockfall-player-hit', hit => {
+    pendingRockfallHit.current = hit;
+  }), []);
+
+  // Footing on a loose rock (LooseRocks.jsx measures how fast the surface
+  // under his boots moves). A wobble is a stumble; a lurch puts him down.
+  const pendingLooseFooting = useRef(null);
+  useEffect(() => {
+    const offWobble = onPropEvent('loose-footing-wobble', event => {
+      if (!pendingLooseFooting.current) pendingLooseFooting.current = { ...event, kind: 'wobble' };
+    });
+    const offLost = onPropEvent('loose-footing-lost', event => {
+      pendingLooseFooting.current = { ...event, kind: 'lost' };
+    });
+    const offStep = onPropEvent('loose-footing-step', event => {
+      if (!pendingLooseFooting.current) pendingLooseFooting.current = { ...event, kind: 'step' };
+    });
+    return () => {
+      offWobble();
+      offLost();
+      offStep();
+    };
+  }, []);
+
   useEffect(() => onPropEvent('player-push-contact', contact => {
     latestPropPushContact.current = {
       ...contact,
@@ -684,7 +719,14 @@ export function PlayerController({
 
   useEffect(() => {
     const landingHandler = event => emitPlayerDustEvent(event, 'landing');
-    const footstepHandler = event => emitPlayerDustEvent(event, 'footstep');
+    // Foot contacts don't know what they landed on; while Darwin stands on a
+    // rock (or any authored support) the step belongs to it, not the ground.
+    const footstepHandler = event => emitPlayerDustEvent(
+      event.target || !stateRef.current.supportObstacle
+        ? event
+        : { ...event, target: stateRef.current.supportObstacle },
+      'footstep',
+    );
     const collisionHandler = event => emitPlayerDustEvent(event, 'skid');
     landingDustTriggerRef.current = landingHandler;
     footstepDustTriggerRef.current = footstepHandler;
@@ -1315,6 +1357,77 @@ export function PlayerController({
         seed: cameraImpulse.current.seed + 1,
       };
     }
+    const rockfallHit = pendingRockfallHit.current;
+    if (rockfallHit) {
+      pendingRockfallHit.current = null;
+      if (isDarwinMode) {
+        const clip = rockfallHit.severe ? 'shoulderHitAndFall' : 'hitReaction';
+        const shove = 1.4 + Math.min(3, (rockfallHit.speed || 0) * 0.6);
+        stateRef.current.sitting = false;
+        stateRef.current.lying = false;
+        velocity.current.x = (rockfallHit.direction?.x || 0) * shove;
+        velocity.current.z = (rockfallHit.direction?.z || 0) * shove;
+        startAction(clip, durationFor(clip), {
+          lockMovement: rockfallHit.severe ? true : 0.38,
+          recoverAction: rockfallHit.severe ? 'gettingUp' : null,
+          recoverDuration: rockfallHit.severe ? durationFor('gettingUp') : undefined,
+        });
+        cameraImpulse.current = {
+          startedAt: now,
+          intensity: rockfallHit.severe ? 0.3 : 0.16,
+          duration: 0.3,
+          seed: cameraImpulse.current.seed + 1,
+        };
+      }
+    }
+    const looseFootingEvent = pendingLooseFooting.current;
+    if (looseFootingEvent) {
+      pendingLooseFooting.current = null;
+      if (isDarwinMode && !stateRef.current.swimming) {
+        if (looseFootingEvent.kind === 'lost') {
+          const speed = looseFootingEvent.speed || 0;
+          const shove = 1.1 + Math.min(2.4, speed * 0.6);
+          const direction = looseFootingEvent.direction || { x: 0, z: 0 };
+          const fallbackX = -facing.current.x;
+          const fallbackZ = -facing.current.z;
+          const hasDirection = Math.hypot(direction.x || 0, direction.z || 0) > 0.1;
+          stateRef.current.sitting = false;
+          stateRef.current.lying = false;
+          velocity.current.x = (hasDirection ? direction.x : fallbackX) * shove;
+          velocity.current.z = (hasDirection ? direction.z : fallbackZ) * shove;
+          startAction('shoulderHitAndFall', durationFor('shoulderHitAndFall'), {
+            lockMovement: true,
+            recoverAction: 'gettingUp',
+            recoverDuration: durationFor('gettingUp'),
+          });
+          const damage = Math.min(12, Math.round(2 + speed * 2.5));
+          useThreeGameStore.getState().applyLooseFootingFall?.(damage, { severe: Boolean(looseFootingEvent.severe) });
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: 0.26,
+            duration: 0.3,
+            seed: cameraImpulse.current.seed + 1,
+          };
+        } else if (looseFootingEvent.kind === 'wobble') {
+          if (!stateRef.current.action) startAction('stumble', durationFor('stumble'), { lockMovement: false });
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: 0.12,
+            duration: 0.24,
+            seed: cameraImpulse.current.seed + 1,
+          };
+        } else {
+          // First step onto a loose stone: grit shifts under the boot.
+          emitPlayerDustEvent({ worldPosition: looseFootingEvent.position, kind: 'skid' }, 'skid');
+          cameraImpulse.current = {
+            startedAt: now,
+            intensity: Math.min(0.08, 6 / Math.max(40, looseFootingEvent.mass || 100)),
+            duration: 0.18,
+            seed: cameraImpulse.current.seed + 1,
+          };
+        }
+      }
+    }
     if (updatePlayerActionMotion({
       group,
       stateRef,
@@ -1344,6 +1457,7 @@ export function PlayerController({
       rotateLeftPressed,
       rotateRightPressed,
       climbPressed,
+      pushPressed,
       dodgePressed,
       jumpPressed,
       anyDirectActionPressed,
@@ -1495,17 +1609,6 @@ export function PlayerController({
       stateRef.current.aiming = false;
       aimActiveRef.current = false;
       lastToolId.current = useThreeGameStore.getState().activeToolId;
-    }
-    // Shotgun recoil lands as a camera impulse the frame the barrel fires.
-    if (shotgunAimState.recoilPending) {
-      shotgunAimState.recoilPending = false;
-      cameraImpulse.current = {
-        startedAt: now,
-        intensity: SHOTGUN.recoil.intensity,
-        duration: SHOTGUN.recoil.duration,
-        seed: cameraImpulse.current.seed + 1,
-        kind: 'recoil',
-      };
     }
     // A blast into his own feet: Darwin goes down, health follows.
     if (shotgunAimState.selfHitPending) {
@@ -1866,6 +1969,59 @@ export function PlayerController({
       }
     }
     lastButtons.current.climb = climbPressed;
+    // Loose rocks: Darwin walks over them by default; P at the prompt leans
+    // into one instead. His capsule never touches them, so this is the push.
+    const pushProbe = stateRef.current.pushPromptProbe;
+    const pushEligible = climbOpportunityEligible && !stateRef.current.airborne;
+    if (!pushEligible) {
+      pushProbe.target = null;
+      if (pushProbe.published) {
+        pushProbe.published = false;
+        clearContextPrompt('push');
+      }
+    } else if (now - pushProbe.lastAt >= 0.14 || (pushPressed && !pushProbe.target)) {
+      pushProbe.lastAt = now;
+      pushProbe.target = findLooseRockPushTarget(
+        currentZoneId,
+        group.current.position,
+        facing.current,
+        stateRef.current.looseFooting.key,
+      );
+      if (pushProbe.target) {
+        publishContextPrompt('push', {
+          id: `push:${pushProbe.target.key}`,
+          label: 'Push rock',
+          keyLabel: 'P',
+          priority: CONTEXT_PROMPT_PRIORITY.push,
+          dwellMs: 180,
+        });
+        pushProbe.published = true;
+      } else if (pushProbe.published) {
+        pushProbe.published = false;
+        clearContextPrompt('push');
+      }
+    }
+    if (pushEligible && pushPressed && pushProbe.target) {
+      const target = pushProbe.target;
+      emitPropEvent('player-push-loose-rock', {
+        rockKey: target.key,
+        direction: target.direction,
+        delta,
+        now,
+      });
+      // Lean, don't walk into it: drop any motion toward the rock.
+      const toward = velocity.current.x * target.direction.x + velocity.current.z * target.direction.z;
+      if (toward > 0) {
+        velocity.current.x -= target.direction.x * toward;
+        velocity.current.z -= target.direction.z * toward;
+      }
+      startPushFeedback({
+        kind: 'loose-rock',
+        height: target.height,
+        colliderTop: target.height,
+        pushMass: target.mass,
+      });
+    }
     if (!moving && LOCOMOTION_START_ACTIONS.has(stateRef.current.action)) {
       interruptAction(LOCOMOTION_START_ACTIONS);
     }
@@ -3116,7 +3272,7 @@ export function PlayerController({
       stanceGroundInfo = null;
     }
     if (
-      nextGroundInfo.source === 'authored-obstacle'
+      (nextGroundInfo.source === 'authored-obstacle' || nextGroundInfo.source === 'loose-rock')
       && stanceGroundInfo
       && stanceGroundInfo.obstacleSupportCount <= 1
       && stanceGroundInfo.spread > 0.14
@@ -3127,6 +3283,36 @@ export function PlayerController({
     const nextGroundY = nextGroundInfo.y;
     const groundDistance = group.current.position.y - nextGroundY;
     const groundedForStance = groundDistance <= playerConfig.groundSnapDistance && jumpState.current.phase !== 'takeoff';
+    stateRef.current.supportObstacle = groundedForStance
+      && (nextGroundInfo.source === 'authored-obstacle' || nextGroundInfo.source === 'loose-rock')
+      ? nextGroundInfo.obstacle || null
+      : null;
+    // Standing on a loose rock: his weight and stride go into it every frame.
+    const looseFooting = stateRef.current.looseFooting;
+    const looseRockKey = groundedForStance && nextGroundInfo.source === 'loose-rock'
+      ? nextGroundInfo.obstacle?.looseRockKey
+      : null;
+    if (looseRockKey && isDarwinMode) {
+      const vx = velocity.current.x;
+      const vz = velocity.current.z;
+      const sameRock = looseFooting.key === looseRockKey;
+      const step = Math.max(delta, 1 / 120);
+      const clampAccel = value => THREE.MathUtils.clamp(value, -LOOSE_FOOTING_MAX_ACCEL, LOOSE_FOOTING_MAX_ACCEL);
+      emitPropEvent('player-loose-rock-footing', {
+        rockKey: looseRockKey,
+        point: { x: group.current.position.x, y: nextGroundY, z: group.current.position.z },
+        delta,
+        accel: {
+          x: sameRock ? clampAccel((vx - looseFooting.vx) / step) : 0,
+          z: sameRock ? clampAccel((vz - looseFooting.vz) / step) : 0,
+        },
+      });
+      looseFooting.key = looseRockKey;
+      looseFooting.vx = vx;
+      looseFooting.vz = vz;
+    } else {
+      looseFooting.key = null;
+    }
     const stancePitch = groundedForStance && stanceGroundInfo
       ? THREE.MathUtils.clamp(stanceGroundInfo.pitch, -0.12, 0.12)
       : 0;
@@ -3405,7 +3591,7 @@ export function PlayerController({
         characterController.sync(p);
         velocity.current.y = 0;
         if (
-          finalGroundInfo.source === 'authored-obstacle'
+          (finalGroundInfo.source === 'authored-obstacle' || finalGroundInfo.source === 'loose-rock')
           && groundLift > 0.08
           && groundLift <= 1.0
           && horizontalSpeed > 0.8

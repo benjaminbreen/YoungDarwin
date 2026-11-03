@@ -13,6 +13,7 @@ import { updateFoliageUniforms } from './foliageMotion';
 import { InstancedGLBLayer } from './InstancedGLBLayer';
 import { InstancedEzTreeLayer } from './InstancedEzTreeLayer';
 import { RockField } from './RockField';
+import { isLooseRock } from '../../../world/looseRocks';
 import { Footprints } from './Footprints';
 import { RockSplashes } from './RockSplashes';
 import { CliffSurf } from './CliffSurf';
@@ -405,6 +406,11 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
     visibleLayers.proceduralFlora,
   ]);
 
+  // Loose rocks render as Rapier bodies (physics/props/LooseRocks.jsx).
+  const looseRockIds = useMemo(() => new Set(
+    (ecology?.rocks || []).filter(rock => isLooseRock(rock, ecology.zoneId)).map(rock => rock.id),
+  ), [ecology]);
+
   if (!ecology) return null;
   const {
     flora,
@@ -436,6 +442,8 @@ export function EcologyRenderer({ ecology, settings = {}, preparationPhase = 6 }
       {rocks.length > 0 && (
         <RockField
           rocks={rocks}
+          excludeIds={looseRockIds}
+          geometryQuality={ecology.rockGeometryQuality || 'refined'}
           dust={ecology.rockDust || null}
           sourceId={`ecology:${ecology.zoneId}:rocks`}
           sourceLabel={`${ecology.zoneId} rocks`}

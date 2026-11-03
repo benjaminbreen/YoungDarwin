@@ -305,3 +305,17 @@ one interchangeable suitability curve for every plant.
   changes when a visual check would catch regressions or confirm the result.
 - If GLSL changes make terrain disappear, inspect shader compile errors and
   reserved variable names before assuming a missing texture.
+
+## Procedural rock geometry
+
+RockField now defaults to the approved 980-triangle geometry for both ordinary
+rocks and larger boulders. Existing shape seeds and proportions are preserved;
+two shallow fracture cuts retain broad planes, with restrained 18-degree crease
+smoothing at the transitions. Textures, placement and collision sources stay in
+their existing owners. An authored region can explicitly select
+`rockGeometryQuality: 'current'` to retain the older 320/500-triangle geometry.
+The approved comparison is `test-results/rock-angular-review/angular-abc.png`
+(column B). The denser 1,620/3,380-triangle trials are not the default.
+
+`denseFracturedBasalt` remains an additional material option for procedural rocks
+and volcanic formations; no region selects it by default.

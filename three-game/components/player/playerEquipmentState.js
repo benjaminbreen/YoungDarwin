@@ -70,9 +70,13 @@ export function updatePlayerEquipmentState({
   }
   if (!hasRifle) stateRef.current.aimToggled = false;
   lastButtons.current.rifle = riflePressed;
-  const holdIntent = hasRifle && !preInputMovementLocked && Boolean(shotgunAimState.holdIntent);
+  // Firing locks movement, but must not drop a held aim and ease the camera
+  // back out of ADS between shots. Other locked actions still block entry.
+  const heldAimAllowed = !preInputMovementLocked
+    || (stateRef.current.aiming && stateRef.current.action === 'fireRifle');
+  const holdIntent = hasRifle && heldAimAllowed && Boolean(shotgunAimState.holdIntent);
   const wantAim = hasRifle && !stateRef.current.swimming
-    && (stateRef.current.aimToggled || holdIntent || (keyAimIntent && !preInputMovementLocked));
+    && (stateRef.current.aimToggled || holdIntent || (keyAimIntent && heldAimAllowed));
   if (wantAim !== Boolean(stateRef.current.aiming)) {
     stateRef.current.aiming = wantAim;
     if (aimToggleAllowed) {

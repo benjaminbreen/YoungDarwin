@@ -172,8 +172,24 @@ export function terrainSlopeAt(x, z, regionId = 'POST_OFFICE_BAY', step = 0.85) 
 // actually stops — at 45 degrees the circle cuts the corner off by ~29% of the
 // half-width. Anything reasoning about "how close am I to leaving the map"
 // must ask this rather than measure to the rectangle.
+//
+// Only the seaward half is a circle. Behind the beach (z >= 0) the bay is
+// bounded by its terrain rectangle, so the inland valley runs out to the full
+// width and depth instead of being cut into a lens; use
+// regionBoundaryIsRadialAt where the position matters.
 export function regionUsesRadialBounds(regionId = 'POST_OFFICE_BAY') {
   return authoredRegion(regionId)?.id === 'POST_OFFICE_BAY';
+}
+
+export function regionBoundaryIsRadialAt(regionId, position) {
+  return regionUsesRadialBounds(regionId) && (Number(position?.z) || 0) < 0;
+}
+
+// The circle (radius = half the width) meets the rectangle's side walls at
+// z = 0, so the two halves join without a step.
+function postOfficeBoundaryDistance(x, z, config) {
+  if (z < 0) return config.bounds - Math.hypot(x, z);
+  return Math.min(config.width * 0.5 - Math.abs(x), config.depth * 0.5 - 1.2 - z);
 }
 
 // Remaining travel, in metres, before the player reaches the edge of the
@@ -185,12 +201,29 @@ export function distanceToWalkableBoundary(position, regionId = 'POST_OFFICE_BAY
   const x = Number(position?.x) || 0;
   const z = Number(position?.z) || 0;
   if (regionUsesRadialBounds(regionId)) {
-    return Math.max(0, config.bounds - Math.hypot(x, z));
+    return Math.max(0, postOfficeBoundaryDistance(x, z, config));
   }
   return Math.max(0, Math.min(
     config.width * 0.5 - 1.2 - Math.abs(x),
     config.depth * 0.5 - 1.2 - Math.abs(z),
   ));
+}
+
+// Edges that lead somewhere only along part of their length. Post Office
+// Bay's west and east exits are coastal routes (by boat to the reef, along the
+// shore to Northern Shore); the same edges further inland are the lava ridge
+// and the lookout's flank, and walking into them should stop the player rather
+// than load a coast.
+const PARTIAL_EDGE_ROUTES = {
+  POST_OFFICE_BAY: {
+    west: ({ z }) => z < 24,
+    east: ({ z }) => z < 30,
+  },
+};
+
+export function regionEdgeRouteOpenAt(regionId, edge, position) {
+  const test = PARTIAL_EDGE_ROUTES[authoredRegion(regionId)?.id]?.[edge];
+  return test ? test({ x: Number(position?.x) || 0, z: Number(position?.z) || 0 }) : true;
 }
 
 export function isWalkableTerrain(x, z, regionId = 'POST_OFFICE_BAY') {
@@ -209,7 +242,7 @@ export function isWadeableTerrain(x, z, regionId = 'POST_OFFICE_BAY', options = 
   const config = getRegionTerrainConfig(regionId);
   const definition = authoredRegion(regionId);
   if (definition?.id === 'POST_OFFICE_BAY') {
-    if (Math.hypot(x, z) > config.bounds) return false;
+    if (postOfficeBoundaryDistance(x, z, config) < 0) return false;
   } else if (Math.abs(x) > config.width * 0.5 - 1.2 || Math.abs(z) > config.depth * 0.5 - 1.2) {
     return false;
   }
@@ -294,10 +327,15 @@ export function clampToWalkable(position, previousPosition = null, regionId = 'P
     }
     return p;
   }
-  const dist = Math.hypot(p.x, p.z);
-  if (dist > config.bounds) {
-    p.x *= config.bounds / dist;
-    p.z *= config.bounds / dist;
+  if (p.z < 0) {
+    const dist = Math.hypot(p.x, p.z);
+    if (dist > config.bounds) {
+      p.x *= config.bounds / dist;
+      p.z *= config.bounds / dist;
+    }
+  } else {
+    p.x = THREE.MathUtils.clamp(p.x, -config.width * 0.5, config.width * 0.5);
+    p.z = Math.min(p.z, config.depth * 0.5 - 1.2);
   }
   if (allowed(p.x, p.z)) return p;
   if (previousPosition && allowed(previousPosition.x, previousPosition.z)) {
@@ -313,9 +351,11 @@ export function clampToWalkable(position, previousPosition = null, regionId = 'P
     }
     return previous;
   }
-  const angle = Math.atan2(p.z, p.x);
-  for (let radius = Math.min(dist, config.bounds); radius > 2; radius -= 1.25) {
-    const candidate = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+  // March back toward the landing until the ground holds.
+  const dist = Math.hypot(p.x, p.z);
+  for (let radius = dist; radius > 2; radius -= 1.25) {
+    const scale = radius / dist;
+    const candidate = new THREE.Vector3(p.x * scale, 0, p.z * scale);
     if (allowed(candidate.x, candidate.z)) return candidate;
   }
   return new THREE.Vector3(0, 0, 7.5);

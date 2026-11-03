@@ -30,7 +30,7 @@ function StowedSpecimen({ specimen, index }) {
 export function NightlyDebriefModal() {
   const debrief = useThreeGameStore(state => state.nightlyDebrief);
   const dismiss = useThreeGameStore(state => state.dismissNightlyDebrief);
-  const panelRef = useDismissableOverlay(Boolean(debrief), dismiss);
+  const panelRef = useDismissableOverlay(Boolean(debrief), dismiss, { sound: 'book' });
 
   if (!debrief) return null;
   const { endedDay, nextDay, finalDay, stowed, shipTotal, notesToday, suppliesDrawn, unexaminedCount } = debrief;

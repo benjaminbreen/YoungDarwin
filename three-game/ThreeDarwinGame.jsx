@@ -61,6 +61,7 @@ import { isOvercastWeather, weatherProfile, weatherSkyTint } from './world/weath
 import { skyState } from './world/celestial';
 import { weatherEnv } from './world/weatherEnvRuntime';
 import { computeColorGrade } from './world/colorGrade';
+import { SplitToneEffect } from './components/scene/SplitToneEffect';
 import { WATER_LEVEL } from './world/water';
 import { waterDev } from './world/waterDevRuntime';
 import { dprCapForZone } from './world/zoneRenderBudget';
@@ -271,6 +272,8 @@ const DEFAULT_PERF_SETTINGS = {
   landmarks: false,
   atmosphere: true,
   worldDetails: true,
+  shoreGlintBrightness: 1,
+  shoreGlintSize: 1,
   beagle: true,
   specimens: true,
   syms: true,
@@ -355,6 +358,32 @@ const QUALITY_PRESETS = {
     ao: false,
     postHalfFloat: false,
     reflections: false,
+    waterQuality: 'performance',
+    waterSplashes: true,
+    weatherFX: true,
+    splatBackdrop: true,
+    solarScreenGlare: true,
+    solarLensGhosts: false,
+    solarSunHalo: true,
+    solarSceneFlares: true,
+    cheapMaterials: true,
+    foliageDrawScale: 0.75,
+    terrainSegmentCap: 160,
+  },
+  // Not a player-facing choice: Automatic's pick for desktop Apple Silicon.
+  // Light's resolution, foliage reach and terrain density, plus the two
+  // features the 2026-08-04 ablation on an M1 Pro measured as within noise —
+  // the planar water reflection and the 4096 shadow map. Light drops both
+  // because it also serves phones, which this tier never does.
+  desktopLight: {
+    dprMode: '1.25x',
+    msaaSamples: 0,
+    postprocessing: true,
+    contextAntialias: true,
+    shadowQuality: 'standard',
+    ao: false,
+    postHalfFloat: false,
+    reflections: true,
     waterQuality: 'performance',
     waterSplashes: true,
     weatherFX: true,
@@ -583,7 +612,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
   const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
   const defaultWaterQuality = requestedQuality
     ? base.waterQuality
-    : quality === 'mobile' || quality === 'low'
+    : quality === 'mobile' || quality === 'low' || quality === 'desktopLight'
       ? QUALITY_PRESETS[quality].waterQuality
       : DEFAULT_PERF_SETTINGS.waterQuality;
   const postprocessing = params.has('post')
@@ -2766,11 +2795,13 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
     hueSat: new HueSaturationEffect({ saturation: 0.08 }),
     contrast: new BrightnessContrastEffect({ contrast: 0.05 }),
     vignette: new VignetteEffect({ eskil: false, offset: 0.26, darkness: 0.42 }),
+    splitTone: new SplitToneEffect(),
   }), []);
   useEffect(() => () => {
     gradeFx.hueSat.dispose();
     gradeFx.contrast.dispose();
     gradeFx.vignette.dispose();
+    gradeFx.splitTone.dispose();
   }, [gradeFx]);
   const gradeRef = useRef(null);
   // Live grade: drives the effects with time-of-day/weather every frame (see
@@ -2784,6 +2815,9 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
       daylight: s.daylight,
       golden: s.golden,
       night: s.night,
+      noonBlue: s.noonBlue,
+      dawnDrama: s.dawnDrama,
+      duskDrama: s.duskDrama,
       overcast: weatherEnv.overcast,
       mist: weatherEnv.mistAmount,
       // Sea air: the trace of the underwater grade that reads well on land.
@@ -2791,7 +2825,16 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
       // effect on its early-out and the water shader out of its Snell branch.
       underwaterAmount: Math.max(store.underwaterCamera?.amount || 0, waterDev.seaAir),
     });
-    const grade = gradeRef.current || (gradeRef.current = { ...target });
+    const grade = gradeRef.current || (gradeRef.current = {
+      ...target,
+      highlightTint: [...target.highlightTint],
+      shadowTint: [...target.shadowTint],
+    });
+    for (let i = 0; i < 3; i += 1) {
+      grade.highlightTint[i] = MathUtils.damp(grade.highlightTint[i], target.highlightTint[i], 2.5, delta);
+      grade.shadowTint[i] = MathUtils.damp(grade.shadowTint[i], target.shadowTint[i], 2.5, delta);
+    }
+    gradeFx.splitTone.setTints(grade.highlightTint, grade.shadowTint, postGradeTuning.splitToneStrength);
     grade.saturation = MathUtils.damp(grade.saturation, target.saturation, 2.5, delta);
     grade.contrast = MathUtils.damp(grade.contrast, target.contrast, 2.5, delta);
     grade.vignetteDarkness = MathUtils.damp(grade.vignetteDarkness, target.vignetteDarkness, 2.5, delta);
@@ -2904,6 +2947,7 @@ function PostFX({ enabled, ao, halfFloat = false, multisampling = 2, underwaterA
           touching any material. Merges into the existing effect pass. */}
       {enabled && <primitive object={gradeFx.hueSat} />}
       {enabled && <primitive object={gradeFx.contrast} />}
+      {enabled && <primitive object={gradeFx.splitTone} />}
       {enabled && visionProfile?.effect && (
         <AnimalVisionPostEffect
           profile={visionProfile}
@@ -3273,6 +3317,7 @@ function SolarDiagnostics({ settings, set }) {
       <div className="mt-1.5 grid grid-cols-1 gap-1.5">
         <DevSlider label="Bloom strength" value={postGradeTuning.bloomIntensityScale} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setPostGradeTuning({ bloomIntensityScale: value })} />
         <DevSlider label="Bloom threshold" value={postGradeTuning.bloomThresholdShift} min={-0.3} max={0.3} step={0.01} format={v => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`} onChange={value => setPostGradeTuning({ bloomThresholdShift: value })} />
+        <DevSlider label="Hour tint" value={postGradeTuning.splitToneStrength} min={0} max={2.5} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setPostGradeTuning({ splitToneStrength: value })} />
         <DevSlider label="Vignette" value={postGradeTuning.vignetteStrength} min={0} max={2} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => setPostGradeTuning({ vignetteStrength: value })} />
         <DevSlider label="Vignette reach" value={postGradeTuning.vignetteOffset} min={0} max={0.8} step={0.02} format={v => v.toFixed(2)} onChange={value => setPostGradeTuning({ vignetteOffset: value })} />
       </div>
@@ -3367,6 +3412,13 @@ function TerrainLookSection() {
         <DevSlider label="Baked AO" value={terrainLookTuning.aoStrength} min={0} max={3} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ aoStrength: value })} />
         <DevSlider label="AO on sunlight" value={terrainLookTuning.aoDirect} min={0} max={1} step={0.02} format={v => (v === 0 ? 'ambient only' : v.toFixed(2))} onChange={value => set({ aoDirect: value })} />
       </div>
+      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+        Ground footprints · under plants and rocks
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Under canopy" value={terrainLookTuning.footprintCanopy} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintCanopy: value })} />
+        <DevSlider label="Rock collars" value={terrainLookTuning.footprintRock} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintRock: value })} />
+      </div>
     </div>
   );
 }
@@ -3393,20 +3445,14 @@ function EnvironmentLookSection() {
         </button>
       </div>
       <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
-        Shapes shaded faces on terrain, rocks, props and characters. Rebuilds the sky light on change;
-        no per-frame cost.{isDefault ? '' : ' Currently overriding the shipped defaults.'}
-      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
-        Ground footprints · under plants and rocks
-      </p>
-      <div className="grid grid-cols-1 gap-1.5">
-        <DevSlider label="Under canopy" value={terrainLookTuning.footprintCanopy} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintCanopy: value })} />
-        <DevSlider label="Rock collars" value={terrainLookTuning.footprintRock} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintRock: value })} />
-      </div>
+        Indirect light on shaded terrain, rocks, props and characters. Strongest in clear daylight;
+        a tight glow can be barely visible on matte ground. Updates live.{isDefault ? '' : ' Currently overriding the shipped defaults.'}
       </p>
       <div className="grid grid-cols-1 gap-1.5">
         <DevSlider label="Sun glow" value={environmentLookTuning.sunLobe} min={0} max={8} step={0.1} format={v => (v === 0 ? 'off' : v.toFixed(1))} onChange={value => set({ sunLobe: value })} />
         <DevSlider label="Glow width" value={environmentLookTuning.sunLobeWidth} min={1} max={32} step={0.5} format={v => (v <= 3 ? `${v.toFixed(1)} broad` : v >= 16 ? `${v.toFixed(1)} tight` : v.toFixed(1))} onChange={value => set({ sunLobeWidth: value })} />
         <DevSlider label="Sand bounce" value={environmentLookTuning.groundBounce} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : v.toFixed(2))} onChange={value => set({ groundBounce: value })} />
+        <DevSlider label="Sky fill" value={environmentLookTuning.skyFill} min={0.5} max={3} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => set({ skyFill: value })} />
       </div>
     </div>
   );
@@ -3806,7 +3852,6 @@ const CAMERA_TUNING_GROUPS = [
     ['fpBobRoll', 'Bob roll (rad)', 0, 0.05, 0.001],
     ['fpBreathe', 'Idle breath (m)', 0, 0.05, 0.001],
     ['fpLandingDip', 'Landing dip (m)', 0, 0.8, 0.01],
-    ['fpRecoilKick', 'Recoil kick (rad)', 0, 0.5, 0.01],
     ['fpRollScale', 'Turn lean', 0, 5, 0.1],
     ['fpSwimEyeAbove', 'Swim eye above (m)', -0.2, 0.6, 0.01],
   ]],
@@ -4112,6 +4157,17 @@ function PerformancePanel({
               screens of backdrop sliders, which made them effectively
               undiscoverable. */}
           <TerrainLookSection />
+          <div className="mb-3 rounded border border-amber-100/15 bg-black/15 p-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-[10px] font-bold uppercase tracking-wide text-amber-100/75">Shoreline glints</h3>
+              <button type="button" className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] hover:bg-white/15" onClick={() => set({ shoreGlintBrightness: 1, shoreGlintSize: 1 })}>reset</button>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              <DevSlider label="Glint brightness" value={settings.shoreGlintBrightness ?? 1} min={0} max={3} step={0.05} format={v => v === 0 ? 'off' : `${v.toFixed(2)}x`} onChange={value => set({ shoreGlintBrightness: value })} />
+              <DevSlider label="Glint flare size" value={settings.shoreGlintSize ?? 1} min={0.25} max={2} step={0.05} format={v => `${v.toFixed(2)}x`} onChange={value => set({ shoreGlintSize: value })} />
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-amber-100/45">Post Office Bay landing shore, in sunlight. 1x matches the stronger B preview. Brightness 0 switches these glints off. Tuning lasts until reload.</p>
+          </div>
           <EnvironmentLookSection />
           <CentralPeakDiagnostics />
           <SolarDiagnostics settings={settings} set={set} />

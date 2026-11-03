@@ -9,6 +9,11 @@ import { createTriplanarRockMaterial } from '../../../world/regions/materials/tr
 import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 
 const FORMATION_MATERIAL_PROFILES = {
+  denseFracturedBasalt: {
+    textureKey: 'denseFracturedBasalt',
+    normalScale: 0.42, roughness: 0.9, uvDensity: 0.8,
+    tint: '#ffffff',
+  },
   caveWeatheredBasalt: {
     textureKey: 'weatheredHighlandBasalt',
     normalScale: 0.64,

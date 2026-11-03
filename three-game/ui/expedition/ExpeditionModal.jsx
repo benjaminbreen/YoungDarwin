@@ -38,8 +38,8 @@ export function ExpeditionModalHeader({ title, subtitle, onClose }) {
   );
 }
 
-export function ExpeditionModal({ title, subtitle, onClose, children, className = '', width = 'min(120rem, 98vw)' }) {
-  const panelRef = useDismissableOverlay(true, onClose);
+export function ExpeditionModal({ title, subtitle, onClose, children, className = '', width = 'min(120rem, 98vw)', sound = 'paper' }) {
+  const panelRef = useDismissableOverlay(true, onClose, { sound });
   return (
     // h-[100dvh] rather than inset-0 alone: on mobile Safari the layout viewport
     // is the *large* viewport, so a 96vh panel centred in it hangs its header
