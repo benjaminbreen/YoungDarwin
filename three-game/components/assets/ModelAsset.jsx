@@ -224,6 +224,278 @@ function applyGazeMotion({ targets, state, enabled, delta, group, motionState, s
   applyTo(head, 1 - neckShare);
 }
 
+const ARM_WEIGHTED_BONE = /Arm|Hand|Shoulder/;
+
+// Pick the vertices that define the body's outline around hand height: in the
+// bind pose, the outermost non-arm vertex per (side, forward, height) cell.
+// The satchel is skinned to the right thigh and the coat skirts to both, so the
+// outline moves with every stride; these few hundred samples are re-skinned
+// each frame instead of trusting a static table.
+function buildArmSilhouette(scene, hips, arms, chest, config) {
+  const sampling = config.silhouette || {};
+  const cellForward = sampling.cellForward ?? 0.03;
+  const cellHeight = sampling.cellHeight ?? 0.05;
+  const [bandLow, bandHigh] = sampling.band ?? [-0.55, 0.25];
+  const meshes = [];
+  scene.traverse(object => {
+    if (object.isSkinnedMesh && object.skeleton?.bones.includes(hips)) meshes.push(object);
+  });
+  if (!meshes.length || arms.length < 2 || !chest) return null;
+
+  // Bind-pose body frame from the skeleton's own inverse bind matrices.
+  const bindPosition = (mesh, bone) => {
+    const index = mesh.skeleton.bones.indexOf(bone);
+    if (index < 0) return null;
+    return new THREE.Vector3().setFromMatrixPosition(mesh.skeleton.boneInverses[index].clone().invert());
+  };
+  const reference = meshes[0];
+  const hipsBind = bindPosition(reference, hips);
+  const leftBind = bindPosition(reference, arms[0].upper);
+  const rightBind = bindPosition(reference, arms[1].upper);
+  const chestBind = bindPosition(reference, chest);
+  if (!hipsBind || !leftBind || !rightBind || !chestBind) return null;
+  const up = chestBind.clone().sub(hipsBind).normalize();
+  const right = rightBind.clone().sub(leftBind);
+  right.addScaledVector(up, -right.dot(up)).normalize();
+  const forward = new THREE.Vector3().crossVectors(up, right).normalize();
+
+  const joints = [];
+  const jointIndex = new Map();
+  const cells = new Map();
+  const base = new THREE.Vector3();
+  for (const mesh of meshes) {
+    const { position, skinIndex, skinWeight } = mesh.geometry.attributes;
+    if (!position || !skinIndex || !skinWeight) continue;
+    const { bones, boneInverses } = mesh.skeleton;
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      let armWeight = 0;
+      for (let k = 0; k < 4; k += 1) {
+        const weight = skinWeight.getComponent(vertex, k);
+        if (weight > 0 && ARM_WEIGHTED_BONE.test(bones[skinIndex.getComponent(vertex, k)]?.name || '')) armWeight += weight;
+      }
+      if (armWeight > 0.05) continue;
+      base.fromBufferAttribute(position, vertex).applyMatrix4(mesh.bindMatrix);
+      const rel = base.clone().sub(hipsBind);
+      const height = rel.dot(up);
+      if (height < bandLow || height > bandHigh) continue;
+      const lateral = rel.dot(right);
+      const key = `${lateral > 0 ? 1 : 0}:${Math.round(rel.dot(forward) / cellForward)}:${Math.round(height / cellHeight)}`;
+      const cell = cells.get(key);
+      if (cell && cell.extent >= Math.abs(lateral)) continue;
+      const influences = [];
+      for (let k = 0; k < 4; k += 1) {
+        const weight = skinWeight.getComponent(vertex, k);
+        if (weight <= 0) continue;
+        const boneSlot = skinIndex.getComponent(vertex, k);
+        const bone = bones[boneSlot];
+        let joint = jointIndex.get(bone);
+        if (joint === undefined) {
+          joint = joints.length;
+          jointIndex.set(bone, joint);
+          joints.push({ bone, inverse: boneInverses[boneSlot], matrix: new THREE.Matrix4() });
+        }
+        influences.push(joint, weight);
+      }
+      cells.set(key, { extent: Math.abs(lateral), base: base.clone(), influences });
+    }
+  }
+  const samples = [...cells.values()];
+  return {
+    joints,
+    samples,
+    forward: new Float32Array(samples.length),
+    lateral: new Float32Array(samples.length),
+    height: new Float32Array(samples.length),
+  };
+}
+
+// Re-skin the silhouette samples into the current body frame (hips-relative
+// forward / signed lateral / height). Skins from the bones' world matrices
+// directly: SkinnedMesh.getVertexPosition divides by the mesh's own world
+// matrix, which is not refreshed every frame for the player.
+function skinArmSilhouette(silhouette, scratch) {
+  for (const joint of silhouette.joints) joint.matrix.multiplyMatrices(joint.bone.matrixWorld, joint.inverse);
+  const { samples, joints } = silhouette;
+  for (let index = 0; index < samples.length; index += 1) {
+    const { base, influences } = samples[index];
+    scratch.skinned.set(0, 0, 0);
+    for (let k = 0; k < influences.length; k += 2) {
+      scratch.skinTerm.copy(base).applyMatrix4(joints[influences[k]].matrix);
+      scratch.skinned.addScaledVector(scratch.skinTerm, influences[k + 1]);
+    }
+    scratch.skinned.sub(scratch.hips);
+    silhouette.forward[index] = scratch.skinned.dot(scratch.forward);
+    silhouette.lateral[index] = scratch.skinned.dot(scratch.right);
+    silhouette.height[index] = scratch.skinned.dot(scratch.up);
+  }
+}
+
+// Widest outline sample on one side near a point, or -Infinity when nothing of
+// the body is beside it (hand swung clear in front or behind).
+function armSilhouetteExtent(silhouette, side, forward, height, windowForward, windowHeight) {
+  let extent = -Infinity;
+  for (let index = 0; index < silhouette.lateral.length; index += 1) {
+    const outward = side * silhouette.lateral[index];
+    if (outward <= extent) continue;
+    if (Math.abs(silhouette.forward[index] - forward) > windowForward) continue;
+    if (Math.abs(silhouette.height[index] - height) > windowHeight) continue;
+    extent = outward;
+  }
+  return extent;
+}
+
+// Arm and hand rest-pose correction. The Mixamo clips were authored for a
+// slimmer torso than the frock coat: at rest the arms hang out from the body,
+// and in the walk and run the hands swing through the coat skirts and the
+// satchel. Each upper arm turns about the body's forward axis (forward/back
+// swing is untouched) toward the body, but never so far that the wrist or
+// fingertip comes within `clearanceMargin` of the live silhouette; where a clip
+// already cuts into it, the same solve pushes the arm back out. Layered on
+// whatever the mixer and the overlay mixer just evaluated.
+function applyArmPoseCorrection({ targets, state, enabled, delta, group, motionState, overlayWeight, scratch }) {
+  const { arms, fingers, hips, silhouette, config } = targets;
+  const dt = THREE.MathUtils.clamp(delta, 0, 0.05);
+  // Authored action, aim, climb, swim and rest poses place the hands on
+  // purpose; correcting them would push tools and handholds off target.
+  // Hands-free one-shots (idle variety, start/stop, landings) are listed in
+  // `correctedActions` and keep the correction.
+  const action = motionState?.action;
+  const suppressed = !enabled
+    || Boolean(action && !targets.correctedActions.has(action))
+    || Boolean(motionState?.aiming)
+    || Boolean(motionState?.handsBusy)
+    || Boolean(motionState?.swimming)
+    || Boolean(motionState?.lying)
+    || Boolean(motionState?.sitting)
+    || Boolean(motionState?.bracing)
+    || Boolean(motionState?.climbMotion)
+    || Boolean(motionState?.flying);
+  // `weight` gates the whole pass; `pullIn` additionally scales only the
+  // cosmetic turn toward the body (the faster gaits want their wider swing).
+  // Pushing a hand back out of the coat or satchel always gets the full weight.
+  const targetWeight = (suppressed ? 0 : 1) * (1 - THREE.MathUtils.clamp(overlayWeight || 0, 0, 1));
+  let targetPullIn = 1;
+  if (motionState?.running) targetPullIn = config.runScale ?? 0.6;
+  else if (motionState?.airborne) targetPullIn = config.airborneScale ?? 0.5;
+  const blendRate = config.blendRate ?? 6;
+  state.weight = THREE.MathUtils.damp(state.weight, targetWeight, blendRate, dt);
+  state.pullIn = THREE.MathUtils.damp(state.pullIn ?? 1, targetPullIn, blendRate, dt);
+  state.debug.left.active = false;
+  state.debug.right.active = false;
+  // Clips without a track for a bone (the tool-hold clips have no thumb keys)
+  // leave last frame's corrected rotation in place, and layering on it again
+  // would accumulate into a spin. Restore the clip pose first wherever the
+  // mixer did not overwrite what this pass wrote.
+  for (const entry of targets.written) {
+    if (entry.active && entry.bone.quaternion.equals(entry.applied)) entry.bone.quaternion.copy(entry.base);
+    entry.active = false;
+  }
+  if (state.weight < 0.002 || !group || !hips || !silhouette || arms.length < 2) return;
+
+  // Body frame from the rig itself (shoulder line + the group's up), so it
+  // holds regardless of how the imported armature is oriented in the group.
+  hips.updateWorldMatrix(true, true);
+  group.getWorldQuaternion(scratch.bodyQuaternion);
+  scratch.up.set(0, 1, 0).applyQuaternion(scratch.bodyQuaternion);
+  arms[0].upper.getWorldPosition(scratch.shoulder);
+  arms[1].upper.getWorldPosition(scratch.elbow);
+  scratch.right.subVectors(scratch.elbow, scratch.shoulder);
+  scratch.right.addScaledVector(scratch.up, -scratch.right.dot(scratch.up));
+  if (scratch.right.lengthSq() < 1e-8) return;
+  scratch.right.normalize();
+  scratch.forward.crossVectors(scratch.up, scratch.right).normalize();
+  hips.getWorldPosition(scratch.hips);
+  skinArmSilhouette(silhouette, scratch);
+
+  const adduction = config.adduction ?? 0.24;
+  const maxPushOut = config.maxPushOut ?? 0.2;
+  const minAbduction = config.minAbduction ?? 0.17;
+  // Arms raised past this angle from straight down (reaching, waving) are
+  // left alone. Elevation, not frontal-plane abduction: a big forward swing
+  // has a large frontal angle but is still a hanging arm.
+  const maxElevation = config.maxElevation ?? 1.5;
+  const margin = config.clearanceMargin ?? 0.045;
+  const windowForward = config.silhouette?.windowForward ?? 0.06;
+  const windowHeight = config.silhouette?.windowHeight ?? 0.08;
+  for (const arm of arms) {
+    arm.upper.getWorldPosition(scratch.shoulder);
+    arm.lower.getWorldPosition(scratch.elbow);
+    scratch.dir.subVectors(scratch.elbow, scratch.shoulder);
+    if (scratch.dir.lengthSq() < 1e-8) continue;
+    scratch.dir.normalize();
+    // Abduction measured in the body's frontal plane only.
+    const down = -scratch.dir.dot(scratch.up);
+    const abduction = Math.atan2(Math.abs(scratch.dir.dot(scratch.right)), Math.max(down, 1e-4));
+    const elevation = Math.acos(THREE.MathUtils.clamp(down, -1, 1));
+    if (elevation >= maxElevation) continue;
+    const raisedFade = 1 - THREE.MathUtils.smoothstep(elevation, maxElevation - 0.25, maxElevation);
+
+    // Outward sign of this side, and the shoulder in hips-relative frontal
+    // coordinates (u = outward, y = up).
+    scratch.offset.subVectors(scratch.shoulder, scratch.hips);
+    const side = Math.sign(scratch.offset.dot(scratch.right)) || 1;
+    const shoulderU = side * scratch.offset.dot(scratch.right);
+    const shoulderY = scratch.offset.dot(scratch.up);
+
+    // Lower bound on the outward turn (radians) so every test point clears
+    // the silhouette. Rotation about the forward axis leaves forward offset
+    // unchanged, so each point's requirement is fixed for this frame.
+    let required = minAbduction - abduction;
+    let gapBefore = Infinity;
+    let solvedCount = 0;
+    for (const point of arm.points) {
+      point.getWorldPosition(scratch.point);
+      scratch.offset.subVectors(scratch.point, scratch.hips);
+      const a = side * scratch.offset.dot(scratch.right) - shoulderU;
+      const pointY = scratch.offset.dot(scratch.up);
+      const b = pointY - shoulderY;
+      if (b >= 0) continue;
+      const extent = armSilhouetteExtent(
+        silhouette, side, scratch.offset.dot(scratch.forward), pointY, windowForward, windowHeight,
+      );
+      if (extent === -Infinity) continue;
+      const radius = Math.hypot(a, b);
+      const current = Math.atan2(a, -b);
+      const needSin = (extent + margin - shoulderU) / Math.max(radius, 1e-4);
+      required = Math.max(required, needSin >= 1 ? maxPushOut : Math.asin(Math.max(needSin, -1)) - current);
+      gapBefore = Math.min(gapBefore, shoulderU + a - extent);
+      scratch.solved[solvedCount * 3] = radius;
+      scratch.solved[solvedCount * 3 + 1] = current;
+      scratch.solved[solvedCount * 3 + 2] = extent;
+      solvedCount += 1;
+    }
+    const turn = THREE.MathUtils.clamp(required, -adduction * state.pullIn, maxPushOut);
+    const outward = turn * state.weight * raisedFade;
+    let gapAfter = Infinity;
+    for (let index = 0; index < solvedCount; index += 1) {
+      const radius = scratch.solved[index * 3];
+      const current = scratch.solved[index * 3 + 1];
+      gapAfter = Math.min(gapAfter, shoulderU + radius * Math.sin(current + outward) - scratch.solved[index * 3 + 2]);
+    }
+    const debug = side > 0 ? state.debug.right : state.debug.left;
+    debug.active = true;
+    debug.gapBefore = gapBefore;
+    debug.gapAfter = gapAfter;
+    debug.turn = outward;
+    if (Math.abs(outward) < 1e-4) continue;
+    // A positive turn about forward (= up x right) swings a hanging arm
+    // toward -right, so outward on this side is -side.
+    scratch.delta.setFromAxisAngle(scratch.forward, -side * outward);
+    arm.written.base.copy(arm.upper.quaternion);
+    applyWorldSpaceBoneDelta(arm.upper, scratch.delta, scratch.parent, scratch.localDelta);
+    arm.written.applied.copy(arm.upper.quaternion);
+    arm.written.active = true;
+  }
+
+  for (const finger of fingers) {
+    scratch.delta.setFromAxisAngle(finger.axis, finger.angle * state.weight);
+    finger.written.base.copy(finger.bone.quaternion);
+    finger.bone.quaternion.multiply(scratch.delta);
+    finger.written.applied.copy(finger.bone.quaternion);
+    finger.written.active = true;
+  }
+}
+
 function stableUnitFromSeed(seed, salt = '') {
   const text = `${seed || 'model'}:${salt}`;
   let hash = 2166136261;
@@ -1559,6 +1831,81 @@ function GLBPrimitive({
     };
     return () => { delete window.__darwinGaze; };
   }, [gazeTargets]);
+  const armPoseTargets = useMemo(() => {
+    const config = asset.proceduralArmPose;
+    if (!config || config.enabled === false) return null;
+    const arms = (config.arms || []).map(arm => ({
+      upper: findGazeBone(importedScene, arm.upper),
+      lower: findGazeBone(importedScene, arm.lower),
+      points: (arm.clearancePoints || []).map(name => findGazeBone(importedScene, name)).filter(Boolean),
+    })).filter(arm => arm.upper && arm.lower);
+    const writtenEntry = bone => ({
+      bone,
+      base: new THREE.Quaternion(),
+      applied: new THREE.Quaternion(),
+      active: false,
+    });
+    arms.forEach(arm => { arm.written = writtenEntry(arm.upper); });
+    const hips = findGazeBone(importedScene, config.hipsBone || 'mixamorig:Hips');
+    const chest = findGazeBone(importedScene, config.chestBone || 'mixamorig:Spine2');
+    const fingers = (config.fingers || []).map(finger => ({
+      bone: findGazeBone(importedScene, finger.bone),
+      axis: new THREE.Vector3(...finger.axis).normalize(),
+      angle: finger.angle,
+    })).filter(finger => finger.bone);
+    fingers.forEach(finger => { finger.written = writtenEntry(finger.bone); });
+    if (!arms.length && !fingers.length) return null;
+    const silhouette = hips ? buildArmSilhouette(importedScene, hips, arms, chest, config) : null;
+    const written = [...arms, ...fingers].map(entry => entry.written);
+    return { arms, fingers, hips, silhouette, written, correctedActions: new Set(config.correctedActions || []), config };
+  }, [asset.proceduralArmPose, importedScene]);
+  // `debug` holds the last frame's per-side clearance (metres outside the
+  // silhouette, before/after the turn) for window.__darwinArmPoseDebug().
+  const armPoseStateRef = useRef({
+    weight: 0,
+    pullIn: 1,
+    debug: {
+      left: { active: false, gapBefore: 0, gapAfter: 0, turn: 0 },
+      right: { active: false, gapBefore: 0, gapAfter: 0, turn: 0 },
+    },
+  });
+  const armPoseScratch = useMemo(() => ({
+    bodyQuaternion: new THREE.Quaternion(),
+    forward: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    up: new THREE.Vector3(),
+    shoulder: new THREE.Vector3(),
+    elbow: new THREE.Vector3(),
+    dir: new THREE.Vector3(),
+    hips: new THREE.Vector3(),
+    offset: new THREE.Vector3(),
+    point: new THREE.Vector3(),
+    skinned: new THREE.Vector3(),
+    skinTerm: new THREE.Vector3(),
+    solved: new Float64Array(12),
+    delta: new THREE.Quaternion(),
+    parent: new THREE.Quaternion(),
+    localDelta: new THREE.Quaternion(),
+  }), []);
+  // Live kill switch, same contract as __darwinGaze.
+  const armPoseEnabledRef = useRef(true);
+  useEffect(() => {
+    if (!armPoseTargets) return undefined;
+    window.__darwinArmPose = (enabled = true) => {
+      armPoseEnabledRef.current = Boolean(enabled);
+      return armPoseEnabledRef.current;
+    };
+    window.__darwinArmPoseDebug = () => ({
+      weight: armPoseStateRef.current.weight,
+      samples: armPoseTargets.silhouette?.samples.length ?? 0,
+      left: { ...armPoseStateRef.current.debug.left },
+      right: { ...armPoseStateRef.current.debug.right },
+    });
+    return () => {
+      delete window.__darwinArmPose;
+      delete window.__darwinArmPoseDebug;
+    };
+  }, [armPoseTargets]);
   const blinkTargets = useMemo(() => {
     const morphName = asset.blinkMorph?.name;
     if (!morphName) return [];
@@ -2332,6 +2679,18 @@ function GLBPrimitive({
       }
     } else if (overlayState.action?.isRunning()) {
       overlayState.action.stop();
+    }
+    if (armPoseTargets) {
+      applyArmPoseCorrection({
+        targets: armPoseTargets,
+        state: armPoseStateRef.current,
+        enabled: armPoseEnabledRef.current,
+        delta,
+        group: group.current,
+        motionState: grounding?.motionRef?.current,
+        overlayWeight: overlayState.weight,
+        scratch: armPoseScratch,
+      });
     }
     footContactRig.update(mixerDelta, activeAction.current, activeRequest.current);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {

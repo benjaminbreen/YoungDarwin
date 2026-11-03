@@ -177,6 +177,74 @@ export const modelAssets = {
       suppressWhileRunning: true,
       suppressWhileAirborne: true,
     },
+    // Arm/hand rest-pose correction layered after the mixer. The Mixamo clips
+    // hang the arms out from the frock coat and leave the fingers splayed.
+    // ROLLBACK: delete this block; `window.__darwinArmPose(false)` kills it
+    // live.
+    proceduralArmPose: {
+      enabled: true,
+      hipsBone: 'mixamorig:Hips',
+      arms: [
+        {
+          upper: 'mixamorig:LeftArm',
+          lower: 'mixamorig:LeftForeArm',
+          clearancePoints: ['mixamorig:LeftHand', 'mixamorig:LeftHandIndex4'],
+        },
+        {
+          upper: 'mixamorig:RightArm',
+          lower: 'mixamorig:RightForeArm',
+          clearancePoints: ['mixamorig:RightHand', 'mixamorig:RightHandIndex4'],
+        },
+      ],
+      // Radians the upper arm may turn in toward the body, or back out when a
+      // clip already drives the hand into the coat or satchel.
+      adduction: 0.24,
+      maxPushOut: 0.35,
+      // Upper-arm floor from vertical, independent of the hand clearance.
+      minAbduction: 0.17,
+      // Upper arm raised further than this from straight down is left alone.
+      maxElevation: 1.5,
+      // Hand clearance from the live body outline: the outermost non-arm
+      // vertex per (side, forward, height) cell around hand height is picked
+      // from the bind pose and re-skinned each frame, because the satchel is
+      // skinned to the right thigh and the coat skirts to both, so the outline
+      // moves with the stride. Wrist and fingertip stay `clearanceMargin`
+      // outside the widest sample within the window around them.
+      chestBone: 'mixamorig:Spine2',
+      clearanceMargin: 0.045,
+      silhouette: {
+        band: [-0.55, 0.25],
+        cellForward: 0.03,
+        cellHeight: 0.05,
+        windowForward: 0.06,
+        windowHeight: 0.08,
+      },
+      runScale: 0.6,
+      airborneScale: 0.5,
+      blendRate: 6,
+      // Hands-free one-shots that keep the correction; every other action
+      // (tool swings, climbs, pushes, gathers) fades it out.
+      correctedActions: [
+        'calmIdle', 'fidgetStand', 'happyIdle', 'inspectNearbyIdle', 'lookAround',
+        'lookAroundShort', 'neckStretch', 'neutralIdle',
+        'startWalking', 'stopWalking', 'startRunning', 'runToStop',
+        'runningTurnLeft', 'runningTurnRight',
+        'landing', 'runningLanding', 'jumpDown', 'fallingToLanding',
+      ],
+      // Relaxed curl. The rig only has index and thumb chains (the other
+      // fingers ride the index). Curl axes differ per hand because the bone
+      // rolls differ: left fingers curl about local +Z, right about local +X.
+      fingers: [
+        { bone: 'mixamorig:LeftHandIndex1', axis: [0, 0, 1], angle: 0.3 },
+        { bone: 'mixamorig:LeftHandIndex2', axis: [0, 0, 1], angle: 0.35 },
+        { bone: 'mixamorig:LeftHandIndex3', axis: [0, 0, 1], angle: 0.25 },
+        { bone: 'mixamorig:LeftHandThumb1', axis: [0, 0, 1], angle: 0.12 },
+        { bone: 'mixamorig:RightHandIndex1', axis: [1, 0, 0], angle: 0.3 },
+        { bone: 'mixamorig:RightHandIndex2', axis: [1, 0, 0], angle: 0.35 },
+        { bone: 'mixamorig:RightHandIndex3', axis: [1, 0, 0], angle: 0.25 },
+        { bone: 'mixamorig:RightHandThumb1', axis: [1, 0, 0], angle: 0.12 },
+      ],
+    },
     secondaryHairMotion: {
       positiveName: 'HairSwayPositive',
       negativeName: 'HairSwayNegative',

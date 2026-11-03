@@ -1320,6 +1320,9 @@ export function NaturalistModel({
       && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
     const heldToolMode = modelAssetId === 'darwin5' && holdingTool;
     const torchMode = modelAssetId === 'darwin5' && !hasRifle && !heldToolMode && lampMode;
+    // Read by the procedural arm pose: a hand holding something must stay
+    // where the hold clip and the attachment put it.
+    motionRef.current.handsBusy = carryingObject || holdingTool || hasRifle || torchMode;
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
     if (motionRef.current.action) {
