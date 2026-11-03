@@ -6,6 +6,7 @@ import { getRuntimePlayerPose, useThreeGameStore } from '../store';
 import { onPropEvent } from '../physics/props/propEvents';
 import { getZoneProps } from '../physics/props/propRegistry';
 import { inferContactResponseKind } from '../world/surfaceContactResponse';
+import { isRockBody } from './contactTargets';
 import { getSpecimenRuntimePoses } from '../world/specimenRuntime';
 import { getZone } from '../world/floreanaZones';
 import { terrainBiomeAt } from '../world/terrain';
@@ -14,9 +15,12 @@ import { getSurfaceContactProfile } from '../world/surfaceContact';
 import { currentFoliageImmersion } from '../world/ecology/foliageContact';
 import { postOfficeBayCoastZ } from '../world/regions/postOfficeBay/terrain';
 import { weatherEnv } from '../world/weatherEnvRuntime';
+import { exhaustionAmount } from '../world/exhaustionLook';
 import {
   CONTEXTUAL_WORLD_AUDIO,
   DARWIN_BODY_AUDIO,
+  FIELD_FOLEY_AUDIO,
+  FOLEY_AUDIO,
   HAMMER_STRIKE_AUDIO,
   INTERACTION_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
@@ -26,9 +30,12 @@ import {
 } from './audioAssets';
 import {
   HAMMER_STRIKE_PROFILES,
+  acousticSpaceForZone,
   hammerStrikeMaterial,
   interactionMaterialForProp,
+  knifeCutMaterial,
   materialFromInteractionEvent,
+  pelletImpactSound,
 } from './interactionMaterials';
 import {
   computeEnvironmentalAudioTargets,
@@ -39,10 +46,12 @@ import {
   surfPresenceForZone,
   zoneHasDirectCoast,
 } from './environmentMix';
+import { crossedDusk, playDuskBell, playJournalEntryCue } from './interfaceFoley';
 import {
   activatePostOfficeBayAudio,
   playAudioSprite,
   preloadSoundscapeToolEffects,
+  setAcousticSpace,
   setAmbientAudioTargets,
   setSpatialAudioTarget,
   setSoundscapeAudioEnabled,
@@ -111,6 +120,15 @@ function targetLooksLikeRock(target) {
 function profileLooksLikeHardRock(profile) {
   return /basalt|lava|boulder|rock|cliff/.test(String(profile?.biome || '').toLowerCase());
 }
+
+
+// Flying birds whose takeoff is worth a wingbeat, and how fast each clip
+// plays: the finch recording, slowed for heavier wings.
+const FLYING_BIRD_PATTERN = /finch|dove|gull|hawk|owl|mockingbird|warbler|flycatcher|heron|egret|tern|noddy|booby|frigate|tattler|plover|stilt|turnstone|martin|cuckoo|tropicbird|petrel|cormorant|pelican/;
+const TAKEOFF_RATE = [
+  [/gull|hawk|owl|heron|pelican|frigate|booby|cormorant/, 0.9],
+  [/dove|mockingbird|tern|noddy|tattler|egret/, 0.96],
+];
 
 // Darwin's footfalls follow his pace: a stroll is soft and dark, a run lands
 // harder and brighter, and each foot sits a touch to its own side of centre
@@ -211,6 +229,19 @@ export function IslandSoundscape({ active, enabled }) {
     hammerWood: -1,
     hammerSucculent: -1,
     hammerHerb: -1,
+    hammerStrain: -1,
+    shardCoat: -1,
+    stowRock: -1,
+    stowPlant: -1,
+    knifeSwish: -1,
+    knifeSucculent: -1,
+    knifeStem: -1,
+    knifeBark: -1,
+    pelletsRock: -1,
+    pelletsEarth: -1,
+    pelletsFoliage: -1,
+    pelletsWood: -1,
+    wildlifeFlush: -1,
     rockStep: -1,
     woodStep: -1,
     mudStep: -1,
@@ -254,6 +285,8 @@ export function IslandSoundscape({ active, enabled }) {
   });
   const lastStepAtRef = useRef(0);
   const lastLandingAtRef = useRef(0);
+  const lastRockBumpAtRef = useRef(0);
+  const lastLooseStoneAtRef = useRef(0);
   const lastWaterAtRef = useRef(0);
   const lastFoliageAtRef = useRef(0);
   const lastBrushAtRef = useRef(0);
@@ -269,9 +302,14 @@ export function IslandSoundscape({ active, enabled }) {
   const windedRef = useRef({ active: false, intensity: 0, nextAt: 0 });
   const propContactsRef = useRef(new Map());
   const pushAudioRef = useRef(new Map());
-  // When the current hammer swing's head is due to land, so the first impact
-  // it causes is heard as a hammer blow rather than a generic bump.
-  const hammerImpactWindowRef = useRef(null);
+  // When the current hammer or knife swing is due to land, so the first
+  // impact it causes is heard as that tool rather than a generic bump.
+  const toolImpactWindowRef = useRef(null);
+  // The last hammer blow or gunshot: birds taking off just after it bolt.
+  const loudEventAtRef = useRef(0);
+  const lastTiredBreathAtRef = useRef(0);
+  const pelletAudioRef = useRef(new Map());
+  const takeoffAudioRef = useRef({ lastAt: 0, actors: new Map() });
   const scheduledAudioRef = useRef(new Set());
   const wildlifeScheduleRef = useRef({ zoneId: null });
   const waveBreakScheduleRef = useRef({ zoneId: null, nextAt: 0 });
@@ -563,12 +601,30 @@ export function IslandSoundscape({ active, enabled }) {
     };
   }, [runtimeEnabled]);
 
+  // Paper sounds for what Darwin writes, and the Beagle's bell at dusk. A
+  // restored save replaces the journal wholesale, so only a single fresh
+  // entry is heard.
+  useEffect(() => {
+    if (!runtimeEnabled) return undefined;
+    return useThreeGameStore.subscribe((state, previous) => {
+      if (!latestRef.current.runtimeEnabled) return;
+      if (state.journal !== previous.journal && state.journal?.length === (previous.journal?.length || 0) + 1) {
+        const entry = state.journal.at(-1);
+        const age = Date.now() - Date.parse(entry?.createdAt || '');
+        if (!(age > 5000)) playJournalEntryCue(entry);
+      }
+      if (state.timeOfDay !== previous.timeOfDay && crossedDusk(previous, state)) playDuskBell();
+    });
+  }, [runtimeEnabled]);
+
   useEffect(() => {
     if (!runtimeEnabled) return undefined;
     const update = () => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || document.hidden) {
         setAmbientAudioTargets({ surf: 0, wind: 0, rain: 0, insects: 0 }, 0.55);
+        setSpatialAudioTarget('coatFlap', { gain: 0 }, 0.3);
+        setSpatialAudioTarget('heartbeat', { gain: 0 }, 0.3);
         return;
       }
       const position = getRuntimePlayerPose()?.position;
@@ -633,6 +689,28 @@ export function IslandSoundscape({ active, enabled }) {
         targets,
       });
       setAmbientAudioTargets(targets, 0.95);
+      setAcousticSpace(acousticSpaceForZone(zone) || (indoors ? 'room' : 'open'));
+      // Darwin's coat in the wind, strongest on the exposed Promontory.
+      const exposure = indoors || current.playableModeId !== 'darwin'
+        ? 0
+        : zone?.type === 'promontory' ? 1 : directCoast ? 0.6 : 0.4;
+      // windSpeed idles near 1, which should leave a faint flutter rather
+      // than silence; a full gale (about 1.7) opens it all the way.
+      const windStrength = clamp01((Number(weatherEnv.windSpeed) - 0.5) / 1.2);
+      const gust = clamp01(Number(weatherEnv.windGust) || 0.5);
+      setSpatialAudioTarget('coatFlap', {
+        gain: 0.12 * windStrength ** 1.2 * exposure * (0.5 + gust * 0.5),
+        playbackRate: 0.96 + gust * 0.08,
+      }, 0.6);
+      // Darwin's pulse rises under the drained-colour exhaustion look, from
+      // the same ramp, and quickens as it deepens.
+      const spent = current.playableModeId === 'darwin'
+        ? exhaustionAmount(current.health, useThreeGameStore.getState().fatigue)
+        : 0;
+      setSpatialAudioTarget('heartbeat', {
+        gain: spent > 0.04 ? 0.11 * spent ** 1.3 : 0,
+        playbackRate: 0.92 + spent * 0.22,
+      }, 1.2);
 
       if (dripping && now >= detail.nextDripAt) {
         playRandomVariant(variantsRef, 'waterDrop', CONTEXTUAL_WORLD_AUDIO.waterDrop, {
@@ -674,9 +752,9 @@ export function IslandSoundscape({ active, enabled }) {
       if (waveSchedule.zoneId === current.currentZoneId
         && !indoors
         && directCoast
-        && surfPresence >= 0.58
+        && surfPresence >= 0.45
         && now >= waveSchedule.nextAt) {
-        const closeness = smoothstep(0.58, 1, surfPresence);
+        const closeness = smoothstep(0.45, 1, surfPresence);
         playRandomVariant(variantsRef, 'waveBreak', POST_OFFICE_BAY_AUDIO.waveBreak, {
           gain: 0.035 + closeness * 0.045,
           playbackRate: randomBetween(0.975, 1.025),
@@ -829,7 +907,16 @@ export function IslandSoundscape({ active, enabled }) {
         const gaitRate = (soreSide ? 1 - injury * 0.025 : 1) * step.rate;
         const stepPan = step.pan;
         const stepFilterHz = step.filterHz;
-        if (hardRock) {
+        if (isRockBody(event?.target)) {
+          // On a boulder: the hobnailed heel clack, clearly not the ground.
+          playContact('bootOnRock', FOLEY_AUDIO.bootOnRock, {
+            intensity: event.intensity,
+            baseGain: 0.17 * gaitGain,
+            playbackJitter: 0.05,
+            playbackRateCenter: gaitRate,
+            pan: stepPan,
+          });
+        } else if (hardRock) {
           playContact('rockStep', MOVEMENT_WILDLIFE_AUDIO.rockStep, {
             intensity: event.intensity,
             baseGain: 0.235 * gaitGain,
@@ -893,6 +980,18 @@ export function IslandSoundscape({ active, enabled }) {
         playDarwinStepLayers(event, step, now);
         return;
       }
+      if (contactKind === 'collision') {
+        if (current.playableModeId !== 'darwin' || !isRockBody(event?.target)) return;
+        if (now - lastRockBumpAtRef.current < 420) return;
+        lastRockBumpAtRef.current = now;
+        playContact('rockBump', FOLEY_AUDIO.rockBump, {
+          intensity: event.intensity,
+          baseGain: 0.11 + clamp01(Number(event?.intensity) || 0.4) * 0.13,
+          pan: panFromWorldPosition(event?.position),
+          playbackJitter: 0.06,
+        });
+        return;
+      }
       if (contactKind !== 'takeoff'
         && contactKind !== 'step-up'
         && contactKind !== 'landing'
@@ -943,7 +1042,40 @@ export function IslandSoundscape({ active, enabled }) {
           pan: panFromWorldPosition(event?.position) * 0.35,
         });
       }
-      if (hardRock) {
+      // His own body in a jump, under whatever the ground says: the push-off,
+      // and a landing's weight, coat and satchel. A small drop off a ledge
+      // only gets the body when it lands with some force.
+      if (contactKind === 'takeoff') {
+        playContact('jumpTakeoff', FOLEY_AUDIO.jumpTakeoff, {
+          intensity: movementIntensity,
+          baseGain: 0.13,
+          pan: panFromWorldPosition(event?.position) * 0.5,
+          playbackJitter: 0.06,
+        });
+      } else if (contactKind === 'landing-jump' || (landing && Number(event?.fallSpeed) >= 2.6)) {
+        playContact('jumpLanding', FOLEY_AUDIO.jumpLanding, {
+          intensity: movementIntensity,
+          baseGain: 0.1 + fallStrength * 0.1,
+          pan: panFromWorldPosition(event?.position) * 0.5,
+          playbackJitter: 0.05,
+        });
+      }
+      const rockBody = isRockBody(event?.target);
+      if (rockBody && landing) {
+        playContact('rockLandingBody', FOLEY_AUDIO.rockLanding, {
+          intensity: movementIntensity,
+          baseGain: 0.16 + fallStrength * 0.08,
+          pan: panFromWorldPosition(event?.position),
+          playbackJitter: 0.05,
+        });
+      } else if (rockBody && contactKind === 'step-up') {
+        playContact('rockScramble', FOLEY_AUDIO.rockScramble, {
+          intensity: movementIntensity,
+          baseGain: 0.2,
+          pan: panFromWorldPosition(event?.position),
+          playbackJitter: 0.05,
+        });
+      } else if (hardRock) {
         const family = landing ? 'rockLanding' : contactKind === 'step-up' ? 'rockStep' : 'rockTakeoff';
         playContact(family, MOVEMENT_WILDLIFE_AUDIO[family], {
           intensity: movementIntensity,
@@ -1200,10 +1332,19 @@ export function IslandSoundscape({ active, enabled }) {
     const offShotgun = onPropEvent('shotgun-fired', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const reportRate = randomBetween(0.985, 1.018);
       playRandomVariant(variantsRef, 'shotgunReport', MOVEMENT_WILDLIFE_AUDIO.shotgunReport, {
         gain: 0.42,
-        playbackRate: randomBetween(0.985, 1.018),
+        playbackRate: reportRate,
         pan: panFromWorldPosition(event?.position) * 0.3,
+        priority: true,
+      });
+      // The recorded crack is cut short; the modelled boom, rolling tail and
+      // hill echoes give the black-powder report its weight and space.
+      playRandomVariant(variantsRef, 'gunBlast', FOLEY_AUDIO.gunBlast, {
+        gain: 0.3,
+        playbackRate: reportRate,
+        pan: panFromWorldPosition(event?.position) * 0.2,
         priority: true,
       });
       if (!event?.reloadStarted) return;
@@ -1222,9 +1363,10 @@ export function IslandSoundscape({ active, enabled }) {
     const offToolSwing = onPropEvent('tool-swing', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
-      if (event?.tool === 'hammer') {
-        const landsAt = performance.now() + (Number(event?.impactDelay) || 0.55) * 1000;
-        hammerImpactWindowRef.current = { opens: landsAt - 150, closes: landsAt + 450, used: false };
+      if (event?.tool === 'hammer' || event?.tool === 'pocket_knife') {
+        const fallbackDelay = event.tool === 'hammer' ? 0.55 : 0.34;
+        const landsAt = performance.now() + (Number(event?.impactDelay) || fallbackDelay) * 1000;
+        toolImpactWindowRef.current = { tool: event.tool, opens: landsAt - 150, closes: landsAt + 450, used: false };
       }
       const profile = {
         hammer: {
@@ -1233,6 +1375,14 @@ export function IslandSoundscape({ active, enabled }) {
           delay: 235,
           gain: 0.115,
           rate: [0.965, 1.015],
+        },
+        // The blade's swish peaks ~0.115 s into its slot; land it on the cut.
+        pocket_knife: {
+          family: 'knifeSwish',
+          sprite: FIELD_FOLEY_AUDIO.knifeSwish,
+          delay: Math.max(0, (Number(event?.impactDelay) || 0.34) * 1000 - 115),
+          gain: 0.085,
+          rate: [0.96, 1.06],
         },
         insect_net: {
           family: 'netSwing',
@@ -1303,13 +1453,43 @@ export function IslandSoundscape({ active, enabled }) {
       // A ground sample drives the head partly into soil and grit; an
       // examine tap is a careful knock, not a blow.
       const softened = event?.groundSample ? 0.72 : event?.tap ? 0.5 : 1;
+      // A boulder cut back by earlier blows answers duller and a touch
+      // lower; a tired arm lands softer.
+      const wear = clamp01(Number(event?.wear) || 0);
+      const tired = event?.tap ? 0 : clamp01(((useThreeGameStore.getState().fatigue || 0) - 45) / 45);
+      const wornFilterHz = wear > 0.3 ? 16000 - wear * 8500 : null;
       playRandomVariant(variantsRef, profile.family, HAMMER_STRIKE_AUDIO[material], {
-        gain: profile.gain * softened,
-        playbackRate: randomBetween(...profile.rate) * (event?.groundSample ? 0.95 : 1),
+        gain: profile.gain * softened * (1 - tired * 0.22),
+        playbackRate: randomBetween(...profile.rate) * (event?.groundSample ? 0.95 : 1) * (1 - wear * 0.035),
         pan,
-        filterHz: event?.groundSample ? 4200 : event?.tap ? 7800 : null,
+        filterHz: event?.groundSample ? 4200 : event?.tap ? 7800 : (tired > 0.4 ? Math.min(wornFilterHz || 18000, 11000) : wornFilterHz),
         priority: true,
       });
+      if (event?.tap) return true;
+      const now = performance.now();
+      loudEventAtRef.current = now;
+      if (event?.strained) {
+        scheduleToolFoley(25, () => {
+          playRandomVariant(variantsRef, 'hammerStrain', HAMMER_STRIKE_AUDIO.strain, {
+            gain: 0.1,
+            playbackRate: randomBetween(0.95, 1.03),
+            pan,
+            priority: true,
+          });
+        });
+      }
+      if (tired > 0.25
+        && !windedRef.current.active
+        && now - lastTiredBreathAtRef.current > 3200
+        && Math.random() < 0.35 + tired * 0.5) {
+        lastTiredBreathAtRef.current = now;
+        scheduleToolFoley(320, () => {
+          playRandomVariant(variantsRef, 'breath', DARWIN_BODY_AUDIO.breath, {
+            gain: 0.085 + tired * 0.06,
+            playbackRate: randomBetween(0.97, 1.03),
+          });
+        });
+      }
       if (profile.rustle) {
         playContact('shrub', INTERACTION_AUDIO.shrub, {
           intensity: 0.7,
@@ -1321,11 +1501,36 @@ export function IslandSoundscape({ active, enabled }) {
       }
       return true;
     };
+    const KNIFE_CUTS = {
+      succulent: { family: 'knifeSucculent', gain: 0.085 },
+      stem: { family: 'knifeStem', gain: 0.08, rustle: 0.035 },
+      bark: { family: 'knifeBark', gain: 0.085 },
+    };
+    const playKnifeCut = event => {
+      const material = knifeCutMaterial(event);
+      const cut = KNIFE_CUTS[material];
+      const pan = panFromWorldPosition(event?.position);
+      playRandomVariant(variantsRef, cut.family, FIELD_FOLEY_AUDIO[cut.family], {
+        gain: cut.gain,
+        playbackRate: randomBetween(0.95, 1.06),
+        pan,
+        priority: true,
+      });
+      if (cut.rustle) {
+        playContact('shrub', INTERACTION_AUDIO.shrub, {
+          intensity: 0.5, baseGain: cut.rustle, pan, playbackRateCenter: 1.08, playbackJitter: 0.06,
+        });
+      }
+      return true;
+    };
+    const playToolImpact = (tool, event, prop) => (
+      tool === 'pocket_knife' ? playKnifeCut(event) : playHammerStrike(event, prop)
+    );
     const offPropStruck = onPropEvent('prop-struck', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
       const prop = getZoneProps(current.currentZoneId).find(item => item.id === event?.propId);
-      const strikeWindow = hammerImpactWindowRef.current;
+      const strikeWindow = toolImpactWindowRef.current;
       if (event?.tool === 'hammer') {
         if (strikeWindow && !event?.tap) strikeWindow.used = true;
         if (playHammerStrike(event, prop)) return;
@@ -1334,7 +1539,7 @@ export function IslandSoundscape({ active, enabled }) {
       }
       // Breakables and plants do not say which tool struck them, so the
       // first impact inside the swing's landing window is taken as the
-      // hammer's own. It waits for the end of the frame: one swing can also
+      // swung tool's own (hammer blow or knife cut). It waits for the end of the frame: one swing can also
       // rattle a loose stone beside the boulder it hits, and the boulder's
       // tagged strike must win. Anything else stays a generic knock.
       const now = performance.now();
@@ -1347,7 +1552,7 @@ export function IslandSoundscape({ active, enabled }) {
         if (!latestRef.current.runtimeEnabled) return;
         if (!strikeWindow.used) {
           strikeWindow.used = true;
-          if (playHammerStrike(event, prop)) return;
+          if (playToolImpact(strikeWindow.tool, event, prop)) return;
         }
         playStruckContact(event, prop);
       }, 0);
@@ -1394,9 +1599,103 @@ export function IslandSoundscape({ active, enabled }) {
         });
       });
     });
+    // A knife cut into a mature cactus reports through its own sway event.
+    const offCactusCut = onPropEvent('mature-cactus-impact', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin' || event?.tool !== 'pocket_knife') return;
+      const strikeWindow = toolImpactWindowRef.current;
+      if (strikeWindow?.tool === 'pocket_knife') strikeWindow.used = true;
+      playKnifeCut({ propId: 'mature-cactus', position: event?.position });
+    });
+    const offShardHit = onPropEvent('hammer-shard-hit', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      scheduleToolFoley(90, () => {
+        playRandomVariant(variantsRef, 'shardCoat', FIELD_FOLEY_AUDIO.shardCoat, {
+          gain: 0.11,
+          playbackRate: randomBetween(0.96, 1.05),
+          pan: panFromWorldPosition(event?.position) * 0.3,
+          priority: true,
+        });
+      });
+    });
+    const offShotHeard = onPropEvent('shotgun-fired', () => {
+      loudEventAtRef.current = performance.now();
+    });
+    // Pellets landing: one cluster per surface per blast, arriving after the
+    // report by the time sound takes to come back from where they struck.
+    const offPellets = onPropEvent('shotgun-impact', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const sound = pelletImpactSound(event);
+      const player = getRuntimePlayerPose()?.position;
+      if (!sound || !player || !event?.position) return;
+      const distance = Math.hypot(event.position.x - player.x, event.position.z - player.z);
+      if (distance > 70) return;
+      const now = performance.now();
+      if (now - (pelletAudioRef.current.get(sound) || 0) < 160) return;
+      pelletAudioRef.current.set(sound, now);
+      const family = { rock: 'pelletsRock', earth: 'pelletsEarth', foliage: 'pelletsFoliage', wood: 'pelletsWood' }[sound];
+      const base = { rock: 0.1, earth: 0.085, foliage: 0.09, wood: 0.095 }[sound];
+      const intensity = clamp01(Number(event?.intensity) || 0.7);
+      scheduleToolFoley((distance / 343) * 1000, () => {
+        playRandomVariant(variantsRef, family, FIELD_FOLEY_AUDIO[family], {
+          gain: base * (0.45 + intensity * 0.55) / (1 + distance / 14),
+          playbackRate: randomBetween(0.95, 1.05),
+          pan: wildlifePanFromWorldPosition(event.position),
+          filterHz: 16000 / (1 + distance / 22),
+          priority: true,
+        });
+      });
+    });
+    // Birds leaving the ground. Just after a hammer blow or a shot they
+    // bolt, so the beat doubles into a startled burst.
+    const offTakeoff = onPropEvent('fauna-takeoff', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || event?.zoneId !== current.currentZoneId) return;
+      const speciesId = String(event?.speciesId || '').toLowerCase();
+      if (!FLYING_BIRD_PATTERN.test(speciesId) || /flightless/.test(speciesId)) return;
+      const player = getRuntimePlayerPose()?.position;
+      if (!player || !event?.position) return;
+      const distance = Math.hypot(event.position.x - player.x, event.position.z - player.z);
+      if (distance > 26) return;
+      const now = performance.now();
+      const audio = takeoffAudioRef.current;
+      if (now - audio.lastAt < 70 || now - (audio.actors.get(event.actorId) || 0) < 1200) return;
+      audio.lastAt = now;
+      audio.actors.set(event.actorId, now);
+      if (audio.actors.size > 64) audio.actors.clear();
+      const startled = now - loudEventAtRef.current < 2500;
+      const rate = TAKEOFF_RATE.find(([pattern]) => pattern.test(speciesId))?.[1] ?? 1.08;
+      const gain = 0.1 * (1 - distance / 26) ** 1.4 * (startled ? 1.25 : 1);
+      const pan = wildlifePanFromWorldPosition(event.position);
+      const beats = startled ? 2 : 1;
+      for (let beat = 0; beat < beats; beat += 1) {
+        scheduleToolFoley(beat * randomBetween(55, 90), () => {
+          playRandomVariant(variantsRef, 'wildlifeFlush', MOVEMENT_WILDLIFE_AUDIO.finchWing, {
+            gain: gain * (beat ? 0.7 : 1),
+            playbackRate: rate * randomBetween(0.97, 1.04),
+            pan,
+            filterHz: 14000 / (1 + distance / 18),
+          });
+        });
+      }
+    });
     const offFieldwork = onPropEvent('fieldwork-foley', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      if (event?.kind === 'stow-sample') {
+        // Timed to Darwin's kneel reaching the sample.
+        const rock = Boolean(event.material);
+        scheduleToolFoley(380, () => {
+          playRandomVariant(variantsRef, rock ? 'stowRock' : 'stowPlant', FIELD_FOLEY_AUDIO[rock ? 'stowRock' : 'stowPlant'], {
+            gain: rock ? 0.1 : 0.09,
+            playbackRate: randomBetween(0.97, 1.03),
+            pan: panFromWorldPosition(event?.position) * 0.4,
+          });
+        });
+        return;
+      }
       const family = {
         note: 'fieldNote',
         container: 'specimenContainer',
@@ -1482,6 +1781,26 @@ export function IslandSoundscape({ active, enabled }) {
         });
       }
     };
+    // A loose stone shifting under Darwin (physics/props/LooseRocks.jsx): a
+    // quiet clonk on the first step, louder as it rocks, loudest as it goes.
+    const playLooseStone = (event, gain) => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      const now = performance.now();
+      if (now - lastLooseStoneAtRef.current < 260) return;
+      lastLooseStoneAtRef.current = now;
+      playContact('looseStone', FOLEY_AUDIO.looseStoneClonk, {
+        intensity: clamp01((Number(event?.speed) || 0.3) / 1.5),
+        baseGain: gain,
+        pan: panFromWorldPosition(event?.position),
+        playbackJitter: 0.07,
+        // A heavier stone answers lower.
+        playbackRateCenter: Number(event?.mass) > 200 ? 0.93 : 1.02,
+      });
+    };
+    const offLooseStep = onPropEvent('loose-footing-step', event => playLooseStone(event, 0.1));
+    const offLooseWobble = onPropEvent('loose-footing-wobble', event => playLooseStone(event, 0.16));
+    const offLooseLost = onPropEvent('loose-footing-lost', event => playLooseStone(event, 0.24));
     const offSkid = onPropEvent('player-skid', event => playLooseTerrainDetail(event, false));
     const offScramble = onPropEvent('player-scramble', event => playLooseTerrainDetail(event, true));
     const offLightning = onPropEvent('lightning-flash', event => {
@@ -1522,9 +1841,17 @@ export function IslandSoundscape({ active, enabled }) {
       offNetBrush();
       offPropStruck();
       offRockBroken();
+      offCactusCut();
+      offShardHit();
+      offShotHeard();
+      offPellets();
+      offTakeoff();
       offFieldwork();
       offEquipment();
       offContainer();
+      offLooseStep();
+      offLooseWobble();
+      offLooseLost();
       offSkid();
       offScramble();
       offLightning();

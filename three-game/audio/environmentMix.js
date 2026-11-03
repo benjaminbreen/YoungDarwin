@@ -91,6 +91,18 @@ function zoneHasCoastalNeighbor(zone, resolveZone) {
   });
 }
 
+// Full surf belongs to the waterline. It used to hold near full level for
+// ~30 m inland and buried Darwin's footsteps across whole bays; now it falls
+// away within a few strides of the water to a quiet coastal bed (about -3 dB
+// at 5 m, -5 dB at 10 m, -8 dB at 20 m, -9 dB inland on a coastal map).
+const SURF_FALLOFF_METRES = 10;
+const COASTAL_SURF_FLOOR = 0.06;
+
+function surfPresenceAtDistance(distance) {
+  const near = Math.exp(-Math.max(0, distance) / SURF_FALLOFF_METRES) ** 1.6;
+  return COASTAL_SURF_FLOOR + near * (1 - COASTAL_SURF_FLOOR);
+}
+
 export function surfPresenceForZone({
   zone,
   position,
@@ -98,16 +110,10 @@ export function surfPresenceForZone({
   shorelineDistance = null,
 } = {}) {
   if (!zone || isInteriorAmbienceZone(zone)) return 0;
-  if (Number.isFinite(shorelineDistance)) {
-    const nearShore = 1 - smoothstep(7, 105, Math.max(0, shorelineDistance));
-    return 0.14 + nearShore * 0.86;
-  }
+  if (Number.isFinite(shorelineDistance)) return surfPresenceAtDistance(shorelineDistance);
   if (zoneHasDirectCoast(zone)) {
     const edgeDistance = distanceToOceanBoundary(position, zone);
-    if (Number.isFinite(edgeDistance)) {
-      const nearShore = 1 - smoothstep(5, 90, edgeDistance);
-      return 0.14 + nearShore * 0.86;
-    }
+    if (Number.isFinite(edgeDistance)) return surfPresenceAtDistance(edgeDistance);
     // Some authored bays place water inside the terrain rather than at an
     // outer route edge. Keep them coastal without pretending a precise line.
     return 0.38;
@@ -207,8 +213,8 @@ export function computeEnvironmentalAudioTargets({
     // much quieter than each crest). A square-root response keeps that body
     // audible on coastal maps and faintly audible one map inland without
     // flattening the recording or making the crests unnaturally constant.
-    // Mixed as a bed: at the waterline it sits ~7 dB under Darwin's
-    // footfalls, not over them (it used to peak ~5 dB above every step).
+    // Mixed as a bed: at the waterline it sits under Darwin's footfalls, and
+    // a few strides inland it is well under them.
     ? (0.026 + Math.sqrt(surfPresence) * 0.174) * (0.94 + windStrength * 0.12)
     : 0;
   const wind = (0.018 + windStrength * 0.115) * Math.max(0.72, Number(gust) || 1);

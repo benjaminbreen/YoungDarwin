@@ -84,10 +84,60 @@ export const HAMMER_STRIKE_AUDIO = Object.freeze({
   wood: Object.freeze({ url: `${HAMMER_ROOT}/strike-wood.wav`, variants: 6, slotDuration: 0.5 }),
   succulent: Object.freeze({ url: `${HAMMER_ROOT}/strike-succulent.wav`, variants: 6, slotDuration: 0.56 }),
   herb: Object.freeze({ url: `${HAMMER_ROOT}/strike-herb.wav`, variants: 6, slotDuration: 0.48 }),
+  strain: Object.freeze({ url: `${HAMMER_ROOT}/strike-strain.wav`, variants: 4, slotDuration: 0.9 }),
 });
 
 export const HAMMER_STRIKE_AUDIO_URLS = Object.freeze(
   Object.values(HAMMER_STRIKE_AUDIO).map(sprite => sprite.url),
+);
+
+// Modelled field Foley (scripts/build-field-foley-audio.mjs): the clasp
+// knife, shotgun pellets landing, stowing specimens, a hammer chip striking
+// Darwin's coat, and the coat itself in the wind (a loop).
+const KNIFE_ROOT = '/assets/audio/knife';
+const PELLETS_ROOT = '/assets/audio/pellets';
+const FIELD_HANDLING_ROOT = '/assets/audio/field-handling';
+
+export const FIELD_FOLEY_AUDIO = Object.freeze({
+  knifeSwish: Object.freeze({ url: `${KNIFE_ROOT}/swish.wav`, variants: 4, slotDuration: 0.5 }),
+  knifeSucculent: Object.freeze({ url: `${KNIFE_ROOT}/cut-succulent.wav`, variants: 6, slotDuration: 0.45 }),
+  knifeStem: Object.freeze({ url: `${KNIFE_ROOT}/cut-stem.wav`, variants: 6, slotDuration: 0.4 }),
+  knifeBark: Object.freeze({ url: `${KNIFE_ROOT}/cut-bark.wav`, variants: 6, slotDuration: 0.45 }),
+  pelletsRock: Object.freeze({ url: `${PELLETS_ROOT}/pellets-rock.wav`, variants: 6, slotDuration: 0.5 }),
+  pelletsEarth: Object.freeze({ url: `${PELLETS_ROOT}/pellets-earth.wav`, variants: 6, slotDuration: 0.5 }),
+  pelletsFoliage: Object.freeze({ url: `${PELLETS_ROOT}/pellets-foliage.wav`, variants: 6, slotDuration: 0.55 }),
+  pelletsWood: Object.freeze({ url: `${PELLETS_ROOT}/pellets-wood.wav`, variants: 6, slotDuration: 0.45 }),
+  stowRock: Object.freeze({ url: `${FIELD_HANDLING_ROOT}/stow-rock.wav`, variants: 6, slotDuration: 0.9 }),
+  stowPlant: Object.freeze({ url: `${FIELD_HANDLING_ROOT}/stow-plant.wav`, variants: 4, slotDuration: 0.8 }),
+  shardCoat: Object.freeze({ url: `${FIELD_HANDLING_ROOT}/shard-coat.wav`, variants: 4, slotDuration: 0.4 }),
+  coatFlap: '/assets/audio/darwin-body/coat-flap-loop.wav',
+});
+
+export const FIELD_FOLEY_AUDIO_URLS = Object.freeze(
+  Object.values(FIELD_FOLEY_AUDIO).map(asset => asset?.url || asset),
+);
+
+// Modelled sounds for the paper interface (scripts/build-ui-audio.mjs): the
+// field book and readers, loose folios, the chart, pencil and nib on paper,
+// the Beagle's bell at dusk, and Darwin's heartbeat when spent (a loop).
+const INTERFACE_ROOT = '/assets/audio/interface';
+
+export const INTERFACE_AUDIO = Object.freeze({
+  bookOpen: Object.freeze({ url: `${INTERFACE_ROOT}/book-open.wav`, variants: 4, slotDuration: 0.9 }),
+  bookClose: Object.freeze({ url: `${INTERFACE_ROOT}/book-close.wav`, variants: 4, slotDuration: 0.6 }),
+  pageTurn: Object.freeze({ url: `${INTERFACE_ROOT}/page-turn.wav`, variants: 6, slotDuration: 0.6 }),
+  paperOpen: Object.freeze({ url: `${INTERFACE_ROOT}/paper-open.wav`, variants: 4, slotDuration: 0.5 }),
+  paperClose: Object.freeze({ url: `${INTERFACE_ROOT}/paper-close.wav`, variants: 4, slotDuration: 0.4 }),
+  mapUnroll: Object.freeze({ url: `${INTERFACE_ROOT}/map-unroll.wav`, variants: 4, slotDuration: 1.1 }),
+  mapRoll: Object.freeze({ url: `${INTERFACE_ROOT}/map-roll.wav`, variants: 4, slotDuration: 0.7 }),
+  pencil: Object.freeze({ url: `${INTERFACE_ROOT}/pencil.wav`, variants: 6, slotDuration: 0.9 }),
+  nib: Object.freeze({ url: `${INTERFACE_ROOT}/nib.wav`, variants: 4, slotDuration: 1.4 }),
+  shipBell: Object.freeze({ url: `${INTERFACE_ROOT}/ship-bell.wav`, variants: 2, slotDuration: 5 }),
+  heartbeat: `${INTERFACE_ROOT}/heartbeat-loop.wav`,
+});
+
+export const INTERFACE_AUDIO_URLS = Object.freeze(
+  Object.values(INTERFACE_AUDIO).map(asset => asset?.url || asset),
 );
 
 const MOVEMENT_WILDLIFE_ROOT = '/assets/audio/movement-wildlife';
@@ -111,6 +161,23 @@ export const MOVEMENT_WILDLIFE_AUDIO = Object.freeze({
 export const MOVEMENT_WILDLIFE_AUDIO_URLS = Object.freeze(
   Object.values(MOVEMENT_WILDLIFE_AUDIO).map(asset => asset?.url || asset),
 );
+
+// Modelled foley (scripts/build-foley-audio.mjs): Darwin on rocks, the body of
+// his jumps, and the low boom and echoes under the recorded gun report.
+const FOLEY_ROOT = '/assets/audio/foley';
+
+export const FOLEY_AUDIO = Object.freeze({
+  bootOnRock: Object.freeze({ url: `${FOLEY_ROOT}/boot-on-rock.wav`, variants: 10, slotDuration: 0.42 }),
+  rockLanding: Object.freeze({ url: `${FOLEY_ROOT}/rock-landing.wav`, variants: 6, slotDuration: 0.9 }),
+  rockBump: Object.freeze({ url: `${FOLEY_ROOT}/rock-bump.wav`, variants: 6, slotDuration: 0.8 }),
+  rockScramble: Object.freeze({ url: `${FOLEY_ROOT}/rock-scramble.wav`, variants: 6, slotDuration: 0.6 }),
+  looseStoneClonk: Object.freeze({ url: `${FOLEY_ROOT}/loose-stone-clonk.wav`, variants: 6, slotDuration: 0.75 }),
+  jumpTakeoff: Object.freeze({ url: `${FOLEY_ROOT}/jump-takeoff.wav`, variants: 6, slotDuration: 0.55 }),
+  jumpLanding: Object.freeze({ url: `${FOLEY_ROOT}/jump-landing.wav`, variants: 6, slotDuration: 0.8 }),
+  gunBlast: Object.freeze({ url: `${FOLEY_ROOT}/gun-blast.wav`, variants: 4, slotDuration: 2.6 }),
+});
+
+export const FOLEY_AUDIO_URLS = Object.freeze(Object.values(FOLEY_AUDIO).map(sprite => sprite.url));
 
 const WILDLIFE_FIELDWORK_ROOT = '/assets/audio/wildlife-fieldwork';
 

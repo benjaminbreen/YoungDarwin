@@ -3,8 +3,14 @@ import {
   CONTEXTUAL_WORLD_AUDIO_URLS,
   DARWIN_BODY_AUDIO,
   DARWIN_BODY_AUDIO_URLS,
+  FOLEY_AUDIO,
+  FOLEY_AUDIO_URLS,
+  FIELD_FOLEY_AUDIO,
+  FIELD_FOLEY_AUDIO_URLS,
   HAMMER_STRIKE_AUDIO,
   HAMMER_STRIKE_AUDIO_URLS,
+  INTERFACE_AUDIO,
+  INTERFACE_AUDIO_URLS,
   INTERACTION_AUDIO,
   INTERACTION_AUDIO_URLS,
   ISLAND_AMBIENCE_AUDIO,
@@ -35,7 +41,15 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'litterStep', label: 'Leaf-litter footsteps', group: 'Movement contacts', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.litterStep, diagnosticGain: 0.23 },
   { key: 'rockTakeoff', label: 'Rock takeoff', group: 'Movement contacts', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.rockTakeoff, diagnosticGain: 0.24 },
   { key: 'rockLanding', label: 'Rock landing', group: 'Movement contacts', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.rockLanding, diagnosticGain: 0.25 },
+  { key: 'bootOnRock', label: 'Boots on a boulder', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.bootOnRock, diagnosticGain: 0.24 },
+  { key: 'rockLandingBody', label: 'Jump landing on a boulder', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.rockLanding, diagnosticGain: 0.24 },
+  { key: 'rockBump', label: 'Walking into a rock', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.rockBump, diagnosticGain: 0.22 },
+  { key: 'rockScramble', label: 'Scrambling onto a rock', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.rockScramble, diagnosticGain: 0.24 },
+  { key: 'looseStone', label: 'Loose stone rocking', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.looseStoneClonk, diagnosticGain: 0.22 },
+  { key: 'jumpTakeoff', label: 'Jump push-off', group: 'Darwin body', kind: 'sprite', sprite: FOLEY_AUDIO.jumpTakeoff, diagnosticGain: 0.2 },
+  { key: 'jumpLanding', label: 'Jump landing (body)', group: 'Darwin body', kind: 'sprite', sprite: FOLEY_AUDIO.jumpLanding, diagnosticGain: 0.2 },
   { key: 'shotgunReport', label: 'Black-powder report', group: 'Shotgun', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.shotgunReport, diagnosticGain: 0.32 },
+  { key: 'gunBlast', label: 'Report boom and echoes', group: 'Shotgun', kind: 'sprite', sprite: FOLEY_AUDIO.gunBlast, diagnosticGain: 0.28 },
   { key: 'shotgunReload', label: 'Muzzle-loader reload', group: 'Shotgun', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.shotgunReload, diagnosticGain: 0.24 },
   { key: 'finchWing', label: 'Finch wingbeats', group: 'Playable animals', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finchWing, diagnosticGain: 0.2 },
   { key: 'tortoiseStep', label: 'Tortoise ground contact', group: 'Playable animals', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.tortoiseStep, diagnosticGain: 0.2 },
@@ -61,6 +75,31 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'hammerWood', label: 'Hammer on timber', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.wood, diagnosticGain: 0.1 },
   { key: 'hammerSucculent', label: 'Hammer on cactus', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.succulent, diagnosticGain: 0.09 },
   { key: 'hammerHerb', label: 'Hammer on herbs and crops', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.herb, diagnosticGain: 0.09 },
+  { key: 'hammerStrain', label: 'Boulder about to split', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.strain, diagnosticGain: 0.14 },
+  { key: 'shardCoat', label: 'Hammer chip striking coat', group: 'Hammer strikes', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.shardCoat, diagnosticGain: 0.12 },
+  { key: 'stowRock', label: 'Stowing a rock sample', group: 'Fieldwork', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.stowRock, diagnosticGain: 0.14 },
+  { key: 'stowPlant', label: 'Pressing a plant sample', group: 'Fieldwork', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.stowPlant, diagnosticGain: 0.14 },
+  { key: 'knifeSwish', label: 'Knife swish', group: 'Knife', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.knifeSwish, diagnosticGain: 0.12 },
+  { key: 'knifeSucculent', label: 'Knife through cactus', group: 'Knife', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.knifeSucculent, diagnosticGain: 0.12 },
+  { key: 'knifeStem', label: 'Knife through stems', group: 'Knife', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.knifeStem, diagnosticGain: 0.12 },
+  { key: 'knifeBark', label: 'Knife across bark', group: 'Knife', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.knifeBark, diagnosticGain: 0.12 },
+  { key: 'pelletsRock', label: 'Pellets on rock', group: 'Shotgun', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.pelletsRock, diagnosticGain: 0.14 },
+  { key: 'pelletsEarth', label: 'Pellets into ground', group: 'Shotgun', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.pelletsEarth, diagnosticGain: 0.14 },
+  { key: 'pelletsFoliage', label: 'Pellets through foliage', group: 'Shotgun', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.pelletsFoliage, diagnosticGain: 0.14 },
+  { key: 'pelletsWood', label: 'Pellets into timber', group: 'Shotgun', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.pelletsWood, diagnosticGain: 0.14 },
+  { key: 'wildlifeFlush', label: 'Birds flushing', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finchWing, diagnosticGain: 0.16 },
+  { key: 'coatFlap', label: 'Coat in the wind', group: 'Darwin body', kind: 'spatial', url: FIELD_FOLEY_AUDIO.coatFlap, diagnosticGain: 0.1 },
+  { key: 'heartbeat', label: 'Heartbeat when spent', group: 'Darwin body', kind: 'spatial', url: INTERFACE_AUDIO.heartbeat, diagnosticGain: 0.16 },
+  { key: 'uiBookOpen', label: 'Book opening', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.bookOpen, diagnosticGain: 0.14 },
+  { key: 'uiBookClose', label: 'Book closing', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.bookClose, diagnosticGain: 0.14 },
+  { key: 'uiPageTurn', label: 'Page turning', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.pageTurn, diagnosticGain: 0.14 },
+  { key: 'uiPaperOpen', label: 'Folio lifted', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.paperOpen, diagnosticGain: 0.14 },
+  { key: 'uiPaperClose', label: 'Folio laid down', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.paperClose, diagnosticGain: 0.14 },
+  { key: 'uiMapUnroll', label: 'Chart unrolling', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.mapUnroll, diagnosticGain: 0.14 },
+  { key: 'uiMapRoll', label: 'Chart rolled up', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.mapRoll, diagnosticGain: 0.14 },
+  { key: 'uiPencil', label: 'Pencil in the field book', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.pencil, diagnosticGain: 0.14 },
+  { key: 'uiNib', label: 'Pen and ink', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.nib, diagnosticGain: 0.14 },
+  { key: 'duskBell', label: "Beagle's bell at dusk", group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.shipBell, diagnosticGain: 0.14 },
   { key: 'gull', label: 'Gull call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.gull, diagnosticGain: 0.2 },
   { key: 'finch', label: 'Finch call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finch, diagnosticGain: 0.18 },
   { key: 'dove', label: 'Dove call', group: 'Wildlife calls', kind: 'sprite', sprite: WILDLIFE_FIELDWORK_AUDIO.dove, diagnosticGain: 0.18 },
@@ -149,11 +188,14 @@ const LAUNCH_AMBIENCE_TARGETS = Object.freeze({
 });
 const LAUNCH_SURF_DELAY_SECONDS = 1.4;
 const DEFERRED_AUDIO_BANKS = Object.freeze([
+  INTERFACE_AUDIO_URLS,
   TOOL_FOLEY_AUDIO_URLS,
   HAMMER_STRIKE_AUDIO_URLS,
+  FIELD_FOLEY_AUDIO_URLS,
   INTERACTION_AUDIO_URLS,
   POST_OFFICE_BAY_AUDIO_URLS.slice(2),
   MOVEMENT_WILDLIFE_AUDIO_URLS,
+  FOLEY_AUDIO_URLS,
   DARWIN_BODY_AUDIO_URLS,
   WILDLIFE_FIELDWORK_AUDIO_URLS,
   CONTEXTUAL_WORLD_AUDIO_URLS,
@@ -216,6 +258,29 @@ const audioState = {
       hammerWood: 0,
       hammerSucculent: 0,
       hammerHerb: 0,
+      hammerStrain: 0,
+      shardCoat: 0,
+      stowRock: 0,
+      stowPlant: 0,
+      knifeSwish: 0,
+      knifeSucculent: 0,
+      knifeStem: 0,
+      knifeBark: 0,
+      pelletsRock: 0,
+      pelletsEarth: 0,
+      pelletsFoliage: 0,
+      pelletsWood: 0,
+      wildlifeFlush: 0,
+      uiBookOpen: 0,
+      uiBookClose: 0,
+      uiPageTurn: 0,
+      uiPaperOpen: 0,
+      uiPaperClose: 0,
+      uiMapUnroll: 0,
+      uiMapRoll: 0,
+      uiPencil: 0,
+      uiNib: 0,
+      duskBell: 0,
       rockStep: 0,
       woodStep: 0,
       mudStep: 0,
@@ -224,6 +289,14 @@ const audioState = {
       rockLanding: 0,
       shotgunReport: 0,
       shotgunReload: 0,
+      gunBlast: 0,
+      bootOnRock: 0,
+      rockLandingBody: 0,
+      rockBump: 0,
+      rockScramble: 0,
+      looseStone: 0,
+      jumpTakeoff: 0,
+      jumpLanding: 0,
       finchWing: 0,
       tortoiseStep: 0,
       gull: 0,
@@ -382,11 +455,115 @@ function ensureAudioGraph() {
   const context = new AudioContextClass({ latencyHint: 'interactive' });
   const master = context.createGain();
   master.gain.value = effectiveMasterGain();
-  master.connect(context.destination);
+  // A peak catcher, not a compressor: it only touches gunshots and heavy
+  // landings stacked on the beds, so louder foley can never clip.
+  const limiter = typeof context.createDynamicsCompressor === 'function' ? context.createDynamicsCompressor() : null;
+  if (limiter) {
+    limiter.threshold.value = -4;
+    limiter.knee.value = 4;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.002;
+    limiter.release.value = 0.18;
+    master.connect(limiter);
+    limiter.connect(context.destination);
+  } else {
+    master.connect(context.destination);
+  }
   audioState.context = context;
   audioState.master = master;
+  audioState.space = createSpaceBus(context, master);
+  applyAcousticSpace(0.05);
   exposeDebugState();
   return context;
+}
+
+// Where Darwin is shapes every one-shot: open ground gives nothing back, a
+// cabin a short room, Gabriel's lava tube a long dark wash with a flutter
+// between its walls, and the Promontory a single slap off the sea cliffs.
+// Every sprite voice feeds one shared send; loops and beds stay dry.
+// The convolver normalizes its impulse, which leaves the room about 19 dB
+// and the cave about 12 dB under the dry voice at unity; these reverb gains
+// set them to roughly -16 dB (a hint of walls) and -8.5 dB (a wet tube).
+const ACOUSTIC_SPACES = Object.freeze({
+  open: { reverb: 0, echo: 0 },
+  room: { reverb: 1.4, seconds: 0.38, damping: 5200, echo: 0 },
+  cave: { reverb: 1.6, seconds: 1.7, damping: 3400, predelay: 0.014, echo: 0.1, echoDelay: 0.068, feedback: 0.32, echoHz: 3000 },
+  cliff: { reverb: 0, echo: 0.2, echoDelay: 0.27, feedback: 0.16, echoHz: 2200 },
+});
+
+function createSpaceBus(context, master) {
+  const input = context.createGain();
+  const convolver = context.createConvolver();
+  const reverbGain = context.createGain();
+  const delay = context.createDelay(1);
+  const echoFilter = context.createBiquadFilter();
+  const feedback = context.createGain();
+  const echoGain = context.createGain();
+  reverbGain.gain.value = 0;
+  echoGain.gain.value = 0;
+  feedback.gain.value = 0;
+  echoFilter.type = 'lowpass';
+  input.connect(convolver);
+  convolver.connect(reverbGain);
+  reverbGain.connect(master);
+  input.connect(delay);
+  delay.connect(echoFilter);
+  echoFilter.connect(feedback);
+  feedback.connect(delay);
+  echoFilter.connect(echoGain);
+  echoGain.connect(master);
+  return { input, convolver, reverbGain, delay, echoFilter, feedback, echoGain, impulses: new Map() };
+}
+
+// A decaying stereo noise tail whose highs die faster than its lows, with a
+// few sparse early reflections ahead of it.
+function spaceImpulse(context, { seconds, damping, predelay = 0.006 }) {
+  const length = Math.ceil((seconds + predelay) * context.sampleRate);
+  const impulse = context.createBuffer(2, length, context.sampleRate);
+  for (let channel = 0; channel < 2; channel += 1) {
+    const data = impulse.getChannelData(channel);
+    const start = Math.round(predelay * context.sampleRate);
+    let low = 0;
+    for (let i = start; i < length; i += 1) {
+      const t = (i - start) / context.sampleRate;
+      const cutoff = Math.max(400, damping * Math.exp(-t / (seconds * 0.45)));
+      const k = 1 - Math.exp(-2 * Math.PI * cutoff / context.sampleRate);
+      low += (Math.random() * 2 - 1 - low) * k;
+      data[i] = low * Math.exp(-6.9 * t / seconds);
+    }
+    for (let tap = 0; tap < 6; tap += 1) {
+      const at = start + Math.round((0.004 + Math.random() * 0.04) * context.sampleRate);
+      if (at < length) data[at] += (Math.random() < 0.5 ? -1 : 1) * (0.5 - tap * 0.06);
+    }
+  }
+  return impulse;
+}
+
+let acousticSpaceId = 'open';
+
+function applyAcousticSpace(timeConstant = 0.6) {
+  const bus = audioState.space;
+  const context = audioState.context;
+  if (!bus || !context) return;
+  const space = ACOUSTIC_SPACES[acousticSpaceId] || ACOUSTIC_SPACES.open;
+  if (space.reverb > 0) {
+    if (!bus.impulses.has(acousticSpaceId)) bus.impulses.set(acousticSpaceId, spaceImpulse(context, space));
+    if (bus.convolver.buffer !== bus.impulses.get(acousticSpaceId)) bus.convolver.buffer = bus.impulses.get(acousticSpaceId);
+  }
+  rampGain(bus.reverbGain.gain, space.reverb, timeConstant);
+  rampGain(bus.echoGain.gain, space.echo, timeConstant);
+  rampGain(bus.feedback.gain, space.feedback || 0, timeConstant);
+  if (space.echoDelay) rampValue(bus.delay.delayTime, space.echoDelay, 0.05);
+  if (space.echoHz) rampValue(bus.echoFilter.frequency, space.echoHz, 0.05);
+}
+
+export function setAcousticSpace(spaceId) {
+  const next = ACOUSTIC_SPACES[spaceId] ? spaceId : 'open';
+  if (next === acousticSpaceId) return;
+  acousticSpaceId = next;
+  audioState.debug.acousticSpace = next;
+  applyAcousticSpace();
+  exposeDebugState();
 }
 
 function rampGain(parameter, value, timeConstant = 0.35) {
@@ -548,6 +725,8 @@ export function preloadSoundscapeEffects() {
     }
     await waitForAudioPreloadWindow();
     await ensureSpatialTrack('bee', MOVEMENT_WILDLIFE_AUDIO.bee);
+    await ensureSpatialTrack('coatFlap', FIELD_FOLEY_AUDIO.coatFlap);
+    await ensureSpatialTrack('heartbeat', INTERFACE_AUDIO.heartbeat);
     exposeDebugState();
     return true;
   })();
@@ -557,7 +736,7 @@ export function preloadSoundscapeEffects() {
 export function preloadSoundscapeToolEffects() {
   if (toolFoleyPreload) return toolFoleyPreload;
   toolFoleyPreload = Promise.all(
-    [...TOOL_FOLEY_AUDIO_URLS, ...HAMMER_STRIKE_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
+    [...TOOL_FOLEY_AUDIO_URLS, ...HAMMER_STRIKE_AUDIO_URLS, ...FIELD_FOLEY_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
   ).then(buffers => {
     const ready = buffers.every(Boolean);
     if (!ready) toolFoleyPreload = null;
@@ -686,6 +865,7 @@ export function playAudioSprite(sprite, {
   pan = 0,
   priority = false,
   filterHz = null,
+  send = 1,
 } = {}) {
   const context = audioState.context;
   const buffer = audioState.buffers.get(sprite.url);
@@ -725,12 +905,21 @@ export function playAudioSprite(sprite, {
     voiceGain.connect(audioState.master);
   }
 
+  let sendGain = null;
+  if (audioState.space && acousticSpaceId !== 'open' && send > 0) {
+    sendGain = context.createGain();
+    sendGain.gain.value = Math.min(1, send);
+    voiceGain.connect(sendGain);
+    sendGain.connect(audioState.space.input);
+  }
+
   const voice = { source, filter, voiceGain, panner, family, baseGain };
   audioState.voices.add(voice);
   source.onended = () => {
     source.disconnect();
     filter?.disconnect();
     voiceGain.disconnect();
+    sendGain?.disconnect();
     panner?.disconnect();
     audioState.voices.delete(voice);
     exposeDebugState();
@@ -741,6 +930,48 @@ export function playAudioSprite(sprite, {
   exposeDebugState();
   return true;
 }
+
+// Interface cues: the paper, pencil and bell sounds the HUD plays (see
+// interfaceFoley.js). They are dry, never sent into the cave or cliff space,
+// and skip a variant's immediate repeat. A cue asked for before its sprite
+// has decoded starts the load and stays silent this once.
+const interfaceLastVariant = new Map();
+
+export function playInterfaceCue(key, { gain = 0.1, playbackRate = 1, pan = 0 } = {}) {
+  const family = INTERFACE_CUE_FAMILIES[key];
+  const sprite = INTERFACE_AUDIO[key];
+  if (!family || !sprite?.url) return false;
+  if (!audioState.buffers.has(sprite.url)) {
+    loadAudioBuffer(sprite.url);
+    return false;
+  }
+  const last = interfaceLastVariant.get(key);
+  let index = Math.floor(Math.random() * sprite.variants);
+  if (sprite.variants > 1 && index === last) index = (index + 1) % sprite.variants;
+  interfaceLastVariant.set(key, index);
+  return playAudioSprite(sprite, {
+    family,
+    index,
+    gain,
+    playbackRate,
+    pan,
+    priority: true,
+    send: 0,
+  });
+}
+
+const INTERFACE_CUE_FAMILIES = Object.freeze({
+  bookOpen: 'uiBookOpen',
+  bookClose: 'uiBookClose',
+  pageTurn: 'uiPageTurn',
+  paperOpen: 'uiPaperOpen',
+  paperClose: 'uiPaperClose',
+  mapUnroll: 'uiMapUnroll',
+  mapRoll: 'uiMapRoll',
+  pencil: 'uiPencil',
+  nib: 'uiNib',
+  shipBell: 'duskBell',
+});
 
 // Synthesized reward chime for the collection celebration — no sample asset,
 // so it rides the shared context/master and obeys the mute toggle like every

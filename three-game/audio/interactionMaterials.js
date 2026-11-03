@@ -54,3 +54,32 @@ export function hammerStrikeMaterial(event, prop = null) {
   // Metal and ceramic props keep their recorded clank and clink.
   return material;
 }
+
+// What the clasp knife is cutting, read from the plant piece's id. Of the
+// knife-cuttable plants only Lecocarpus is woody; its twigs take the dry cut.
+export function knifeCutMaterial(event) {
+  const id = String(event?.propId || event?.sourceId || '').toLowerCase();
+  if (/prickly-pear|lava-cactus|mature-cactus|opuntia|cactus/.test(id)) return 'succulent';
+  if (/lecocarpus|palo-santo|bark|timber/.test(id)) return 'bark';
+  return 'stem';
+}
+
+// Which pellet-impact sprite a shotgun-impact surface takes. Hits on animals
+// stay silent: the report and the animal's own flight carry that moment.
+export function pelletImpactSound(event) {
+  const surface = event?.surface;
+  if (surface === 'fauna') return null;
+  if (surface === 'foliage') return 'foliage';
+  if (surface === 'wood' || surface === 'structure') return 'wood';
+  if (surface === 'rock') return 'rock';
+  const biome = String(event?.biome || '').toLowerCase();
+  return /basalt|lava|rock|cliff|boulder|scree|reef/.test(biome) ? 'rock' : 'earth';
+}
+
+// The reverberant space a zone puts Darwin in (audioRuntime ACOUSTIC_SPACES).
+export function acousticSpaceForZone(zone) {
+  const type = String(zone?.type || zone?.biome || '').toLowerCase();
+  if (type === 'caveinterior') return 'cave';
+  if (type === 'promontory') return 'cliff';
+  return null;
+}

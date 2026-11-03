@@ -61,7 +61,10 @@ those edges, and retains an audible quiet floor throughout a coastal map. Its
 gain curve compensates for the field recording's naturally quiet rolling body
 without compressing away the larger crests. A region one route inland from a
 coastal region keeps a much lower distant-surf floor. Post Office Bay still uses
-its more precise authored curved shoreline. The runtime also resumes a browser-
+its more precise authored curved shoreline. Full surf belongs to the waterline: presence
+falls off exponentially over about 10 m (roughly -3 dB at 5 m, -5 dB at 10 m,
+-8 dB at 20 m) to a quiet coastal floor, so Darwin's footfalls stay audible a
+few strides up the beach. Close wave breaks only fire within about 5 m. The runtime also resumes a browser-
 suspended audio context on visibility return or the next player input. Ambient
 readiness is tracked per loop rather than inferred from the shared audio context:
 if surf or another bed misses its first fetch/decode during a development rebuild,
@@ -384,3 +387,77 @@ Seeds are fixed, so a rebuild reproduces the committed sprites exactly:
 ```bash
 npm run asset:audio:hammer
 ```
+
+## Body foley: rocks, jumps and the gun
+
+Like the hammer, these are modelled rather than recorded
+(`scripts/build-foley-audio.mjs`, `public/assets/audio/foley/`). Darwin's
+hobnailed boots give every rock contact a bright heel-and-nail clack followed by
+the sole's duller slap, so a boulder underfoot is distinct from stony ground.
+
+| Sprite | When it plays |
+| --- | --- |
+| `boot-on-rock` | Footsteps while he stands on a rock or stone obstacle or a loose rock |
+| `rock-landing` | A landing on a rock body (both boots, a low thump, grit and kicked pebbles) |
+| `rock-bump` | Walking into a rock: shoulder and coat thud, a hand on the stone, a scrape |
+| `rock-scramble` | Stepping or vaulting up onto a rock |
+| `loose-stone-clonk` | A loose rock rocking under him (first step, wobble, losing his footing) |
+| `jump-takeoff` | Every jump push-off, under the surface sound |
+| `jump-landing` | Every jump landing (and hard drops): weight, coat, satchel, buckle |
+| `gun-blast` | Under the recorded black-powder crack: cap, boom, rolling tail, hill echoes |
+
+Footstep events carry the obstacle Darwin is standing on as their target, and
+`three-game/audio/contactTargets.js` decides whether a target is rock. A master
+peak limiter (threshold -4 dB) keeps the gun and heavy landings from clipping.
+
+```bash
+npm run asset:audio:foley
+```
+
+## Field tools, handling and space
+
+The same modelling covers Darwin's other tools and the small handling beats
+(`scripts/build-field-foley-audio.mjs`, rebuilt with
+`npm run asset:audio:field-foley`; shared primitives live in
+`scripts/lib/modelledAudio.mjs`).
+
+| Sound | Trigger |
+| --- | --- |
+| Knife swish | Every pocket-knife swing, peaking on the cut |
+| Knife cuts | First impact in the knife's landing window, or a `mature-cactus-impact` from the knife: cactus pads take the wet slice, Lecocarpus twigs the dry woody cut, other herbs and vines the stem snick |
+| Pellet impacts | `shotgun-impact`: rock (with occasional ricochet whine), earth, foliage, timber. One cluster per surface per blast, delayed by distance at the speed of sound, quieter and darker with range. Hits on animals are silent |
+| Boulder strain | The blow before a breakable boulder splits (`strained` on `prop-struck`) |
+| Wear and fatigue | Strikes darken and drop slightly as a boulder is cut back (`wear`), and land softer above 45 fatigue, sometimes followed by a breath |
+| Stowing a sample | `fieldwork-foley` `stow-sample`: paper fold then stone into the case for rocks, drying papers for plants |
+| Chip on the coat | `hammer-shard-hit`, just before the existing pain reaction |
+| Birds taking off | `fauna-takeoff` for flying species within 26 m, using the finch wingbeat slowed for heavier wings; doubled into a startled burst within 2.5 s of a hammer blow or shot |
+| Coat in the wind | A looping spatial track scaled by surface wind, gusts and exposure (strongest on Windy Promontory) |
+
+Every sprite voice also feeds one shared acoustic send (`setAcousticSpace` in
+`audioRuntime.js`). Gabriel's lava-tube chambers (`caveInterior`) get a long,
+dark wash with a short flutter echo between the walls; other interiors get a
+short room; Windy Promontory gets a single slap back off the sea cliffs; open
+ground stays dry. Loops and ambient beds never feed the send.
+
+## Interface and game-state cues
+
+The HUD is heard as the objects Darwin carries, not as clicks
+(`scripts/build-ui-audio.mjs`, rebuilt with `npm run asset:audio:interface`;
+wired in `three-game/audio/interfaceFoley.js`). The cues play dry, never through
+the cave or cliff send, and have their own "Interface" group in the mixer.
+
+| Sound | Trigger |
+| --- | --- |
+| Book opening and closing | Overlays registered with `sound: 'book'` in `useDismissableOverlay`: the journal, the book reader, the nightly debrief |
+| Folio lifted and laid down | Every other overlay (the default `sound: 'paper'`). Swapping one panel for another plays only the new one |
+| Chart unrolling and rolled up | The island map (`sound: 'map'`) |
+| Page turning | A page change inside an open book, or moving between journal pages |
+| Pencil | A journal entry the player writes (field note, examination, reading note), and the name underlined on the "New species sighted" card |
+| Pen and ink | Collections fair-copied aboard the Beagle (`logistics` entries) |
+| The Beagle's bell | The clock passing six in the evening while walking or waiting; a rest or a voyage that jumps over it stays silent |
+| Heartbeat | A looping track that fades in with the exhaustion look (`world/exhaustionLook.js`) and quickens as it deepens; Darwin only |
+
+The inventory case keeps its leather `equipment-foley` and opts out of the
+paper cue with `sound: null`, as do the developer jump menu and the
+multiplayer lobby. Collection and documentation entries are left to the
+existing field-note and specimen-container sounds in the world.
