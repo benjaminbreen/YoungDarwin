@@ -17,13 +17,19 @@ import { weatherEnv } from '../world/weatherEnvRuntime';
 import {
   CONTEXTUAL_WORLD_AUDIO,
   DARWIN_BODY_AUDIO,
+  HAMMER_STRIKE_AUDIO,
   INTERACTION_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
   TOOL_FOLEY_AUDIO,
   WILDLIFE_FIELDWORK_AUDIO,
 } from './audioAssets';
-import { interactionMaterialForProp } from './interactionMaterials';
+import {
+  HAMMER_STRIKE_PROFILES,
+  hammerStrikeMaterial,
+  interactionMaterialForProp,
+  materialFromInteractionEvent,
+} from './interactionMaterials';
 import {
   computeEnvironmentalAudioTargets,
   diurnalBirdCallsAllowed,
@@ -104,19 +110,6 @@ function targetLooksLikeRock(target) {
 
 function profileLooksLikeHardRock(profile) {
   return /basalt|lava|boulder|rock|cliff/.test(String(profile?.biome || '').toLowerCase());
-}
-
-function materialFromInteractionEvent(event, prop = null) {
-  const direct = String(event?.material || '').toLowerCase();
-  if (['wood', 'stone', 'metal', 'ceramic'].includes(direct)) return direct;
-  const registered = interactionMaterialForProp(prop);
-  if (registered) return registered;
-  const text = `${event?.propId || ''} ${event?.kind || ''} ${event?.label || ''} ${direct}`.toLowerCase();
-  if (/rock|stone|basalt|lava|volcan|boulder/.test(text)) return 'stone';
-  if (/iron|metal|brass|tin|candlestick|mug/.test(text)) return 'metal';
-  if (/ceramic|glass|bottle|jug|pot|bowl|earthen/.test(text)) return 'ceramic';
-  if (/wood|timber|crate|barrel|chest|case|stool|chair|fence|gate|post|cactus|plant|crop/.test(text)) return 'wood';
-  return null;
 }
 
 // Darwin's footfalls follow his pace: a stroll is soft and dark, a run lands
@@ -208,6 +201,16 @@ export function IslandSoundscape({ active, enabled }) {
     hammerSwing: -1,
     netSwing: -1,
     netContact: -1,
+    hammerBasalt: -1,
+    hammerScoria: -1,
+    hammerTuff: -1,
+    hammerOlivine: -1,
+    hammerCoral: -1,
+    hammerIronCrust: -1,
+    hammerSplit: -1,
+    hammerWood: -1,
+    hammerSucculent: -1,
+    hammerHerb: -1,
     rockStep: -1,
     woodStep: -1,
     mudStep: -1,
@@ -266,6 +269,9 @@ export function IslandSoundscape({ active, enabled }) {
   const windedRef = useRef({ active: false, intensity: 0, nextAt: 0 });
   const propContactsRef = useRef(new Map());
   const pushAudioRef = useRef(new Map());
+  // When the current hammer swing's head is due to land, so the first impact
+  // it causes is heard as a hammer blow rather than a generic bump.
+  const hammerImpactWindowRef = useRef(null);
   const scheduledAudioRef = useRef(new Set());
   const wildlifeScheduleRef = useRef({ zoneId: null });
   const waveBreakScheduleRef = useRef({ zoneId: null, nextAt: 0 });
@@ -1216,6 +1222,10 @@ export function IslandSoundscape({ active, enabled }) {
     const offToolSwing = onPropEvent('tool-swing', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
+      if (event?.tool === 'hammer') {
+        const landsAt = performance.now() + (Number(event?.impactDelay) || 0.55) * 1000;
+        hammerImpactWindowRef.current = { opens: landsAt - 150, closes: landsAt + 450, used: false };
+      }
       const profile = {
         hammer: {
           family: 'hammerSwing',
@@ -1285,10 +1295,65 @@ export function IslandSoundscape({ active, enabled }) {
         });
       });
     });
+    const playHammerStrike = (event, prop) => {
+      const material = hammerStrikeMaterial(event, prop);
+      const profile = HAMMER_STRIKE_PROFILES[material];
+      if (!profile) return false;
+      const pan = panFromWorldPosition(event?.position);
+      // A ground sample drives the head partly into soil and grit; an
+      // examine tap is a careful knock, not a blow.
+      const softened = event?.groundSample ? 0.72 : event?.tap ? 0.5 : 1;
+      playRandomVariant(variantsRef, profile.family, HAMMER_STRIKE_AUDIO[material], {
+        gain: profile.gain * softened,
+        playbackRate: randomBetween(...profile.rate) * (event?.groundSample ? 0.95 : 1),
+        pan,
+        filterHz: event?.groundSample ? 4200 : event?.tap ? 7800 : null,
+        priority: true,
+      });
+      if (profile.rustle) {
+        playContact('shrub', INTERACTION_AUDIO.shrub, {
+          intensity: 0.7,
+          baseGain: profile.rustle * softened,
+          pan,
+          playbackRateCenter: material === 'succulent' ? 1.12 : 1.02,
+          playbackJitter: 0.06,
+        });
+      }
+      return true;
+    };
     const offPropStruck = onPropEvent('prop-struck', event => {
       const current = latestRef.current;
       if (!current.runtimeEnabled || current.playableModeId !== 'darwin') return;
       const prop = getZoneProps(current.currentZoneId).find(item => item.id === event?.propId);
+      const strikeWindow = hammerImpactWindowRef.current;
+      if (event?.tool === 'hammer') {
+        if (strikeWindow && !event?.tap) strikeWindow.used = true;
+        if (playHammerStrike(event, prop)) return;
+        playStruckContact(event, prop);
+        return;
+      }
+      // Breakables and plants do not say which tool struck them, so the
+      // first impact inside the swing's landing window is taken as the
+      // hammer's own. It waits for the end of the frame: one swing can also
+      // rattle a loose stone beside the boulder it hits, and the boulder's
+      // tagged strike must win. Anything else stays a generic knock.
+      const now = performance.now();
+      if (!strikeWindow || strikeWindow.used || now < strikeWindow.opens || now > strikeWindow.closes) {
+        playStruckContact(event, prop);
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        scheduledAudioRef.current.delete(timer);
+        if (!latestRef.current.runtimeEnabled) return;
+        if (!strikeWindow.used) {
+          strikeWindow.used = true;
+          if (playHammerStrike(event, prop)) return;
+        }
+        playStruckContact(event, prop);
+      }, 0);
+      scheduledAudioRef.current.add(timer);
+    });
+    const playStruckContact = (event, prop) => {
       const material = materialFromInteractionEvent(event, prop);
       const sprite = material ? INTERACTION_AUDIO[material] : null;
       if (!sprite) return;
@@ -1303,6 +1368,30 @@ export function IslandSoundscape({ active, enabled }) {
         baseGain,
         pan: panFromWorldPosition(event?.position),
         playbackJitter: material === 'metal' || material === 'ceramic' ? 0.035 : 0.055,
+      });
+    };
+    const offRockBroken = onPropEvent('rock-broken', event => {
+      const current = latestRef.current;
+      if (!current.runtimeEnabled
+        || current.playableModeId !== 'darwin'
+        || event?.zoneId !== current.currentZoneId) return;
+      const pan = panFromWorldPosition(event?.position);
+      // Softer stone parts with less of a crack and more crumble.
+      const soft = ['tuff', 'scoria', 'coral_limestone'].includes(event?.hammerMaterial);
+      playRandomVariant(variantsRef, 'hammerSplit', HAMMER_STRIKE_AUDIO.split, {
+        gain: soft ? 0.085 : 0.11,
+        playbackRate: randomBetween(0.96, 1.02) * (soft ? 0.94 : 1),
+        pan,
+        filterHz: soft ? 3600 : null,
+        priority: true,
+      });
+      scheduleToolFoley(140, () => {
+        playRandomVariant(variantsRef, 'rockTumble', CONTEXTUAL_WORLD_AUDIO.rockTumble, {
+          gain: 0.075,
+          playbackRate: randomBetween(0.92, 1),
+          pan,
+          priority: true,
+        });
       });
     });
     const offFieldwork = onPropEvent('fieldwork-foley', event => {
@@ -1432,6 +1521,7 @@ export function IslandSoundscape({ active, enabled }) {
       offNetContact();
       offNetBrush();
       offPropStruck();
+      offRockBroken();
       offFieldwork();
       offEquipment();
       offContainer();

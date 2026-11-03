@@ -14,6 +14,7 @@ import { ReadableDocument } from './ReadableDocument';
 import { hasPopulationTraits } from '../examine/populationTraits';
 import { casualName, catchPlan, toolDisplayName } from '../catchRules';
 import { specimenInHand } from '../components/player/catchRequest';
+import { hammerMaterialForSpecimen } from '../physics/props/rockSampling';
 import { getBehaviorBrain } from '../fauna/behavior/behaviorBrain';
 import {
   cameraDirectiveForProcedure,
@@ -372,6 +373,9 @@ export function ExamineView() {
         requestExamineStrike({
           propId: `examine:${actorId}`,
           material: 'stone',
+          tool: 'hammer',
+          tap: true,
+          hammerMaterial: hammerMaterialForSpecimen(live.typeId) || 'basalt',
           dustCount: 10,
           sparkCount: 3,
           dustColor: '#6b6258',

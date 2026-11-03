@@ -68,6 +68,28 @@ export const TOOL_FOLEY_AUDIO_URLS = Object.freeze(
   Object.values(TOOL_FOLEY_AUDIO).map(sprite => sprite.url),
 );
 
+// Modelled hammer strikes (scripts/build-hammer-audio.mjs). The rock keys are
+// the rockSampling hammer materials, so a struck boulder is heard as its own
+// geology; the rest cover the timber and plants the hammer also meets.
+const HAMMER_ROOT = '/assets/audio/hammer';
+
+export const HAMMER_STRIKE_AUDIO = Object.freeze({
+  basalt: Object.freeze({ url: `${HAMMER_ROOT}/strike-basalt.wav`, variants: 8, slotDuration: 0.7 }),
+  scoria: Object.freeze({ url: `${HAMMER_ROOT}/strike-scoria.wav`, variants: 8, slotDuration: 0.62 }),
+  tuff: Object.freeze({ url: `${HAMMER_ROOT}/strike-tuff.wav`, variants: 8, slotDuration: 0.7 }),
+  olivine: Object.freeze({ url: `${HAMMER_ROOT}/strike-olivine.wav`, variants: 8, slotDuration: 0.66 }),
+  coral_limestone: Object.freeze({ url: `${HAMMER_ROOT}/strike-coral-limestone.wav`, variants: 8, slotDuration: 0.56 }),
+  iron_crust: Object.freeze({ url: `${HAMMER_ROOT}/strike-iron-crust.wav`, variants: 8, slotDuration: 0.66 }),
+  split: Object.freeze({ url: `${HAMMER_ROOT}/strike-split.wav`, variants: 3, slotDuration: 1.4 }),
+  wood: Object.freeze({ url: `${HAMMER_ROOT}/strike-wood.wav`, variants: 6, slotDuration: 0.5 }),
+  succulent: Object.freeze({ url: `${HAMMER_ROOT}/strike-succulent.wav`, variants: 6, slotDuration: 0.56 }),
+  herb: Object.freeze({ url: `${HAMMER_ROOT}/strike-herb.wav`, variants: 6, slotDuration: 0.48 }),
+});
+
+export const HAMMER_STRIKE_AUDIO_URLS = Object.freeze(
+  Object.values(HAMMER_STRIKE_AUDIO).map(sprite => sprite.url),
+);
+
 const MOVEMENT_WILDLIFE_ROOT = '/assets/audio/movement-wildlife';
 
 export const MOVEMENT_WILDLIFE_AUDIO = Object.freeze({

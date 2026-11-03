@@ -295,6 +295,14 @@ export function inferHammerMaterial({ rock = null, zoneId = 'POST_OFFICE_BAY', b
   return 'basalt';
 }
 
+// The hammer material whose sample is this specimen type (examine sessions
+// know the specimen, not the rock it came from).
+export function hammerMaterialForSpecimen(specimenId) {
+  if (!specimenId) return null;
+  const profile = Object.values(HAMMER_MATERIAL_PROFILES).find(item => item.specimenId === specimenId);
+  return profile?.material || null;
+}
+
 export function groundHammerMaterial({ zoneId = 'POST_OFFICE_BAY', biome = '' } = {}) {
   const text = `${zoneId} ${biome}`.toLowerCase();
   if (text.includes('olivine') || text.includes('green-beach') || text.includes('green beach')) return 'olivine';

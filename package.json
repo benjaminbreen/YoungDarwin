@@ -52,6 +52,7 @@
     "asset:travel-textures": "node scripts/build-travel-textures.mjs",
     "asset:audio:post-office-bay": "node scripts/build-post-office-bay-audio.mjs",
     "asset:audio:interactions": "node scripts/build-interaction-audio.mjs",
+    "asset:audio:hammer": "node scripts/build-hammer-audio.mjs",
     "asset:audio:movement-wildlife": "node scripts/build-movement-wildlife-audio.mjs",
     "asset:audio:darwin-body": "node scripts/build-darwin-body-audio.mjs",
     "asset:audio:island-ambience": "node scripts/build-island-ambience-audio.mjs",

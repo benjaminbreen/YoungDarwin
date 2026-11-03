@@ -435,6 +435,7 @@ const {
 } = loadModule('game-core/floreanaGeography.js');
 const {
   CONTEXTUAL_WORLD_AUDIO,
+  HAMMER_STRIKE_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
   TOOL_FOLEY_AUDIO,
@@ -2504,6 +2505,43 @@ test('hammer and insect-net Foley sprites are committed PCM assets with stable s
   }
 });
 
+test('every hammer material has a committed strike sprite sized to its slots', () => {
+  const { HAMMER_MATERIAL_PROFILES } = loadModule('three-game/physics/props/rockSampling.js');
+  const keys = [...Object.keys(HAMMER_MATERIAL_PROFILES), 'split', 'wood', 'succulent', 'herb'];
+  for (const key of keys) {
+    const sprite = HAMMER_STRIKE_AUDIO[key];
+    assert.ok(sprite, `${key} has a hammer strike sprite`);
+    const filePath = path.join(process.cwd(), 'public', sprite.url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    const wav = fs.readFileSync(filePath);
+    assert.equal(wav.subarray(0, 4).toString('ascii'), 'RIFF', `${key} is PCM WAV`);
+    const seconds = wav.readUInt32LE(40) / (wav.readUInt32LE(24) * 2);
+    assert.ok(Math.abs(seconds - sprite.variants * sprite.slotDuration) < 0.002, `${key} slots match its length`);
+  }
+  setSoundscapeAudioTrackTrimDb('hammerTuff', 0.5);
+  setSoundscapeAudioTrackTrimDb('hammerSplit', 0.5);
+  const trackLabels = getSoundscapeAudioMixSettings().trackLabels;
+  assert.equal(trackLabels.hammerTuff, 'Hammer on tuff');
+  assert.equal(trackLabels.hammerSplit, 'Boulder splitting');
+  resetSoundscapeAudioMix();
+});
+
+test('hammer impacts are heard as the geology, timber or plant they meet', () => {
+  const { hammerStrikeMaterial } = loadModule('three-game/audio/interactionMaterials.js');
+  assert.equal(hammerStrikeMaterial({ propId: 'post-office-bay-basalt-30', hammerMaterial: 'scoria' }), 'scoria');
+  assert.equal(hammerStrikeMaterial({ propId: 'hammer-sample:x', hammerMaterial: 'coral_limestone' }), 'coral_limestone');
+  assert.equal(hammerStrikeMaterial({ propId: 'POST_OFFICE_BAY:loose-rock:loose-perched-stone' }), 'basalt');
+  assert.equal(hammerStrikeMaterial({ propId: 'FLOREANA:prickly-pear:site-1:pad-2' }), 'succulent');
+  assert.equal(hammerStrikeMaterial({ propId: 'mature-cactus:ecology:POST_OFFICE_BAY:candelabra-cactus-2' }), 'succulent');
+  assert.equal(hammerStrikeMaterial({ propId: 'FLOREANA:palo-santo:site-1:branch-3' }), 'wood');
+  assert.equal(hammerStrikeMaterial({ propId: 'watkins-cabin-wall-2' }), 'wood');
+  assert.equal(hammerStrikeMaterial({ propId: 'crop:maize-4' }), 'herb');
+  assert.equal(hammerStrikeMaterial({ propId: 'FLOREANA:sicyos:site-1:vine-1' }), 'herb');
+  // Metal and ceramic props keep their recorded impacts.
+  assert.equal(hammerStrikeMaterial({ propId: 'tin-mug-1' }), 'metal');
+  assert.equal(hammerStrikeMaterial({ propId: 'mystery-1' }), null);
+});
+
 test('wildlife, weather, fieldwork, and shoreline sprites are committed PCM assets', () => {
   const expected = {
     dove: [WILDLIFE_FIELDWORK_AUDIO.dove, 5, 2],
@@ -2577,7 +2615,7 @@ test('sound debug mix trims clamp, serialize, and reset with stable track keys',
   assert.equal(setSoundscapeAudioTrackTrimDb('not-a-track', 4), null);
 
   const tuned = getSoundscapeAudioMixSettings();
-  assert.equal(tuned.schema, 'darwin-sound-mix-v2');
+  assert.equal(tuned.schema, 'darwin-sound-mix-v3');
   assert.equal(tuned.masterDb, 6);
   assert.equal(tuned.tracks.surf, -24);
   assert.equal(tuned.trackLabels.surf, 'Ocean surf');

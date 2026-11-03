@@ -991,6 +991,9 @@ export function RockSampleSystem() {
       emitPropEvent('prop-struck', {
         propId: target.rock?.id || `hammer-sample:${target.key}`,
         material: 'stone',
+        tool: 'hammer',
+        hammerMaterial: profile.material,
+        groundSample: Boolean(target.groundSample),
         position: chip.scarPosition,
         impactDir: { x: chip.normal.x, y: 0, z: chip.normal.z },
         dustCount: 0,
@@ -1016,6 +1019,12 @@ export function RockSampleSystem() {
           bite: rock.proceduralRock || rock.kind === 'boulder' ? chip.bite : null,
         });
         if (broken) {
+          emitPropEvent('rock-broken', {
+            rockId: rock.id,
+            zoneId: currentZoneId,
+            hammerMaterial: profile.material,
+            position: chip.scarPosition,
+          });
           const groundY = movementTerrainHeight(rock.x, rock.z, currentZoneId);
           newFragments.push(makeBreakFragments(rock, chip.sourceRockKey, currentZoneId, profile, groundY));
           store.recordHammerStrikeFeedback?.({

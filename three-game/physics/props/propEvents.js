@@ -60,7 +60,8 @@ export function isSwingClaimed(swingId) {
 // 'carried-prop-settle' { propId, zoneId, mode: 'place'|'release', position: {x,y,z} }
 // 'container-foley' { kind: 'chest-open'|'chest-close', propId, position }
 // 'player-winded' { active, effort, fatigue }
-// 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount }
+// 'prop-struck' { propId, position: {x,y,z}, impactDir: {x,y,z}, dustCount, sparkCount, material?, tool?, hammerMaterial?, groundSample?, tap? }
+// 'rock-broken' { rockId, zoneId, hammerMaterial, position: {x,y,z} } — a boulder's last hammer blow
 // 'prop-broken' { propId, position: {x,y,z}, impactDir: {x,y,z} }
 // 'toggle-syms-field-case' { id }
 // 'mature-cactus-impact' { sourceId, itemId, position, direction, amplitude, duration, frequency, tool }

@@ -342,3 +342,45 @@ All are Creative Commons 0. Rebuild these derivatives with:
 ```bash
 npm run asset:audio:interactions
 ```
+
+## Hammer strikes
+
+The hammer's impacts are the one deliberate exception to the recorded-material
+policy. They are modelled, not recorded, because each strike has to sound like
+a specific rock: the six hammer materials in
+`three-game/physics/props/rockSampling.js` each have a `soundMessage`, and the
+model for each strike follows that description. No library recording covers
+scoria, tuff, olivine basalt, coral limestone and iron crust struck with the
+same steel hammer.
+
+Each strike is built in layers (`scripts/build-hammer-audio.mjs`): the contact
+pulse (shorter and brighter on harder stone), the steel head's free-bar ring,
+a dense cluster of the struck mass's modes, the fracture crack, crushed grit,
+and the loosened chip landing and bouncing, plus one close ground reflection.
+
+| Sprite | What it should sound like |
+| --- | --- |
+| `basalt` | Hard, ringing clack; the head rings and a dense chip tinks away |
+| `scoria` | Gritty, hollow crunch from collapsing vesicles; light crumbs patter |
+| `tuff` | Dull, dusty tap with no ring; ash powder sifts off afterwards |
+| `olivine` | Basaltic knock followed by faint glassy crystal ticks |
+| `coral_limestone` | Dry, chalky click; bright brittle crumble and a pale hiss |
+| `iron_crust` | A raspy skim of rusty skin, then the dark stone beneath |
+| `split` | A boulder's last blow: the crack runs through, the halves drop |
+| `wood` | Short hollow "tok" on timber or a crate, with a fibrous bite |
+| `succulent` | Cactus: cuticle pop, wet downward squelch, fibrous tear |
+| `herb` | Soft stem thwap and snap; the recorded shrub rustle joins at runtime |
+
+`RockSampleSystem` tags each rock strike with its `hammerMaterial` (and
+`groundSample`), and emits `rock-broken` on the final blow, which adds the
+recorded rock tumble on top of the split. Breakables and plants do not say
+which tool hit them, so `IslandSoundscape` takes the first `prop-struck` inside
+a hammer swing's landing window as the hammer's own and picks the sprite by
+prop id. Metal and ceramic props keep their recorded clank and clink. Every
+strike sprite has its own trim in the sound mixer under "Hammer strikes".
+
+Seeds are fixed, so a rebuild reproduces the committed sprites exactly:
+
+```bash
+npm run asset:audio:hammer
+```

@@ -3,6 +3,8 @@ import {
   CONTEXTUAL_WORLD_AUDIO_URLS,
   DARWIN_BODY_AUDIO,
   DARWIN_BODY_AUDIO_URLS,
+  HAMMER_STRIKE_AUDIO,
+  HAMMER_STRIKE_AUDIO_URLS,
   INTERACTION_AUDIO,
   INTERACTION_AUDIO_URLS,
   ISLAND_AMBIENCE_AUDIO,
@@ -49,6 +51,16 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'hammerSwing', label: 'Hammer swing', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.hammerSwing, diagnosticGain: 0.18 },
   { key: 'netSwing', label: 'Insect-net swing', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.netSwing, diagnosticGain: 0.18 },
   { key: 'netContact', label: 'Insect-net contact', group: 'Tool Foley', kind: 'sprite', sprite: TOOL_FOLEY_AUDIO.netContact, diagnosticGain: 0.18 },
+  { key: 'hammerBasalt', label: 'Hammer on basalt', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.basalt, diagnosticGain: 0.1 },
+  { key: 'hammerScoria', label: 'Hammer on scoria', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.scoria, diagnosticGain: 0.1 },
+  { key: 'hammerTuff', label: 'Hammer on tuff', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.tuff, diagnosticGain: 0.1 },
+  { key: 'hammerOlivine', label: 'Hammer on olivine basalt', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.olivine, diagnosticGain: 0.1 },
+  { key: 'hammerCoral', label: 'Hammer on coral limestone', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.coral_limestone, diagnosticGain: 0.12 },
+  { key: 'hammerIronCrust', label: 'Hammer on iron crust', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.iron_crust, diagnosticGain: 0.1 },
+  { key: 'hammerSplit', label: 'Boulder splitting', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.split, diagnosticGain: 0.12 },
+  { key: 'hammerWood', label: 'Hammer on timber', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.wood, diagnosticGain: 0.1 },
+  { key: 'hammerSucculent', label: 'Hammer on cactus', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.succulent, diagnosticGain: 0.09 },
+  { key: 'hammerHerb', label: 'Hammer on herbs and crops', group: 'Hammer strikes', kind: 'sprite', sprite: HAMMER_STRIKE_AUDIO.herb, diagnosticGain: 0.09 },
   { key: 'gull', label: 'Gull call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.gull, diagnosticGain: 0.2 },
   { key: 'finch', label: 'Finch call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finch, diagnosticGain: 0.18 },
   { key: 'dove', label: 'Dove call', group: 'Wildlife calls', kind: 'sprite', sprite: WILDLIFE_FIELDWORK_AUDIO.dove, diagnosticGain: 0.18 },
@@ -86,34 +98,45 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
 
 const AUDIO_DEBUG_TRACK_BY_KEY = new Map(AUDIO_DEBUG_TRACKS.map(track => [track.key, track]));
 // v2: the v1 trims tuned on 2026-10-30 became AUTHORED_MIX below. Bumping
-// the schema drops browsers' saved v1 copies so they are not applied twice.
-const SOUND_MIX_STORAGE_KEY = 'darwin.sound-mix.v2';
-const SOUND_MIX_SCHEMA = 'darwin-sound-mix-v2';
+// the schema drops browsers' saved copies so they are not applied twice.
+// v3: the v2 trims tuned on 2026-11-02 were folded in the same way.
+const SOUND_MIX_STORAGE_KEY = 'darwin.sound-mix.v3';
+const SOUND_MIX_SCHEMA = 'darwin-sound-mix-v3';
 const BASE_MASTER_GAIN = 0.72;
 // The shipped balance, tuned by ear in the in-game Sound mix panel. Player
 // trims (the sliders, 0 dB by default) ride on top of these offsets.
+// 2026-11-02: footsteps raised ~6 dB; they were lost under the surf bed.
+// 2026-11-02 (later): a by-ear pass folded in. Footsteps, surf, rain and
+// insects came back down; the bee, breath and close wave break came up.
 const AUTHORED_MIX = Object.freeze({
   masterDb: -2.5,
   tracks: Object.freeze({
-    bee: 3.5,
+    bee: 7,
+    breath: 2,
     brushGrass: -14,
     brushShrub: -2.5,
     brushSpine: 4.5,
     cloth: -10,
     grass: -10.5,
-    grit: -11.5,
-    litterStep: -12.5,
-    mudStep: -5.5,
+    grit: -15.5,
+    insects: -11.5,
+    jumpLanding: -2.5,
+    jumpTakeoff: -5.5,
+    litterStep: -10,
+    mudStep: -17.5,
     pain: 5.5,
-    rockStep: -6,
+    rain: -13.5,
+    rockStep: -6.5,
     rockTakeoff: -6.5,
-    sand: -12.5,
-    shotgunReport: -8,
+    sand: -14,
+    shotgunReport: -3,
     spineSnag: 7.5,
+    surf: -10,
     symsGrit: -2,
     tortoiseStep: -6.5,
-    water: -10,
-    woodStep: -7,
+    water: -11,
+    waveBreak: 2,
+    woodStep: -6.5,
   }),
 });
 const MASTER_TRIM_MIN_DB = -18;
@@ -127,6 +150,7 @@ const LAUNCH_AMBIENCE_TARGETS = Object.freeze({
 const LAUNCH_SURF_DELAY_SECONDS = 1.4;
 const DEFERRED_AUDIO_BANKS = Object.freeze([
   TOOL_FOLEY_AUDIO_URLS,
+  HAMMER_STRIKE_AUDIO_URLS,
   INTERACTION_AUDIO_URLS,
   POST_OFFICE_BAY_AUDIO_URLS.slice(2),
   MOVEMENT_WILDLIFE_AUDIO_URLS,
@@ -182,6 +206,16 @@ const audioState = {
       hammerSwing: 0,
       netSwing: 0,
       netContact: 0,
+      hammerBasalt: 0,
+      hammerScoria: 0,
+      hammerTuff: 0,
+      hammerOlivine: 0,
+      hammerCoral: 0,
+      hammerIronCrust: 0,
+      hammerSplit: 0,
+      hammerWood: 0,
+      hammerSucculent: 0,
+      hammerHerb: 0,
       rockStep: 0,
       woodStep: 0,
       mudStep: 0,
@@ -523,7 +557,7 @@ export function preloadSoundscapeEffects() {
 export function preloadSoundscapeToolEffects() {
   if (toolFoleyPreload) return toolFoleyPreload;
   toolFoleyPreload = Promise.all(
-    [...TOOL_FOLEY_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
+    [...TOOL_FOLEY_AUDIO_URLS, ...HAMMER_STRIKE_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
   ).then(buffers => {
     const ready = buffers.every(Boolean);
     if (!ready) toolFoleyPreload = null;
