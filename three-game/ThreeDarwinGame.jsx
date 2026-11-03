@@ -3395,6 +3395,13 @@ function EnvironmentLookSection() {
       <p className="mb-2 text-[10px] leading-snug text-amber-100/55">
         Shapes shaded faces on terrain, rocks, props and characters. Rebuilds the sky light on change;
         no per-frame cost.{isDefault ? '' : ' Currently overriding the shipped defaults.'}
+      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-amber-100/55">
+        Ground footprints · under plants and rocks
+      </p>
+      <div className="grid grid-cols-1 gap-1.5">
+        <DevSlider label="Under canopy" value={terrainLookTuning.footprintCanopy} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintCanopy: value })} />
+        <DevSlider label="Rock collars" value={terrainLookTuning.footprintRock} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintRock: value })} />
+      </div>
       </p>
       <div className="grid grid-cols-1 gap-1.5">
         <DevSlider label="Sun glow" value={environmentLookTuning.sunLobe} min={0} max={8} step={0.1} format={v => (v === 0 ? 'off' : v.toFixed(1))} onChange={value => set({ sunLobe: value })} />

@@ -23,27 +23,30 @@ const STORAGE_KEY = 'darwin.terrainLook.v2';
 
 // Baked from Ben's tuning pass at Post Office Bay, 2026-08-03, and re-baked
 // 2026-10-31 with the baked-occlusion pass (stronger AO, calmer detail tiling,
-// neutral saturation, less cool): slightly deeper
-// and cooler ground, a little more colour and contrast, much stronger macro
-// breakup, more matte, and noticeably more grain from the normal maps.
+// neutral saturation, less cool), and again 2026-11-02 (lighter, warm rather
+// than cool, slightly finer grain): a little more contrast, much stronger
+// macro breakup, more matte, and noticeably more grain from the normal maps.
+// Re-baked later on 2026-11-02 with the ground-footprint pass: richer mineral
+// colour at softer contrast, footprints a little shy under canopy and a
+// little firmer around rocks.
 export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // Overall albedo gain. Below 1 deepens the ground, above 1 lifts it.
-  brightness: 0.91,
+  brightness: 0.95,
   // 0 is greyscale, 1 is authored, above 1 pushes the mineral colour.
-  saturation: 1,
+  saturation: 1.16,
   // Pivots albedo around mid grey. Sand at this key flattens easily; a little
   // contrast is usually what makes ground read as surface rather than paper.
-  contrast: 1.06,
+  contrast: 0.9,
   // Negative cools toward the sea light, positive warms toward iron sand.
-  warmth: -0.12,
+  warmth: 0.12,
   // Scales the large-wavelength tonal/hue breakup that regions apply on top
   // of their tiled detail. This is the knob that stops open ground reading as
   // one flat sheet at a distance.
-  macroVariation: 2.1,
+  macroVariation: 2,
   // Offsets the final roughness. Negative is glossier (wetter, more sheen),
   // positive is more matte. Grass and sand want to stay matte — see the
   // material notes about a 0.55 roughness floor.
-  roughness: 0.23,
+  roughness: 0.22,
   // Scales the tangent-space normal strength each region derives from its NRH
   // maps. Low values flatten the surface; high values exaggerate grain.
   normalStrength: 1.75,
@@ -66,7 +69,7 @@ export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // Scales the tiled detail UVs. Below 1 makes the grain larger and calmer,
   // above 1 finer and busier. Currently read by Post Office Bay; other regions
   // opt in by multiplying their layer scales by uTerrainGradeShape.w.
-  detailTiling: 0.7,
+  detailTiling: 0.8,
 
   // --- baked occlusion -------------------------------------------------------
   // Heightfield AO baked per vertex (world/terrainOcclusion.js). Scales how
@@ -75,16 +78,27 @@ export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // Share of the occlusion also applied to direct sun. 0 is physically pure
   // AO, which barely shows at midday; more lets creases read in full sun.
   aoDirect: 0.8,
+
+  // --- ground footprints -----------------------------------------------------
+  // Duff, shade and packed soil under each plant's crown, and the grit collar
+  // banked against each rock (world/groundFootprints.js). 0 turns either off.
+  footprintCanopy: 0.7,
+  footprintRock: 1.05,
 });
 
 export const terrainLookTuning = { ...TERRAIN_LOOK_DEFAULTS, ...readStored(), ...readUrlOverrides() };
 
-// `?noTerrainAo` switches the baked occlusion off for one session, so
-// perf:sweep and look can A/B it without touching the persisted dials.
+// `?noTerrainAo` and `?noGroundFootprints` switch the baked occlusion or the
+// plant/rock footprints off for one session, so perf:sweep and look can A/B
+// them without touching the persisted dials.
 function readUrlOverrides() {
   if (typeof window === 'undefined') return null;
   try {
-    return new URLSearchParams(window.location.search).has('noTerrainAo') ? { aoStrength: 0 } : null;
+    const params = new URLSearchParams(window.location.search);
+    return {
+      ...(params.has('noTerrainAo') ? { aoStrength: 0 } : null),
+      ...(params.has('noGroundFootprints') ? { footprintCanopy: 0, footprintRock: 0 } : null),
+    };
   } catch {
     return null;
   }

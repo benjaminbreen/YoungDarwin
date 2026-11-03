@@ -38,6 +38,7 @@ import { waterDev } from '../../world/waterDevRuntime';
 import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { terrainLookTuning } from '../../world/terrainLook';
+import { getGroundFootprintMap } from '../../world/groundFootprints';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = TERRAIN_WATER_SURFACE_Y;
@@ -161,6 +162,73 @@ const TERRAIN_TEXTURE_CARRY_APPLY = /* glsl */`
   }
 `;
 
+// Where plants and rocks stand (world/groundFootprints.js). R is canopy,
+// G the grit collar around rocks, B the packed soil at a stem. Runs before
+// the grade so the result is graded like the rest of the region. Value noise
+// at two scales keeps the discs from reading as stamped circles and gives the
+// duff a fleck of fallen leaves and twigs.
+const TERRAIN_FOOTPRINT_GLSL = /* glsl */`
+  uniform sampler2D uGroundFootprintMap;
+  uniform vec4 uGroundFootprintBounds;
+  uniform vec2 uGroundFootprint;
+  float terrainFootprintSky = 1.0;
+  float gfpHash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+  float gfpNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(gfpHash(i), gfpHash(i + vec2(1.0, 0.0)), u.x),
+      mix(gfpHash(i + vec2(0.0, 1.0)), gfpHash(i + vec2(1.0, 1.0)), u.x),
+      u.y
+    );
+  }
+`;
+
+const TERRAIN_FOOTPRINT_APPLY = /* glsl */`
+  if (uGroundFootprintBounds.z > 0.0) {
+    vec2 gfpUv = (vCausticsW.xz - uGroundFootprintBounds.xy) * uGroundFootprintBounds.zw;
+    if (all(greaterThan(gfpUv, vec2(0.0))) && all(lessThan(gfpUv, vec2(1.0)))) {
+      vec3 gfp = texture2D(uGroundFootprintMap, gfpUv).rgb;
+      if (gfp.r + gfp.g + gfp.b > 0.004) {
+        float gfpBroad = gfpNoise(vCausticsW.xz * 0.85 + vec2(3.1, -1.7));
+        float gfpFine = gfpNoise(vCausticsW.xz * 4.3 + vec2(-7.4, 2.2));
+        // Ragged edge: the noise moves the canopy boundary in and out rather
+        // than just dimming it, so the margin of the duff is irregular.
+        float canopy = smoothstep(0.12, 0.85, gfp.r + (gfpBroad - 0.5) * 0.5)
+          * uGroundFootprint.x;
+        float stem = gfp.b * uGroundFootprint.x;
+        float collar = smoothstep(0.05, 0.9, gfp.g + (gfpBroad - 0.5) * 0.35)
+          * uGroundFootprint.y;
+
+        vec3 gfpBase = diffuseColor.rgb;
+        float gfpLuma = dot(gfpBase, vec3(0.2126, 0.7152, 0.0722));
+        // Duff: browner, darker, less mineral than the open ground, flecked
+        // with darker leaf and twig litter.
+        float gfpFleck = smoothstep(0.58, 0.82, gfpFine) * smoothstep(0.3, 0.8, canopy);
+        vec3 gfpDuff = mix(vec3(gfpLuma), gfpBase, 0.6) * vec3(0.8, 0.72, 0.6);
+        gfpDuff *= 1.0 - gfpFleck * 0.22;
+        diffuseColor.rgb = mix(gfpBase, gfpDuff, canopy * 0.78);
+        // Packed, slightly damp soil where the stem meets the ground.
+        diffuseColor.rgb *= 1.0 - stem * 0.2;
+        // Fines that wash and blow against a rock and stay in its lee.
+        vec3 gfpGrit = mix(vec3(gfpLuma), gfpBase, 0.45) * 0.76;
+        diffuseColor.rgb = mix(diffuseColor.rgb, gfpGrit, collar * (0.42 + gfpFine * 0.2));
+        roughnessFactor = min(1.0, roughnessFactor + canopy * 0.06 + collar * 0.04);
+
+        // Sky light lost under a crown or in a rock's lee. Also lands on
+        // direct light below (see aomap), standing in for a contact shadow
+        // that stays put whether or not the shadow map reaches this far.
+        terrainFootprintSky = 1.0 - clamp(canopy * 0.45 + stem * 0.15 + collar * 0.28, 0.0, 0.62);
+      }
+    }
+  }
+`;
+
 // Global terrain grade. uTerrainGrade is (brightness, saturation, contrast,
 // warmth); uTerrainGradeExtra is (macroVariation, roughnessOffset,
 // normalStrength). Pure arithmetic on values the shader already holds — no
@@ -240,6 +308,12 @@ function injectTerrainRenderingExtensions(material) {
     shader.uniforms.uTerrainGradeShape = { value: new THREE.Vector4(0, 0, 0, 1) };
     // Baked heightfield occlusion (world/terrainOcclusion.js): (strength, direct share).
     shader.uniforms.uTerrainAo = { value: new THREE.Vector2(0, 0) };
+    // Plant and rock footprints (world/groundFootprints.js): map, bounds as
+    // (minX, minZ, 1/width, 1/depth), and (canopy, rock collar) strength.
+    const footprint = getGroundFootprintMap(null);
+    shader.uniforms.uGroundFootprintMap = { value: footprint.texture };
+    shader.uniforms.uGroundFootprintBounds = { value: footprint.bounds.clone() };
+    shader.uniforms.uGroundFootprint = { value: new THREE.Vector2(1, 1) };
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -270,6 +344,7 @@ function injectTerrainRenderingExtensions(material) {
         uniform vec2 uTerrainAo;
         varying float vTerrainCarryDepth;
         varying float vTerrainOcclusion;
+        ${TERRAIN_FOOTPRINT_GLSL}
         ${TERRAIN_TEXTURE_CARRY_GLSL}
         ${CAUSTICS_GLSL}`,
       )
@@ -281,6 +356,7 @@ function injectTerrainRenderingExtensions(material) {
       .replace(
         '#include <metalnessmap_fragment>',
         `#include <metalnessmap_fragment>
+        ${TERRAIN_FOOTPRINT_APPLY}
         ${TERRAIN_GRADE_APPLY}`,
       )
       // Normal strength has to land after each region's own normal work, which
@@ -304,9 +380,10 @@ function injectTerrainRenderingExtensions(material) {
         `#include <aomap_fragment>
         {
           float terrainAo = 1.0 - clamp(vTerrainOcclusion * uTerrainAo.x, 0.0, 0.85);
-          reflectedLight.indirectDiffuse *= terrainAo;
-          reflectedLight.indirectSpecular *= terrainAo;
-          reflectedLight.directDiffuse *= mix(1.0, terrainAo, uTerrainAo.y);
+          reflectedLight.indirectDiffuse *= terrainAo * terrainFootprintSky;
+          reflectedLight.indirectSpecular *= terrainAo * terrainFootprintSky;
+          reflectedLight.directDiffuse *= mix(1.0, terrainAo, uTerrainAo.y)
+            * mix(1.0, terrainFootprintSky, 0.45);
         }`,
       )
       .replace(
@@ -317,7 +394,7 @@ function injectTerrainRenderingExtensions(material) {
       );
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry-baked-ao`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry-baked-ao-footprints`;
   material.needsUpdate = true;
   return material;
 }
@@ -466,6 +543,15 @@ export function Terrain({ segmentCap = null }) {
       }
       if (shader.uniforms.uTerrainAo) {
         shader.uniforms.uTerrainAo.value.set(terrainLookTuning.aoStrength, terrainLookTuning.aoDirect);
+      }
+      if (shader.uniforms.uGroundFootprintMap) {
+        const footprint = getGroundFootprintMap(store.currentZoneId);
+        shader.uniforms.uGroundFootprintMap.value = footprint.texture;
+        shader.uniforms.uGroundFootprintBounds.value.copy(footprint.bounds);
+        shader.uniforms.uGroundFootprint.value.set(
+          terrainLookTuning.footprintCanopy,
+          terrainLookTuning.footprintRock,
+        );
       }
       if (shader.uniforms.uTerrainWetShine) {
         // The shore-wet glint band is tuned for surf beaches (~1-2 m of wet

@@ -9,6 +9,7 @@ import { StaticGLB } from '../assets/StaticGLB';
 import { getEcology } from '../../world/ecology';
 import { readRegionEcologyResource } from '../../world/ecology/ecologyResource';
 import { EcologyRenderer } from './ecology/EcologyRenderer';
+import { publishGroundFootprints } from '../../world/groundFootprints';
 import { FacetedBoulderField } from './ecology/FacetedBoulderField';
 import { usesFacetedBoulderSurface } from '../../world/facetedBoulders';
 import { BeachedWhaleboatField } from '../world/BeachedWhaleboat';
@@ -193,6 +194,9 @@ export function WorldDetails({ settings = {}, contentPhase = 6 }) {
   const preparingDestination = transitionDestinationId === currentZoneId;
   if (preparingDestination) readRegionEcologyResource(currentZoneId);
   const ecology = getEcology(currentZoneId);
+  // The terrain shader shades the soil under each plant and rock from this
+  // mask; it reads the zone's entry every frame, so publishing is enough.
+  useEffect(() => publishGroundFootprints(ecology), [ecology]);
   if (!ecology) return null;
   return (
     <group>

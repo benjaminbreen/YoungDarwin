@@ -4041,6 +4041,36 @@ test('Gabriel cave papers are readable, rendered in English, and read rather tha
       // Pages with no language (initials, tallies) have nothing to render.
       if (page.language && page.language !== 'English') {
         assert.equal(page.translation?.length, page.lines.length, `${item.typeId} renders each ${page.language} line into English`);
+test('ground footprints mark the soil under plants and around rocks', () => {
+  const { rasterizeGroundFootprints, collectGroundFootprints } = loadModule('three-game/world/groundFootprints.js');
+  const { getEcology } = loadModule('three-game/world/ecology/index.js');
+  const raster = rasterizeGroundFootprints({
+    canopies: [{ x: 0, z: 0, radius: 2, strength: 1 }],
+    rocks: [{ x: 10, z: 0, radiusX: 1, radiusZ: 1, yaw: 0 }],
+  });
+  const at = (x, z, channel) => {
+    const { bounds, width, height, data } = raster;
+    const column = Math.min(width - 1, Math.floor((x - bounds.minX) / (bounds.maxX - bounds.minX) * width));
+    const row = Math.min(height - 1, Math.floor((z - bounds.minZ) / (bounds.maxZ - bounds.minZ) * height));
+    return data[(row * width + column) * 4 + channel] / 255;
+  };
+  assert.ok(at(0, 0, 0) > 0.9 && at(0, 0, 2) > 0.9, 'full canopy and stem at the trunk');
+  assert.equal(at(0, 3, 0), 0, 'canopy ends just past the crown');
+  assert.equal(at(0, 1.5, 2), 0, 'packed soil stays tight to the stem');
+  assert.ok(at(11.2, 0, 1) > 0.3, 'grit banked against the rock');
+  assert.equal(at(13, 0, 1), 0, 'collar is a skirt, not a moat');
+  assert.equal(at(10, 0, 0), 0, 'rocks leave the canopy channel alone');
+  assert.equal(rasterizeGroundFootprints({ canopies: [], rocks: [] }), null);
+
+  // Post Office Bay feeds real plants and rocks through, at bounded size.
+  const footprints = collectGroundFootprints(getEcology('POST_OFFICE_BAY'), 'POST_OFFICE_BAY');
+  assert.ok(footprints.canopies.length > 40, `canopies ${footprints.canopies.length}`);
+  assert.ok(footprints.rocks.length > 20, `rocks ${footprints.rocks.length}`);
+  assert.ok(footprints.canopies.every(item => item.radius >= 0.25 && item.radius <= 6));
+  const pob = rasterizeGroundFootprints(footprints);
+  assert.ok(pob.width <= 512 && pob.height <= 512, `${pob.width}x${pob.height}`);
+});
+
       }
     }
     const action = resolveFieldAction({ toolId: 'hammer', target: { id: `item:${item.typeId}`, kind: 'item', readable: true, name: item.name } });
