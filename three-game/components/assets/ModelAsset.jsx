@@ -29,6 +29,8 @@ import { createLazyAnimationActions } from './lazyAnimationActions';
 import { useTrackedGLTF } from './gltfCachePolicy';
 import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
 import { shotgunAimState } from '../../shooting/aimState';
+import { applyPlayerFabricDetail } from './playerFabricDetail';
+import { DARWIN5_WATCH_CHAIN } from './darwin5WatchChain';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin5',
@@ -605,30 +607,36 @@ function normalizeImportedMaterials(scene, asset, motion = null, instanceSeed = 
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material) return;
-      material.side = asset.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      material.toneMapped = false;
-      if (asset.forceOpaque) {
-        material.transparent = false;
-        material.opacity = 1;
-        material.alphaMap = null;
-        material.alphaTest = 0;
-        material.depthWrite = true;
-        material.depthTest = true;
-      }
-      if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.02);
-      if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.72);
-      if (material.color) {
-        if (asset.materialTint) {
-          material.color.lerp(
-            new THREE.Color(asset.materialTint),
-            THREE.MathUtils.clamp(asset.materialTintStrength ?? 0.18, 0, 1),
-          );
+      // Once per material: this effect re-runs when `motion`/`instanceSeed`
+      // change identity, and a second pass would undo the player's material
+      // upgrades (which run once) and lerp colours toward cream again.
+      if (!material.userData.importedMaterialNormalized) {
+        material.userData.importedMaterialNormalized = true;
+        material.side = asset.doubleSide ? THREE.DoubleSide : THREE.FrontSide;
+        material.toneMapped = false;
+        if (asset.forceOpaque) {
+          material.transparent = false;
+          material.opacity = 1;
+          material.alphaMap = null;
+          material.alphaTest = 0;
+          material.depthWrite = true;
+          material.depthTest = true;
         }
-        material.color.lerp(new THREE.Color('#f1dfbd'), asset.materialLift || 0.18);
-      }
-      if (material.emissive) {
-        material.emissive.set(asset.materialEmissive || '#241c12');
-        material.emissiveIntensity = asset.materialEmissiveIntensity ?? 0.22;
+        if ('metalness' in material) material.metalness = Math.min(material.metalness || 0, 0.02);
+        if ('roughness' in material) material.roughness = Math.max(material.roughness || 0, 0.72);
+        if (material.color) {
+          if (asset.materialTint) {
+            material.color.lerp(
+              new THREE.Color(asset.materialTint),
+              THREE.MathUtils.clamp(asset.materialTintStrength ?? 0.18, 0, 1),
+            );
+          }
+          material.color.lerp(new THREE.Color('#f1dfbd'), asset.materialLift || 0.18);
+        }
+        if (material.emissive) {
+          material.emissive.set(asset.materialEmissive || '#241c12');
+          material.emissiveIntensity = asset.materialEmissiveIntensity ?? 0.22;
+        }
       }
       applyImportedMaterialColorGrade(material, asset.materialColorGrade, instanceSeed);
       if (motion) applyFoliageMotion(material, object.geometry, motion, { id: asset.id, path: asset.path, label: asset.label });
@@ -782,7 +790,7 @@ export function setPlayerEnvBounce(bounce) {
 
 const ENVIRONMENT_REFRESH_SECONDS = 2.5;
 const ENVIRONMENT_CHANGE_THRESHOLD = 0.06;
-const ENV_CLEAR_TOP = new THREE.Color('#a3bcd8');
+const ENV_CLEAR_TOP = new THREE.Color('#94bcec');
 const ENV_CLEAR_HORIZON = new THREE.Color('#dccfb2');
 const ENV_CLEAR_GROUND = new THREE.Color('#a68a64');
 const ENV_CLOSED_TOP = new THREE.Color('#9aa6ad');
@@ -816,7 +824,7 @@ function environmentPalette(timeOfDay, day) {
   // Keep the environment deliberately secondary to direct lighting. In a
   // storm it darkens with the cloud deck instead of continuing to reflect a
   // clear studio sky from wet rock and wood.
-  const intensity = THREE.MathUtils.lerp(0.1, 0.25, daylight)
+  const intensity = THREE.MathUtils.lerp(0.1, 0.25, daylight) * environmentLookTuning.skyFill
     * (1 - closure * 0.34)
     * (1 - weatherEnv.lightDim * 0.18);
   // Directional terms fade with cloud (an overcast sky has no sun side) and
@@ -896,7 +904,9 @@ export function SceneEnvironment({ intensity = 0.25 }) {
     const target = environmentPalette(store.timeOfDay, store.day);
     scene.environmentIntensity = target.intensity * (intensity / 0.25);
     refreshClock.current += delta;
-    const due = refreshClock.current >= ENVIRONMENT_REFRESH_SECONDS;
+    // Manual tuning bypasses the slow time/weather refresh cadence.
+    const lookChanged = lastPalette.current?.lookRevision !== target.lookRevision;
+    const due = lookChanged || refreshClock.current >= ENVIRONMENT_REFRESH_SECONDS;
     if (!due || (lastPalette.current && paletteDistance(lastPalette.current, target) < ENVIRONMENT_CHANGE_THRESHOLD)) return;
 
     const material = state.sourceScene.userData.skyGradientMaterial;
@@ -967,7 +977,8 @@ function getPlayerDataTexture(url, srgb = false) {
   tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
+  // The player is always close to the camera, often at grazing angles.
+  tex.anisotropy = 8;
   playerDataTextures.set(key, tex);
   return tex;
 }
@@ -987,11 +998,24 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
   const roughMap = cfg.roughnessMapUrl ? getPlayerDataTexture(cfg.roughnessMapUrl) : null;
   const albedoMap = cfg.albedoMapUrl ? getPlayerDataTexture(cfg.albedoMapUrl, true) : null;
   const normalMap = cfg.normalMapUrl ? getPlayerDataTexture(cfg.normalMapUrl) : null;
+  const aoMap = cfg.aoMapUrl ? getPlayerDataTexture(cfg.aoMapUrl) : null;
+  const fabricDisabled = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('noDarwinFabric') === '1';
+  const fabricHeight = cfg.fabricDetail?.heightMapUrl && !fabricDisabled
+    ? getPlayerDataTexture(cfg.fabricDetail.heightMapUrl) : null;
+  // Fraction of the baked AO that also attenuates direct light. three applies
+  // aoMap to indirect light only, and this scene starves fill light, so on its
+  // own the bake barely registers; the bake is contact-range, so this darkens
+  // creases (collar, lapels, pockets, fingers) rather than whole faces.
+  const aoDirect = { value: cfg.aoDirectStrength ?? 0 };
   scene.traverse(object => {
     if (!object.isMesh || object.userData.noPlayerMaterialUpgrade) return;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material || material.userData.playerUpgradeApplied) return;
+      // Only surfaces that already sample the atlas share its UV layout; the
+      // brass buttons have no texture and the eyelid creases no UVs at all.
+      const samplesAtlas = Boolean(material.map) && Boolean(object.geometry?.attributes?.uv);
       // A sidecar roughness map drives roughness absolutely (factor = 1, the map
       // bakes per-material values); otherwise fall back to the scalar override.
       if (roughMap && 'roughnessMap' in material) {
@@ -1000,9 +1024,15 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
       } else if (cfg.roughness !== undefined && 'roughness' in material) {
         material.roughness = cfg.roughness;
       }
-      // Optional enhanced-albedo swap + a gentle derived micro-detail normal map
-      // (the model ships albedo-only; this adds tactile surface relief).
+      // Optional enhanced-albedo swap and atlas normal for older variants.
       if (albedoMap && 'map' in material) material.map = albedoMap;
+      // Baked contact occlusion (scripts/bake-darwin-ao.mjs). three applies
+      // aoMap to indirect light only, so sun-lit faces keep their key light.
+      if (aoMap && samplesAtlas && 'aoMap' in material) {
+        material.aoMap = aoMap;
+        material.aoMapIntensity = cfg.aoMapIntensity ?? 1;
+        material.userData.aoDirectUniform = aoDirect;
+      }
       if (normalMap && 'normalMap' in material) {
         material.normalMap = normalMap;
         const ns = cfg.normalScale ?? 0.5;
@@ -1024,10 +1054,19 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
         shader.uniforms.uRimColor = { value: rimColor };
         shader.uniforms.uRimPower = { value: rimPower };
         shader.uniforms.uRimIntensity = { value: rimIntensity };
+        shader.uniforms.uAoDirect = aoDirect;
         shader.fragmentShader = shader.fragmentShader
           .replace(
             'void main() {',
-            'uniform vec3 uRimColor;\nuniform float uRimPower;\nuniform float uRimIntensity;\nvoid main() {',
+            'uniform vec3 uRimColor;\nuniform float uRimPower;\nuniform float uRimIntensity;\nuniform float uAoDirect;\nvoid main() {',
+          )
+          .replace(
+            '#include <aomap_fragment>',
+            `#include <aomap_fragment>
+  #ifdef USE_AOMAP
+    reflectedLight.directDiffuse *= mix( 1.0, ambientOcclusion, uAoDirect );
+    reflectedLight.directSpecular *= mix( 1.0, ambientOcclusion, uAoDirect );
+  #endif`,
           )
           .replace(
             '#include <emissivemap_fragment>',
@@ -1039,9 +1078,123 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
           );
       };
       material.userData.playerUpgradeApplied = true;
+      if (fabricHeight && samplesAtlas) applyPlayerFabricDetail(material, cfg.fabricDetail, fabricHeight);
       material.needsUpdate = true;
     });
   });
+}
+
+// A sparkle variant of a polished-metal material, for detail too small to model
+// (a watch chain's links). Every ~link-sized cell of the bind-pose surface gets
+// its own facet tilt, so as Darwin moves or the camera turns, single links swing
+// into the sun's mirror direction and the material's direct-specular glint
+// pushes them past the bloom threshold, instead of the smooth underlying cloth
+// surface reflecting one broad, rarely aligned highlight. Facets are fixed in
+// world space, which is what camera orbits see. Shares the source material's
+// hooks (glint, AO, env bounce); one variant per source material.
+const sparkleVariants = new WeakMap();
+function getSparkleVariant(source, config, name) {
+  const cached = sparkleVariants.get(source);
+  if (cached) return cached;
+  const material = source.clone();
+  material.name = name || `${source.name} sparkle`;
+  if (config.roughness !== undefined) material.roughness = config.roughness;
+  const uniforms = {
+    cellSize: { value: config.cellMetres ?? 0.003 },
+    tilt: { value: config.tilt ?? 0.6 },
+  };
+  const sourceHook = source.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (sourceHook) sourceHook(shader, renderer);
+    shader.uniforms.uSparkleCell = uniforms.cellSize;
+    shader.uniforms.uSparkleTilt = uniforms.tilt;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'varying vec3 vSparklePos;\nvoid main() {')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSparklePos = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', `varying vec3 vSparklePos;
+uniform float uSparkleCell;
+uniform float uSparkleTilt;
+vec3 sparkleHash(vec3 p) {
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.xxy + p.yxx) * p.zyx);
+}
+void main() {`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  {
+    vec3 facet = sparkleHash(floor(vSparklePos / uSparkleCell)) * 2.0 - 1.0;
+    facet = (viewMatrix * vec4(facet, 0.0)).xyz;
+    normal = normalize(normal + (facet - normal * dot(facet, normal)) * uSparkleTilt);
+  }`);
+  };
+  material.customProgramCacheKey = () => `${source.customProgramCacheKey?.() ?? ''}|sparkle`;
+  material.userData.sparkleUniforms = uniforms;
+  if (material.userData.envBaseIntensity != null) envBounceMaterials.add(material);
+  material.needsUpdate = true;
+  sparkleVariants.set(source, material);
+  return material;
+}
+
+const MATERIAL_SPLITS = {
+  darwin5WatchChain: DARWIN5_WATCH_CHAIN,
+};
+
+// Move triangles fused into one primitive onto another material in the same
+// scene (e.g. the watch chain painted on the clothing atlas onto the brass
+// buttons' material). Triangles are matched by bind-pose centroid, so the
+// table survives a re-encode that reorders triangles; on any mismatch the mesh
+// is left alone. The index is reordered once per shared geometry (cached GLB
+// clones share it) and each mesh gets a [source, target] material array.
+function applyMaterialSplits(scene, asset) {
+  for (const entry of asset.materialSplits || []) {
+    const splitId = typeof entry === 'string' ? entry : entry.id;
+    const split = MATERIAL_SPLITS[splitId];
+    if (!split) continue;
+    let target = null;
+    scene.traverse(object => {
+      if (target || !object.isMesh || Array.isArray(object.material)) return;
+      if (object.material?.name === split.targetMaterial) target = object.material;
+    });
+    if (!target) continue;
+    if (entry.sparkle) target = getSparkleVariant(target, entry.sparkle, entry.name);
+    scene.traverse(object => {
+      if (!object.isMesh || Array.isArray(object.material) || object.material?.name !== split.sourceMaterial) return;
+      const geometry = object.geometry;
+      if (!geometry.userData.materialSplits?.[splitId]) {
+        const index = geometry.index;
+        const position = geometry.attributes.position;
+        if (!index || index.count / 3 !== split.triangleCount || geometry.groups.length) {
+          console.warn(`[ModelAsset] ${splitId}: ${object.name} does not match the split table; skipped`);
+          return;
+        }
+        const keep = [];
+        const moved = [];
+        const key = [0, 0, 0];
+        for (let t = 0; t < split.triangleCount; t += 1) {
+          const a = index.getX(t * 3);
+          const b = index.getX(t * 3 + 1);
+          const c = index.getX(t * 3 + 2);
+          key[0] = Math.round((position.getX(a) + position.getX(b) + position.getX(c)) / 3 * 10000);
+          key[1] = Math.round((position.getY(a) + position.getY(b) + position.getY(c)) / 3 * 10000);
+          key[2] = Math.round((position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3 * 10000);
+          (split.centroids.has(key.join(',')) ? moved : keep).push(a, b, c);
+        }
+        if (moved.length / 3 < split.centroids.size * 0.9) {
+          console.warn(`[ModelAsset] ${splitId}: matched ${moved.length / 3}/${split.centroids.size} triangles; skipped`);
+          return;
+        }
+        const reordered = new (index.array.constructor)(keep.length + moved.length);
+        reordered.set(keep);
+        reordered.set(moved, keep.length);
+        geometry.setIndex(new THREE.BufferAttribute(reordered, 1));
+        geometry.addGroup(0, keep.length, 0);
+        geometry.addGroup(keep.length, moved.length, 1);
+        geometry.userData.materialSplits = { ...geometry.userData.materialSplits, [splitId]: true };
+      }
+      object.material = [object.material, target];
+    });
+  }
 }
 
 function applyEyeGlossUpgrade(scene) {
@@ -2148,6 +2301,7 @@ function GLBPrimitive({
     applyPlayerMaterialUpgrade(importedScene, asset, gl);
     applyMaterialRegionUpgrade(importedScene, asset);
     applyEyeGlossUpgrade(importedScene);
+    applyMaterialSplits(importedScene, asset);
   }, [asset, importedScene, gl]);
 
   useEffect(() => {

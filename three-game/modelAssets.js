@@ -78,9 +78,34 @@ export const modelAssets = {
     // the light rig deliberately starves fill on clear days, so this keeps the
     // back-lit player from crushing to black without a player-only glow.
     // Sidecar maps generated from the embedded Darwin5 atlas:
-    // roughness adds material separation, normal adds cloth/leather relief, and
-    // albedo keeps detail crisp without rebaking the GLB.
-    materialUpgrade: { rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045, roughness: 0.72, envMapIntensity: 0.3, toneMapped: true, roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1', normalMapUrl: '/assets/models/darwin5-normal.webp?v=1', normalScale: 0.56, albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1' },
+    // roughness adds material separation, and
+    // albedo keeps detail crisp without rebaking the GLB. The AO map is ray-traced
+    // contact occlusion from the bind pose (npm run asset:darwin-ao).
+    materialUpgrade: {
+      rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045,
+      roughness: 0.72, envMapIntensity: 0.3, toneMapped: true,
+      roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1',
+      albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1',
+      aoMapUrl: '/assets/models/darwin5-ao.webp?v=1', aoMapIntensity: 1, aoDirectStrength: 0.5,
+      // Existing ImageGen period wool, projected before skinning at 18 cm per
+      // tile. Rebuild: node scripts/build-darwin-fabric.mjs. No atlas-derived
+      // normal; distant/subpixel detail fades to the original smooth surface.
+      fabricDetail: {
+        heightMapUrl: '/assets/models/darwin5-fabric-height.webp?v=1',
+        materialNames: ['Materialmat'], tileMetres: 0.18, reliefMetres: 0.0006,
+        fadeDistance: [1, 3],
+      },
+    },
+    // Fused-in details that deserve another material: the watch chain is
+    // painted onto the clothing atlas, so it moves onto the brass-button
+    // material at load. Rebuild: node scripts/build-darwin-watch-chain.mjs.
+    // `sparkle` gives the links their own facet tilts (cell = one link) so they
+    // twinkle into the button glint's bloom instead of reading as flat paint.
+    materialSplits: [{
+      id: 'darwin5WatchChain',
+      name: 'Darwin5 watch chain',
+      sparkle: { cellMetres: 0.003, tilt: 0.6, roughness: 0.12 },
+    }],
     materialRegionUpgrade: {
       skin: {
         materialNames: ['Darwin5 skin', 'Darwin5 eyelid skin', 'Darwin5 forehead underlay'],
