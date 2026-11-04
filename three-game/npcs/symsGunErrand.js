@@ -38,6 +38,14 @@ export const SYMS_GUN = Object.freeze({
   stalkSpeed: 1.45,
 });
 
+// The tool Darwin ends up holding when something other than setActiveTool
+// picks it (mode switches, quick-bar edits). The gun is only his while he
+// holds it: otherwise fall back to the first other tool on the bar.
+export function settleDarwinTool(toolId, toolbarOrder, shotgunHolder) {
+  if (toolId !== 'shotgun' || shotgunHolder === GUN_HOLDERS.DARWIN) return toolId;
+  return (toolbarOrder || []).find(id => id !== 'shotgun') || 'hands';
+}
+
 // A live animal that needs the gun, nearest and most nearly in front of Darwin
 // first. `poses` is the zone's specimen runtime pose map.
 export function pickSymsQuarry({

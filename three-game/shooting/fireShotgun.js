@@ -2,6 +2,7 @@ import { emitPropEvent } from '../physics/props/propEvents';
 import { useThreeGameStore } from '../store';
 import { SHOTGUN } from './shotgunConfig';
 import { shotgunAimState } from './aimState';
+import { GUN_HOLDERS } from '../npcs/symsGunErrand';
 
 function nowSeconds() {
   return (globalThis.performance?.now?.() ?? Date.now()) / 1000;
@@ -27,6 +28,9 @@ export function shotgunAmmoStatus() {
 // emits 'shotgun-fired' for the FX/resolver pipeline.
 // Returns 'fired' | 'reloading'.
 export function tryFireShotgun({ position, facing }) {
+  // Covington's gun is not Darwin's to fire until he has handed it over.
+  const holder = useThreeGameStore.getState().shotgunHolder;
+  if (holder && holder !== GUN_HOLDERS.DARWIN) return 'unheld';
   const ammo = shotgunAmmoStatus();
   if (ammo.status !== 'ready' || ammo.shells <= 0) return 'reloading';
   const state = useThreeGameStore.getState();

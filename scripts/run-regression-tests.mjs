@@ -8872,6 +8872,16 @@ test('every repertoire behaviour is well formed and every response has a reactio
   }
 });
 
+test('Darwin only ends up holding the shotgun once Covington has handed it over', () => {
+  const { settleDarwinTool, GUN_HOLDERS } = loadModule('three-game/npcs/symsGunErrand.js');
+  const bar = ['shotgun', 'insect_net', 'pocket_knife', 'hammer', 'hands', 'sketch'];
+  // Returning to Darwin mode falls back to the first slot, which is the gun.
+  assert.equal(settleDarwinTool('shotgun', bar, GUN_HOLDERS.SYMS), 'insect_net');
+  assert.equal(settleDarwinTool('shotgun', bar, GUN_HOLDERS.DARWIN), 'shotgun');
+  assert.equal(settleDarwinTool('hammer', bar, GUN_HOLDERS.SYMS), 'hammer');
+  assert.equal(settleDarwinTool('shotgun', ['shotgun'], GUN_HOLDERS.SYMS), 'hands');
+});
+
 test('held shotgun aim survives the firing lock and releases normally', () => {
   const source = fs.readFileSync('three-game/components/player/playerEquipmentState.js', 'utf8');
   const compiled = ts.transpileModule(source, {

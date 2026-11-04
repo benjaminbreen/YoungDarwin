@@ -83,7 +83,7 @@ import { restFlavor } from './restFlavor';
 import { sameFieldAction } from './fieldActions';
 import { createShotgunActions } from './storeSlices/shotgunSlice';
 import { createSymsGunActions } from './storeSlices/symsGunSlice';
-import { GUN_HOLDERS } from './npcs/symsGunErrand';
+import { GUN_HOLDERS, settleDarwinTool } from './npcs/symsGunErrand';
 import { createWarinessActions } from './storeSlices/warinessSlice';
 import { createObservationActions } from './storeSlices/observationSlice';
 import { sanitizeFieldObservations } from './fauna/behavior/fieldObservations';
@@ -427,7 +427,10 @@ export const useThreeGameStore = create((set, get) => ({
     const toolbarOrder = mode.id === 'darwin'
       ? [...darwinToolbarOrder]
       : getPlayableToolbarIds(mode.id);
-    const nextActiveToolId = toolbarOrder.includes(state.activeToolId) ? state.activeToolId : toolbarOrder[0];
+    const preferredToolId = toolbarOrder.includes(state.activeToolId) ? state.activeToolId : toolbarOrder[0];
+    const nextActiveToolId = mode.id === 'darwin'
+      ? settleDarwinTool(preferredToolId, toolbarOrder, state.shotgunHolder)
+      : preferredToolId;
     const patch = {
       playableModeId: mode.id,
       activeToolId: nextActiveToolId,
@@ -524,12 +527,15 @@ export const useThreeGameStore = create((set, get) => ({
     const toolbarOrder = assignToolbarSlot(state.toolbarOrder, slotIndex, toolId, availableToolIds);
     if (toolbarOrder === state.toolbarOrder) return {};
     const displacedToolId = state.toolbarOrder[slotIndex];
+    // The gun on Darwin's back keeps its slot until it is handed back.
+    if (state.shotgunHolder === GUN_HOLDERS.DARWIN && !toolbarOrder.includes('shotgun')) return {};
+    const nextActiveToolId = state.activeToolId === displacedToolId && !toolbarOrder.includes(displacedToolId)
+      ? toolId
+      : state.activeToolId;
     return {
       toolbarOrder,
       darwinToolbarOrder: [...toolbarOrder],
-      activeToolId: state.activeToolId === displacedToolId && !toolbarOrder.includes(displacedToolId)
-        ? toolId
-        : state.activeToolId,
+      activeToolId: settleDarwinTool(nextActiveToolId, toolbarOrder, state.shotgunHolder),
     };
   }),
   moveToolbarSlot: (from, to) => set(state => {
