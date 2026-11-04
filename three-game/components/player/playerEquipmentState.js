@@ -4,6 +4,7 @@ import { triggerToolUse } from '../../input/touchControls';
 import { tryFireShotgun } from '../../shooting/fireShotgun';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { shotgunAimState } from '../../shooting/aimState';
+import { slingDrawState } from './shotgunSling';
 
 // F held this long shoulders the shotgun; a shorter press is a shot.
 export const SHOTGUN_AIM_HOLD_SECONDS = 0.2;
@@ -102,6 +103,19 @@ export function updatePlayerEquipmentState({
         startAction('fireRifle', Math.max(SHOTGUN.refireDelay, SHOTGUN.fireActionDuration), { lockMovement: true });
       } else {
         startAction('rifleEquip', ACTION_DURATION.rifleEquip, { lockMovement: false });
+      }
+    }
+  }
+
+  // A hip shot asked for with the gun on his back (playerActionTriggers)
+  // goes off once the draw has shouldered it, or lapses.
+  if (slingDrawState.pendingShotUntil > 0) {
+    if (!hasRifle || nowSeconds > slingDrawState.pendingShotUntil) {
+      slingDrawState.pendingShotUntil = 0;
+    } else if (slingDrawState.t >= 1) {
+      slingDrawState.pendingShotUntil = 0;
+      if (tryFireShotgun({ position: playerPosition, facing: playerFacing }) === 'fired') {
+        startAction('fireRifle', Math.max(SHOTGUN.refireDelay, SHOTGUN.fireActionDuration), { lockMovement: true });
       }
     }
   }

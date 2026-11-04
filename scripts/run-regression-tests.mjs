@@ -218,6 +218,7 @@ const {
 const {
   buildEffectiveDprLadder,
   classifyAutomaticGraphicsQuality,
+  rockGeometryQualityForDrawScale,
 } = loadModule('three-game/automaticQuality.js');
 const {
   cachedGpuResource,
@@ -2736,6 +2737,67 @@ test('wildlife calls follow behaviour: alarm and onStart edges, cadence, day, ra
   assert.ok(new Set(started.map(request => request.playbackRate)).size > 1, 'individuals differ in pitch');
 });
 
+test('a wildlife alarm at the flight-distance edge does not chatter', () => {
+  const { ALARM_COOLDOWN_MS, ALARM_REARM_MS, createWildlifeVoiceDirector, stepWildlifeVoices } = loadModule('three-game/audio/wildlifeVoices.js');
+  const director = createWildlifeVoiceDirector();
+  const context = { zoneId: 'Z', listener: { x: 0, y: 0, z: 0 }, hour: 12, resolve: () => ({ slotDuration: 1 }), random: () => 0 };
+  const lion = alarmed => [{ actorId: 'lion', speciesId: 'sealion', position: { x: 6, y: 0, z: 0 }, activity: 'default', alarmed }];
+  stepWildlifeVoices(director, { ...context, animals: lion(false), now: 0 });
+  let alarms = 0;
+  // Panic hovering on the threshold: alarmed and calm in turn, 1.5 s each.
+  for (let now = 100; now < 20000; now += 1500) {
+    const alarmed = Math.floor(now / 1500) % 2 === 0;
+    alarms += stepWildlifeVoices(director, { ...context, animals: lion(alarmed), now })
+      .filter(request => request.kind === 'alarm').length;
+  }
+  assert.equal(alarms, 1, 'one bark bout, not one every flicker');
+  // Settled past the rearm time and out of cooldown, it alarms again.
+  const later = 20000 + Math.max(ALARM_REARM_MS, ALARM_COOLDOWN_MS);
+  stepWildlifeVoices(director, { ...context, animals: lion(false), now: 20000 });
+  const again = stepWildlifeVoices(director, { ...context, animals: lion(true), now: later });
+  assert.equal(again.filter(request => request.kind === 'alarm').length, 1);
+});
+
+test('a wildlife edge call dropped by the mixer is retried, not counted as heard', () => {
+  const { EDGE_RETRY_MS, createWildlifeVoiceDirector, stepWildlifeVoices } = loadModule('three-game/audio/wildlifeVoices.js');
+  const director = createWildlifeVoiceDirector();
+  let accept = false;
+  const played = [];
+  const context = {
+    zoneId: 'Z', listener: { x: 0, y: 0, z: 0 }, hour: 12, resolve: () => ({ slotDuration: 1 }), random: () => 0,
+    play: request => {
+      if (!accept) return false;
+      played.push(request);
+      return true;
+    },
+  };
+  const tortoise = activity => [{ actorId: 't', speciesId: 'floreanagianttortoise', position: { x: 2, y: 0, z: 0 }, activity, alarmed: false }];
+  stepWildlifeVoices(director, { ...context, animals: tortoise('default'), now: 0 });
+  assert.equal(stepWildlifeVoices(director, { ...context, animals: tortoise('withdraw'), now: 100 }).length, 0, 'voice budget full');
+  assert.equal(director.voices.length, 0, 'a dropped call holds no voice');
+  assert.equal(director.lastStartAt, 0, 'a dropped call does not set the start gap');
+  accept = true;
+  const retried = stepWildlifeVoices(director, { ...context, animals: tortoise('withdraw'), now: 400 });
+  assert.equal(retried.length, 1, 'the withdraw hiss is still heard');
+  assert.equal(played.length, 1);
+  assert.equal(stepWildlifeVoices(director, { ...context, animals: tortoise('withdraw'), now: 2000 }).length, 0, 'and only once');
+  // Once the retry window has passed, a dropped edge is let go.
+  accept = false;
+  stepWildlifeVoices(director, { ...context, animals: tortoise('default'), now: 3000 });
+  stepWildlifeVoices(director, { ...context, animals: tortoise('withdraw'), now: 3100 });
+  accept = true;
+  assert.equal(stepWildlifeVoices(director, { ...context, animals: tortoise('withdraw'), now: 3200 + EDGE_RETRY_MS }).length, 0);
+});
+
+test('a fading spatial loop keeps its place until it is silent', () => {
+  const { spatialRouteFor } = loadModule('three-game/audio/audioRuntime.js');
+  assert.equal(spatialRouteFor('world', { hasPoint: true, targetGain: 0.1, currentGain: 0.1 }), 'world');
+  assert.equal(spatialRouteFor('world', { hasPoint: false, targetGain: 0, currentGain: 0.05 }), 'world', 'the brook tail stays where the brook is');
+  assert.equal(spatialRouteFor('world', { hasPoint: false, targetGain: 0, currentGain: 0 }), 'stereo', 'rerouted once silent');
+  assert.equal(spatialRouteFor('world', { hasPoint: false, targetGain: 0.08, currentGain: 0.05 }), 'stereo', 'a sound moved onto Darwin goes stereo');
+  assert.equal(spatialRouteFor(null, { hasPoint: false, targetGain: 0, currentGain: 0 }), 'stereo');
+});
+
 test('the water probe finds spring water and rocky sea edges, not sandy ones', () => {
   const { placeLoopGains, probeWaterAround } = loadModule('three-game/audio/placeSounds.js');
   const listener = { x: 0, y: 1, z: 0 };
@@ -3797,6 +3859,132 @@ test('loose rock support follows the live rigid-body pose', () => {
   assert.equal(footingResponse(FOOTING_WOBBLE_SPEED * 0.5), null, 'a settled stone holds');
   assert.equal(footingResponse(FOOTING_WOBBLE_SPEED), 'wobble');
   assert.equal(footingResponse(FOOTING_FALL_SPEED), 'fall');
+});
+
+test('loose rocks taller than a step block Darwin sideways against their live pose', () => {
+  const {
+    MAX_WALK_STEP_HEIGHT,
+    looseRockVerticalExtent,
+    resolveLooseRockBlock,
+  } = loadModule('three-game/physics/looseRockContact.js');
+  const { looseRockSurfaceY } = loadModule('three-game/world/looseRocks.js');
+  const surface = (state, x, z) => looseRockSurfaceY(state, state.radii, x, z);
+  const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-6, `${message}: ${actual} vs ${expected}`);
+  const feet = { x: 0.9, y: 0, z: 0 };
+
+  // Knee-high stone: he steps onto it, nothing blocks.
+  const low = { id: 'low', x: 0, y: 0.3, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, radii: [0.8, 0.3, 0.4] };
+  near(looseRockVerticalExtent(low, low.radii).top, 0.6, 'level top');
+  assert.ok(0.6 <= MAX_WALK_STEP_HEIGHT);
+  assert.equal(resolveLooseRockBlock(feet, [low], surface), null, 'a step-high rock is walked onto');
+
+  // The same stone rolled onto its long axis stands 1.1 m: now it blocks,
+  // and its shadow is the narrow 0.3 m radius, grown by his 0.42 m body.
+  const s = Math.SQRT1_2;
+  const rolled = { ...low, id: 'rolled', y: 0.8, qz: s, qw: s };
+  near(looseRockVerticalExtent(rolled, rolled.radii).top, 1.6, 'rolled top');
+  const block = resolveLooseRockBlock({ x: 0.5, y: 0, z: 0 }, [rolled], surface);
+  assert.ok(block, 'a rock rolled upright blocks');
+  near(block.x, 0.72, 'pushed out to the rolled rim plus body radius');
+  near(block.z, 0, 'straight out');
+  near(block.normal.x, 1, 'normal points away from the rock');
+  assert.equal(block.state.id, 'rolled');
+  assert.equal(resolveLooseRockBlock({ x: 0.8, y: 0, z: 0 }, [rolled], surface), null, 'clear of the narrow side');
+  assert.ok(resolveLooseRockBlock({ x: 0, y: 0, z: 0.7 }, [rolled], surface), 'still long along z');
+
+  // A big rock on a slope, approached from downhill: its top is far above
+  // his feet, so he stops at the rim instead of walking into it.
+  const slope = { id: 'slope', x: 0, y: 1.2, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, radii: [0.9, 0.7, 0.9] };
+  const uphill = resolveLooseRockBlock({ x: 0, y: 0.1, z: -1.1 }, [slope], surface);
+  assert.ok(uphill);
+  near(Math.hypot(uphill.x, uphill.z), 1.32, 'rim plus body radius');
+  // Standing on its crown (he jumped up) he is never shoved off.
+  assert.equal(resolveLooseRockBlock({ x: 0.2, y: surface(slope, 0.2, 0), z: 0 }, [slope], surface), null);
+  // A rock tumbling well over his head is not a wall.
+  const overhead = { ...slope, id: 'overhead', y: 3 };
+  assert.equal(resolveLooseRockBlock({ x: 0.3, y: 0, z: 0 }, [overhead], surface), null);
+  // Dead centre still resolves to a finite, outward position.
+  const centre = resolveLooseRockBlock({ x: 0, y: 0, z: 0 }, [rolled], surface);
+  assert.ok(Number.isFinite(centre.x) && Number.isFinite(centre.z));
+  assert.ok(Math.hypot(centre.x, centre.z) > 0.7);
+});
+
+test('collision adapter blocks tall loose rocks and caps loose-rock step-up', () => {
+  const { createCollisionAdapter } = loadModule('three-game/physics/collisionAdapter.js');
+  const { MAX_WALK_STEP_HEIGHT } = loadModule('three-game/physics/looseRockContact.js');
+  const { publishLooseRockCollider, removeLooseRockCollider } = loadModule('three-game/physics/props/propRuntime.js');
+  const zoneId = 'C_HIGH';
+  const adapter = createCollisionAdapter(zoneId);
+  const x = 4;
+  const z = 4;
+  const ground = adapter.groundY(new Vector3(x, terrainHeight(x, z, zoneId) + 0.5, z));
+  const pose = (id, lift, radii) => ({
+    id, x, y: ground + lift, z, qx: 0, qy: 0, qz: 0, qw: 1, radii, mass: 300,
+    collider: { shape: 'ball', radius: radii[0] },
+  });
+  try {
+    publishLooseRockCollider(zoneId, 'test-tall', pose('test-tall', 0.6, [0.7, 0.6, 0.7]));
+    const walking = new Vector3(x + 0.95, ground, z);
+    const hit = adapter.resolveCollision(walking, walking.clone());
+    assert.ok(hit, 'walking into a 1.2 m loose rock is blocked');
+    assert.equal(hit.obstacle.kind, 'loose-rock');
+    assert.ok(hit.position.x - x >= 0.7 + 0.42 - 1e-6, `held at the rim, x=${hit.position.x - x}`);
+    adapter.beginFrame();
+    const info = adapter.groundInfo(new Vector3(x, ground, z));
+    assert.notEqual(info.source, 'loose-rock', 'a 1.2 m crown is not a stride up');
+    removeLooseRockCollider(zoneId, 'test-tall');
+
+    publishLooseRockCollider(zoneId, 'test-step', pose('test-step', MAX_WALK_STEP_HEIGHT * 0.4, [0.5, MAX_WALK_STEP_HEIGHT * 0.4, 0.5]));
+    adapter.beginFrame();
+    const step = adapter.groundInfo(new Vector3(x, ground, z));
+    assert.equal(step.source, 'loose-rock', 'a knee-high stone is stepped onto');
+    assert.equal(adapter.resolveCollision(new Vector3(x + 0.6, ground, z), new Vector3(x + 0.6, ground, z))?.obstacle?.kind === 'loose-rock', false);
+  } finally {
+    removeLooseRockCollider(zoneId, 'test-tall');
+    removeLooseRockCollider(zoneId, 'test-step');
+  }
+});
+
+test('a hammer swing picks at most one loose rock, and the loose rocks respect claims', () => {
+  const { selectLooseRockStrikeTarget } = loadModule('three-game/physics/looseRockContact.js');
+  const rock = (id, x, z) => ({ id, x, y: 0, z, radii: [0.4, 0.3, 0.4] });
+  const states = [rock('ahead-far', 0, -2.4), rock('ahead-near', 0.3, -1.2), rock('behind', 0, 1), rock('wide', 1.5, -0.2)];
+  const target = selectLooseRockStrikeTarget(states, { x: 0, z: 0 }, { x: 0, z: -1 });
+  assert.equal(target.key, 'ahead-near');
+  assert.ok(target.direction.z < -0.9, 'driven away from Darwin');
+  assert.equal(selectLooseRockStrikeTarget([rock('behind', 0, 1)], { x: 0, z: 0 }, { x: 0, z: -1 }), null);
+  assert.equal(selectLooseRockStrikeTarget([rock('far', 0, -4)], { x: 0, z: 0 }, { x: 0, z: -1 }), null);
+
+  const looseSource = fs.readFileSync(path.resolve('three-game/physics/props/LooseRocks.jsx'), 'utf8');
+  assert.equal(looseSource.match(/onPropEvent\('tool-swing'/g)?.length, 1, 'one swing listener for every loose rock');
+  assert.match(looseSource, /isSwingClaimed\(strike\.swingId\)/);
+  const sampleSource = fs.readFileSync(path.resolve('three-game/physics/props/RockSampleSystem.jsx'), 'utf8');
+  assert.match(sampleSource, /selectLooseRockStrikeTarget\(/, 'rock sampling leaves a nearer loose rock its swing');
+});
+
+test('loose rock poses survive leaving the zone mid-roll and the tunnel fail-safe', () => {
+  const source = fs.readFileSync(path.resolve('three-game/physics/props/LooseRocks.jsx'), 'utf8');
+  assert.match(source, /useEffect\(\(\) => \(\) => \{[\s\S]*?savePose\(t, q, true\)/, 'unmount saves the live pose');
+  const failSafe = source.slice(source.indexOf('// Fail-safe'));
+  assert.match(failSafe.slice(0, 800), /savePose\(reset/, 'the fail-safe reset is saved');
+  assert.match(source, /useState\(\(\) => Boolean\(savedPose\?\.moving\)\)/, 'a rock saved mid-roll resumes awake');
+});
+
+test('loose rocks get no baked ground collar where they first lay', () => {
+  const { collectGroundFootprints } = loadModule('three-game/world/groundFootprints.js');
+  const { getEcology } = loadModule('three-game/world/ecology/index.js');
+  const { isLooseRock } = loadModule('three-game/world/looseRocks.js');
+  const zoneId = 'POST_OFFICE_BAY';
+  const ecology = getEcology(zoneId);
+  const loose = ecology.rocks.filter(rock => isLooseRock(rock, zoneId));
+  assert.ok(loose.length > 0);
+  const collars = collectGroundFootprints(ecology, zoneId).rocks;
+  for (const rock of loose) {
+    assert.ok(
+      !collars.some(collar => collar.x === rock.x && collar.z === rock.z),
+      `${rock.id} is loose and must not leave a collar behind`,
+    );
+  }
 });
 
 test('Post Office Bay has loose stones to test on, and they leave the static world', () => {
@@ -8832,6 +9020,70 @@ test('no resident animal is placed inside a rock or cactus', () => {
   assert.deepEqual(buried, []);
 });
 
+test('the dense refined rock pool is reserved for the Performance and Cinematic tiers', () => {
+  // Refined crags are detail 12/16 icospheres (~3.4k/5.8k triangles a rock,
+  // drawn again for shadows) against 320/500 faceted: read each tier's real
+  // foliageDrawScale from the presets rather than restating it here.
+  const gameSource = fs.readFileSync(path.resolve('three-game/ThreeDarwinGame.jsx'), 'utf8');
+  const presets = gameSource.slice(gameSource.indexOf('const QUALITY_PRESETS = {'));
+  const drawScale = tier => {
+    const block = presets.slice(presets.indexOf(`\n  ${tier}: {`));
+    const match = block.match(/foliageDrawScale:\s*([\d.]+)/);
+    assert.ok(match, `no foliageDrawScale in the ${tier} preset`);
+    return Number(match[1]);
+  };
+  const expected = { low: 'standard', mobile: 'standard', desktopLight: 'standard', performance: 'refined', cinematic: 'refined' };
+  for (const [tier, quality] of Object.entries(expected)) {
+    assert.equal(rockGeometryQualityForDrawScale(drawScale(tier)), quality, tier);
+  }
+  // Before the game mirrors its tier into the store, stay on the cheap pool.
+  assert.equal(rockGeometryQualityForDrawScale(undefined), 'standard');
+  const rockFieldSource = fs.readFileSync(path.resolve('three-game/components/scene/ecology/RockField.jsx'), 'utf8');
+  assert.match(rockFieldSource, /rockGeometryQualityForDrawScale\(state\.foliageDrawScale\)/);
+  assert.match(rockFieldSource, /const refined = geometryQuality === 'refined' && tierRockQuality === 'refined';/);
+});
+
+test('Southern Reefs owns its wet sand band so the shared shore damp does not darken it twice', () => {
+  const source = fs.readFileSync(path.resolve('three-game/world/regions/southernReefs/material.js'), 'utf8');
+  assert.match(source, /float wet = /, 'Southern Reefs no longer paints its own wet band; drop ownsShoreDamp too');
+  assert.match(source, /material\.userData\.ownsShoreDamp = true;/);
+});
+
+test('the whalers\' rest hearth stones and carapaces are walk-over bodies from the shared obstacle source', () => {
+  const {
+    getRuntimeObstacles,
+    getObstacleSupport,
+    isWalkOverTraversalObstacle,
+    postOfficeWhalersRestLayout,
+  } = loadModule('three-game/world/obstacles.js');
+  const layout = postOfficeWhalersRestLayout();
+  const obstacles = getRuntimeObstacles('POST_OFFICE_BAY');
+  const rest = obstacles.filter(obstacle => obstacle.id.startsWith('post-office-whalers-rest-'));
+  const shells = rest.filter(obstacle => obstacle.kind === 'carapace');
+  const stones = rest.filter(obstacle => obstacle.kind === 'stone');
+  assert.equal(shells.length, layout.shells.length, 'every carapace needs a body');
+  assert.ok(stones.length >= layout.stones.length - 2, 'the hearth ring lost its stones');
+  for (const obstacle of rest) {
+    // Under the support-stone line: walk-over support, never a Rapier wall.
+    assert.ok(isWalkOverTraversalObstacle(obstacle), `${obstacle.id} is not walk-over`);
+    assert.ok(obstacle.colliderTop < 0.75, `${obstacle.id} is tall enough to need a blocking body`);
+    const ground = terrainHeight(obstacle.x, obstacle.z, 'POST_OFFICE_BAY');
+    const support = getObstacleSupport(obstacle.x, obstacle.z, ground, 0.3, obstacles);
+    assert.ok(support && support.height > ground + 0.15, `Darwin wades through ${obstacle.id}`);
+  }
+  for (const shell of layout.shells) {
+    assert.ok(shells.some(obstacle => Math.hypot(obstacle.x - shell.x, obstacle.z - shell.z) < 1e-6));
+  }
+  const componentSource = fs.readFileSync(path.resolve('three-game/components/scene/PostOfficeWhalersRest.jsx'), 'utf8');
+  assert.match(componentSource, /postOfficeWhalersRestLayout\(\)/);
+  assert.doesNotMatch(componentSource, /REST_SHELLS|REST_HEARTH_STONES/, 'the visual has its own copy of the layout again');
+  // It has no Rapier bodies, so it must not vanish with the physics props.
+  const zoneSource = fs.readFileSync(path.resolve('three-game/zones/ActiveZoneContent.jsx'), 'utf8');
+  const line = zoneSource.split('\n').find(text => text.includes('<PostOfficeWhalersRest />'));
+  assert.ok(line);
+  assert.doesNotMatch(line, /physicsProps/);
+});
+
 test('a flying insect goes over a boulder in its patch, never through it', () => {
   const { stepPollinatorFlight, clearPollinatorFlight } = loadModule('three-game/wildlife/pollinators/pollinatorFlight.js');
   // A 1.5 m block, 1.2 m across, in the middle of the habitat.
@@ -8882,6 +9134,61 @@ test('Darwin only ends up holding the shotgun once Covington has handed it over'
   assert.equal(settleDarwinTool('shotgun', ['shotgun'], GUN_HOLDERS.SYMS), 'hands');
 });
 
+test('a hip shot with the gun slung waits for the draw, then fires once', () => {
+  const source = fs.readFileSync('three-game/components/player/playerEquipmentState.js', 'utf8');
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  let now = 1000;
+  let shots = 0;
+  const sling = { t: 0, pendingShotUntil: 0 };
+  const dependencies = {
+    './playerConfig': { ACTION_DURATION: {} },
+    './playerInputState': { pulseEquippedToolOnUse() {} },
+    '../../input/touchControls': { triggerToolUse() {} },
+    '../../shooting/fireShotgun': { tryFireShotgun() { shots += 1; return 'fired'; } },
+    '../../shooting/shotgunConfig': { SHOTGUN: { refireDelay: 0.5, fireActionDuration: 0.55 } },
+    '../../shooting/aimState': { shotgunAimState: { holdIntent: false } },
+    './shotgunSling': { slingDrawState: sling },
+  };
+  const exports = {};
+  new Function('exports', 'require', 'performance', compiled)(
+    exports, id => { assert.ok(dependencies[id], id); return dependencies[id]; },
+    { now: () => now },
+  );
+  const stateRef = { current: { aimKeyHeldSince: null, action: 'rifleEquip' } };
+  const actions = [];
+  const context = {
+    keys: {}, stateRef,
+    lastButtons: { current: {} }, lastToolId: { current: 'shotgun' },
+    lastFirePulse: { current: 0 }, firePulseRef: { current: 0 },
+    aimActiveRef: { current: false }, activeToolId: 'shotgun',
+    riflePressed: false, preInputMovementLocked: false,
+    startAction(clip) { stateRef.current.action = clip; actions.push(clip); },
+  };
+  const update = () => exports.updatePlayerEquipmentState(context);
+  sling.pendingShotUntil = now / 1000 + 1.2;
+  update();
+  assert.equal(shots, 0, 'no blast while the gun is still on his back');
+  sling.t = 1;
+  now += 600;
+  update();
+  assert.equal(shots, 1);
+  assert.deepEqual(actions, ['fireRifle']);
+  assert.equal(sling.pendingShotUntil, 0);
+  update();
+  assert.equal(shots, 1, 'one shot per request');
+
+  // A draw that never completes lets the request lapse.
+  sling.t = 0;
+  sling.pendingShotUntil = now / 1000 + 1.2;
+  now += 1500;
+  update();
+  sling.t = 1;
+  update();
+  assert.equal(shots, 1);
+});
+
 test('held shotgun aim survives the firing lock and releases normally', () => {
   const source = fs.readFileSync('three-game/components/player/playerEquipmentState.js', 'utf8');
   const compiled = ts.transpileModule(source, {
@@ -8898,6 +9205,7 @@ test('held shotgun aim survives the firing lock and releases normally', () => {
       '../../shooting/fireShotgun': { tryFireShotgun() { shots += 1; return 'fired'; } },
       '../../shooting/shotgunConfig': { SHOTGUN: { refireDelay: 0.5, fireActionDuration: 0.55 } },
       '../../shooting/aimState': { shotgunAimState: aim },
+      './shotgunSling': { slingDrawState: { t: 1, pendingShotUntil: 0 } },
     };
     const exports = {};
     new Function('exports', 'require', 'performance', compiled)(

@@ -9,6 +9,7 @@ import { inferContactResponseKind } from '../world/surfaceContactResponse';
 import { isRockBody } from './contactTargets';
 import { getSpecimenRuntimePoses } from '../world/specimenRuntime';
 import { getSocialEntry } from '../fauna/behavior/socialField';
+import { worldTime } from '../world/worldTime';
 import { getZone } from '../world/floreanaZones';
 import { terrainBiomeAt, terrainHeight } from '../world/terrain';
 import { WATER_LEVEL } from '../world/water';
@@ -60,6 +61,7 @@ import { jumpSoundShape } from './jumpSounds';
 import { pickPlaceSound, placeAmbienceGains, placeLoopGains, probeWaterAround, soundPlacesForZone } from './placeSounds';
 import {
   activatePostOfficeBayAudio,
+  audioSpriteReady,
   playAudioSprite,
   preloadSoundscapeToolEffects,
   setAcousticSpace,
@@ -517,7 +519,9 @@ export function IslandSoundscape({ active, enabled }) {
         const actorId = specimen.instanceId || specimen.id;
         const position = poses.get(actorId);
         if (!position || nowSeconds - Number(position.updatedAt || 0) > 3) continue;
-        const social = getSocialEntry(zoneId, actorId);
+        // Brains publish on world time; an entry they stopped refreshing is
+        // stale, not a standing order to keep singing the last activity.
+        const social = getSocialEntry(zoneId, actorId, worldTime.elapsed);
         animals.push({
           actorId,
           speciesId: specimen.id,
@@ -543,15 +547,16 @@ export function IslandSoundscape({ active, enabled }) {
             ...worldSpatial(request.position),
             filterHz: request.filterHz,
           });
-          if (request.delayMs <= 0) {
-            start();
-            return;
-          }
+          // False tells the director the call was dropped (voice budget
+          // full, bank not decoded) so it is not counted as heard.
+          if (request.delayMs <= 0) return start();
+          if (!audioSpriteReady(request.sprite, { family: request.sound })) return false;
           const id = window.setTimeout(() => {
             pending.delete(id);
             start();
           }, request.delayMs);
           pending.add(id);
+          return true;
         },
       });
       const colony = seabirdColonyBed(animals, listener, {

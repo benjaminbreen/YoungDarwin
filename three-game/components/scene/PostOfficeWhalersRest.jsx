@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { terrainHeight } from '../../world/terrain';
-import { POST_OFFICE_BAY_WHALERS_REST } from '../../world/regions/postOfficeBay/terrain';
+import { postOfficeWhalersRestLayout } from '../../world/obstacles';
 import { catalogToInspectable } from '../../world/inspectables';
 import { useThreeGameStore } from '../../store';
 
@@ -19,15 +19,9 @@ function inspect(catalogId, sourceId) {
 // of animals that were cooked here rather than carried. By 1835 the Floreana
 // tortoise had been hunted nearly out of the lowlands; the shells are older
 // than the scrub that has grown up round them.
-const REST_SHELLS = [
-  // [dx, dz, size, yaw, roll, bleach]
-  [1.7, 0.6, 0.42, 0.4, 0.12, 0.92],
-  [2.4, -1.1, 0.37, 2.1, -0.22, 1.0],
-  [-1.6, 1.5, 0.45, 4.2, 0.3, 0.85],
-  [0.6, 2.4, 0.33, 1.2, 2.9, 0.96],
-  [-2.3, -0.9, 0.39, 5.4, -0.08, 0.9],
-];
-const REST_HEARTH_STONES = 9;
+//
+// The layout (hearth, stones, shells) lives in world/obstacles.js beside the
+// walk-over bodies built from it, so what Darwin stands on is what is drawn.
 
 // Sun-bleached scutes: pale plates with grey-brown growth rings and seams,
 // drawn once into a small canvas (the same hexagon layout as the whalers'
@@ -73,7 +67,7 @@ function bleachedScuteTexture() {
 }
 
 export function PostOfficeWhalersRest() {
-  const rest = POST_OFFICE_BAY_WHALERS_REST;
+  const layout = postOfficeWhalersRestLayout();
   const scutes = useMemo(() => bleachedScuteTexture(), []);
   useEffect(() => () => scutes?.dispose(), [scutes]);
   const materials = useMemo(() => ({
@@ -85,15 +79,12 @@ export function PostOfficeWhalersRest() {
     charred: new THREE.MeshStandardMaterial({ color: '#2e2620', roughness: 0.95, flatShading: true }),
   }), [scutes]);
   useEffect(() => () => Object.values(materials).forEach(material => material.dispose()), [materials]);
-  const hearth = { x: rest.x - 0.4, z: rest.z - 0.2 };
+  const { hearth } = layout;
   const hearthY = terrainHeight(hearth.x, hearth.z);
-  const stones = useMemo(() => Array.from({ length: REST_HEARTH_STONES }, (_, i) => {
-    const angle = (i / REST_HEARTH_STONES) * Math.PI * 2 + Math.sin(i * 3.1) * 0.18;
-    const reach = 0.62 + Math.sin(i * 1.7) * 0.06;
-    const x = hearth.x + Math.cos(angle) * reach;
-    const z = hearth.z + Math.sin(angle) * reach;
-    return { x, z, y: terrainHeight(x, z), s: 0.13 + ((i * 37) % 7) * 0.012, yaw: i * 1.3 };
-  }), [hearth.x, hearth.z]);
+  const stones = useMemo(
+    () => layout.stones.map(stone => ({ ...stone, y: terrainHeight(stone.x, stone.z) })),
+    [layout],
+  );
   return (
     <group>
       <group onClick={inspect('charred_tortoise_shell', 'post-office-whalers-rest-hearth')}>
@@ -111,10 +102,7 @@ export function PostOfficeWhalersRest() {
         </mesh>
       </group>
       <group onClick={inspect('tortoise_carapace', 'post-office-whalers-rest-carapaces')}>
-        {REST_SHELLS.map(([dx, dz, size, yaw, roll, bleach], i) => {
-          const x = hearth.x + dx;
-          const z = hearth.z + dz;
-          const upturned = Math.abs(roll) > 1.5;
+        {layout.shells.map(({ x, z, size, yaw, roll, bleach, upturned }, i) => {
           return (
             <group key={i} position={[x, terrainHeight(x, z) + (upturned ? size * 0.68 : 0.01), z]} rotation={[upturned ? 0 : roll * 0.4, yaw, roll]}>
               <mesh material={bleach > 0.9 ? materials.shell : materials.shellAged} scale={[size * 1.15, size * 0.66, size]} castShadow receiveShadow>

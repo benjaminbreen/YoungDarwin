@@ -13,6 +13,12 @@ import * as THREE from 'three';
 // an hour).
 export const SHOTGUN_MODEL_PATH = '/assets/models/tools/shotgun.glb?v=2';
 
+// Shared with the controller: how far the gun is off Darwin's back (1 =
+// shouldered) and a hip shot waiting for the draw to finish (seconds,
+// performance.now() clock). PlayerModel writes `t`; with no slung rig mounted
+// it stays 1 and a shot fires at once.
+export const slingDrawState = { t: 1, pendingShotUntil: 0 };
+
 export const SLING = {
   // Swivels in gun space: under the fore-end tip and under the butt.
   frontSwivel: [0, 0.0, -0.4],

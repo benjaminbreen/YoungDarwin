@@ -4,6 +4,7 @@ import React, { useMemo, useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { useThreeGameStore } from '../../../store';
+import { rockGeometryQualityForDrawScale } from '../../../automaticQuality';
 import { catalogToInspectable } from '../../../world/inspectables';
 import { rockRenderTransform, rockVisualBounds } from '../../../world/proceduralRocks';
 import { createTriplanarRockMaterial } from '../../../world/regions/materials/triplanarRockMaterial';
@@ -29,8 +30,9 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 //    had no vertex colours, so WebGL multiplied the albedo by black); this
 //    keeps it on purpose, with a little albedo so it never goes flat black.
 //  - muted: weathered stone. A dense crag with creased smooth normals that
-//    reads soft and matte. Needs geometryQuality 'refined' (the default);
-//    otherwise it falls back to the faceted crag.
+//    reads soft and matte. Needs geometryQuality 'refined' (the default)
+//    on a Performance/Cinematic tier; otherwise it falls back to the faceted
+//    crag.
 const GLITTERING_BASALT = {
   textureKey: 'darkBasaltGravel',
   normalScale: 0.42,
@@ -372,8 +374,11 @@ function RockContactShadows({ rocks }) {
 
 // excludeIds: rocks drawn elsewhere (loose rocks live as Rapier bodies). They
 // are skipped like broken rocks so every other rock keeps its variant index.
+// geometryQuality is the region's ceiling; the graphics tier decides whether
+// the dense refined pool is affordable (automaticQuality.js).
 export function RockField({ rocks, excludeIds = null, dust = null, sourceId = 'ecology-rocks', sourceLabel = 'Ecology rocks', sourceKind = 'ecology-rocks', geometryQuality = 'refined' }) {
-  const refined = geometryQuality === 'refined';
+  const tierRockQuality = useThreeGameStore(state => rockGeometryQualityForDrawScale(state.foliageDrawScale));
+  const refined = geometryQuality === 'refined' && tierRockQuality === 'refined';
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const rockDamage = useThreeGameStore(state => state.rockDamage);
   const { brokenIds, damagedById } = useMemo(() => {

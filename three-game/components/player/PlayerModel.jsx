@@ -31,6 +31,7 @@ import {
   findSlingBones,
   createStrapState,
   poseSlingStrap,
+  slingDrawState,
   slungTransform,
   updateSlingSwing,
 } from './shotgunSling';
@@ -1101,6 +1102,7 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
         strap.material.dispose();
       }
       slingRef.current = null;
+      slingDrawState.t = 1;
       groupRef.current = null;
       visualRef.current = null;
     };
@@ -1160,10 +1162,15 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
         if (group.visible) group.visible = false;
         if (sling.strap.visible) sling.strap.visible = false;
         sling.t = 0;
+        slingDrawState.t = 0;
         return;
       }
       if (!sling.strap.visible) sling.strap.visible = true;
-      const shouldered = wantHeld && Boolean(motionRef?.current?.aiming || motionRef?.current?.action === 'fireRifle');
+      const shouldered = wantHeld && Boolean(
+        motionRef?.current?.aiming
+        || motionRef?.current?.action === 'fireRifle'
+        || slingDrawState.pendingShotUntil > 0,
+      );
       poseSlung(frameState, delta, shouldered);
       return;
     }
@@ -1184,6 +1191,7 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
     if (!group.visible) group.visible = true;
     const dt = Math.min(Math.max(delta || 0, 0), 0.1);
     sling.t = THREE.MathUtils.clamp(sling.t + (wantHeld ? 1 : -1) * dt / SLING.drawSeconds, 0, 1);
+    slingDrawState.t = sling.t;
     const { gun, reach } = drawCurve(sling.t);
     const frame = bodyFrame(sling.bones);
     sling.bones.rightShoulder.getWorldPosition(sling.offset);

@@ -18,6 +18,14 @@
 const SPEED_OF_SOUND = 343;
 export const MAX_WILDLIFE_VOICES = 4;
 const MIN_START_GAP_MS = 140;
+// An animal standing at Darwin's flight distance flickers in and out of
+// alarm. A fresh alarm call needs it to have settled for a while first, and
+// no individual repeats its alarm sooner than the cooldown.
+export const ALARM_REARM_MS = 5000;
+export const ALARM_COOLDOWN_MS = 12000;
+// A one-off call (an alarm, a withdraw hiss) that could not start because the
+// budget was full or the bank not decoded yet waits this long for a voice.
+export const EDGE_RETRY_MS = 1500;
 
 // Time windows a species is vocal in, by hour.
 // The same daylight and night the bird beds use (environmentMix.js).
@@ -230,25 +238,42 @@ export function lineOccluded(from, to, heightAt) {
   return false;
 }
 
+// Record the animal's alarm state; true when it has just turned alarmed
+// after being settled long enough, and outside its own alarm cooldown.
+function noteAlarm(state, alarmed, now) {
+  const was = state.alarmed;
+  state.alarmed = alarmed;
+  if (!alarmed) {
+    if (was) state.calmSince = now;
+    return false;
+  }
+  if (was) return false;
+  return now - (state.calmSince ?? -Infinity) >= ALARM_REARM_MS
+    && now >= (state.alarmQuietUntil ?? -Infinity);
+}
+
 // What the animal should say now, if anything: alarm and onStart edges win,
-// then a running activity's cadence, then a calm call.
+// then a running activity's cadence, then a calm call. Edge calls carry
+// `edge: true` so the director can hold them briefly if no voice is free.
 export function chooseCall(profile, state, { activity, alarmed, now, hour, random = Math.random, rain = 0 }) {
   if (!profile) return null;
   const vocalNow = inWindow(hour, profile.hours);
   const activitySpec = profile.activities?.[activity] || null;
   const activityChanged = activity !== state.activity;
-  const alarmRose = alarmed && !state.alarmed;
+  const alarmRose = noteAlarm(state, alarmed, now);
   state.activity = activity;
-  state.alarmed = alarmed;
 
-  if (alarmRose && profile.alarm && vocalNow && random() < (profile.alarm.chance ?? 1)) {
-    return { kind: 'alarm', ...profile.alarm };
+  if (alarmRose && profile.alarm && vocalNow) {
+    if (random() < (profile.alarm.chance ?? 1)) return { kind: 'alarm', edge: true, ...profile.alarm };
+    // A skipped roll is still this alarm's turn; the next flicker does not
+    // get another try.
+    state.alarmQuietUntil = now + ALARM_COOLDOWN_MS;
   }
   if (activitySpec) {
     if (activityChanged) {
       state.activityNextAt = now + (activitySpec.every ? randomBetween(activitySpec.every, random) * 500 : 0);
       if (activitySpec.onStart && random() < (activitySpec.chance ?? 1) && (vocalNow || activitySpec.sound)) {
-        return { kind: 'activity', ...activitySpec };
+        return { kind: 'activity', edge: true, ...activitySpec };
       }
     } else if (activitySpec.every && now >= state.activityNextAt) {
       state.activityNextAt = now + randomBetween(activitySpec.every, random) * 1000;
@@ -322,6 +347,9 @@ export function stepWildlifeVoices(director, context) {
       state = {
         activity: animal.activity,
         alarmed: animal.alarmed,
+        calmSince: -Infinity,
+        alarmQuietUntil: -Infinity,
+        pending: null,
         calmNextAt: now + (profile.calm ? randomBetween(profile.calm, random) * 1000 * 0.6 : 0),
         activityNextAt: now + 2500,
         seenAt: now,
@@ -332,15 +360,27 @@ export function stepWildlifeVoices(director, context) {
     state.seenAt = now;
     if (distance > profile.far * 1.2) {
       state.activity = animal.activity;
-      state.alarmed = animal.alarmed;
+      noteAlarm(state, animal.alarmed, now);
+      state.pending = null;
       continue;
     }
-    const call = chooseCall(profile, state, {
+    let call = chooseCall(profile, state, {
       activity: animal.activity, alarmed: animal.alarmed, now, hour, rain, random,
     });
+    if (call?.edge) {
+      state.pending = { call, until: now + EDGE_RETRY_MS, activity: animal.activity };
+    } else if (state.pending) {
+      // A held edge call is retried while it still fits what the animal is
+      // doing: an alarm while it is alarmed, a start call while that
+      // activity lasts.
+      const { pending } = state;
+      const stillFits = pending.call.kind === 'alarm' ? animal.alarmed : pending.activity === animal.activity;
+      if (now > pending.until || !stillFits) state.pending = null;
+      else call = pending.call;
+    }
     if (!call) continue;
     if (profile.underwaterOnly && !underwater) continue;
-    heard.push({ animal, profile, call, distance });
+    heard.push({ animal, profile, call, distance, state });
   }
   for (const [actorId, state] of director.actors) {
     if (now - state.seenAt > 15000) director.actors.delete(actorId);
@@ -349,7 +389,7 @@ export function stepWildlifeVoices(director, context) {
   // Alarms first, then nearest first.
   heard.sort((a, b) => (b.call.kind === 'alarm') - (a.call.kind === 'alarm') || a.distance - b.distance);
   const started = [];
-  for (const { animal, profile, call, distance } of heard) {
+  for (const { animal, profile, call, distance, state } of heard) {
     if (director.voices.length >= MAX_WILDLIFE_VOICES) break;
     if (director.voices.some(voice => voice.actorId === animal.actorId)) continue;
     if (call.kind !== 'alarm' && now - director.lastStartAt < MIN_START_GAP_MS) continue;
@@ -380,7 +420,11 @@ export function stepWildlifeVoices(director, context) {
       delayMs: shaped.delayMs,
       playbackRate,
     };
-    play?.(request);
+    // play returns false when the voice was dropped; only a call that
+    // actually started counts as heard. A held edge call tries again.
+    if (play && play(request) === false) continue;
+    if (call.edge) state.pending = null;
+    if (call.kind === 'alarm') state.alarmQuietUntil = now + ALARM_COOLDOWN_MS;
     director.lastStartAt = now;
     director.voices.push({
       actorId: animal.actorId,

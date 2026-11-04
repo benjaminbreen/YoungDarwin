@@ -61,6 +61,7 @@ import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
 import { findLooseRockPushTarget } from './playerLooseRocks';
+import { MAX_WALK_STEP_HEIGHT } from '../../physics/looseRockContact';
 import { CONTEXT_PROMPT_PRIORITY } from '../../ui/contextPromptService';
 import { registerPlayerHarnessBridge } from '../../e2e/playerHarnessBridge';
 import {
@@ -107,8 +108,9 @@ const PUSH_ANIMATION_COOLDOWN = 0.34;
 // Stride acceleration passed into a loose rock is capped so a frame hitch
 // can't kick it.
 const LOOSE_FOOTING_MAX_ACCEL = 12;
-// Tallest step Darwin climbs just by walking into it (metres).
-const AUTO_TRAVERSE_MAX_HEIGHT = 0.75;
+// Tallest step Darwin climbs just by walking into it (metres). Loose-rock
+// support and blocking (physics/looseRockContact.js) use the same rise.
+const AUTO_TRAVERSE_MAX_HEIGHT = MAX_WALK_STEP_HEIGHT;
 const PUSH_ANIMATION_MIN_SPEED = 0.85;
 const PUSH_ANIMATION_MIN_FORWARD = 0.42;
 const PUSH_FEEDBACK_DURATION = {

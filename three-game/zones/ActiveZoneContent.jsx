@@ -173,7 +173,10 @@ export function ActiveZoneContent({
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'W_LAVA' && <WarmGate><WesternLowlandsCampRuins /></WarmGate>}
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalInmateCabin /></WarmGate>}
       {structuresReady && settings.physicsProps !== false && currentZoneId === 'PENAL_COLONY' && <WarmGate><PenalWorkGangCabin /></WarmGate>}
-      {structuresReady && settings.physicsProps !== false && currentZoneId === 'POST_OFFICE_BAY' && <WarmGate><PostOfficeWhalersRest /></WarmGate>}
+      {/* No Rapier bodies, so not a physicsProps family: its walk-over
+          support comes from world/obstacles.js whatever the toggles, and the
+          visual must stay with it. */}
+      {structuresReady && currentZoneId === 'POST_OFFICE_BAY' && <WarmGate><PostOfficeWhalersRest /></WarmGate>}
       {waterSplashesReady && settings.waterSplashes !== false && <WaterSplashes />}
       {interactablesReady && <AnimalDroppings />}
       {beagleReady && settings.beagle !== false && (

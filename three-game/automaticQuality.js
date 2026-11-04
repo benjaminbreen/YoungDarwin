@@ -90,3 +90,19 @@ export function probeWebGLRendererName(documentRef = globalThis.document) {
     context?.getExtension?.('WEBGL_lose_context')?.loseContext?.();
   }
 }
+
+// Procedural rock geometry follows the tier's detail reach (foliageDrawScale,
+// mirrored into the store beside cheapMaterials). The refined chiseled crag is
+// IcosahedronGeometry detail 12/16 (~3.4k/5.8k triangles per rock, drawn again
+// in the shadow pass) against 320/500 for the faceted crag, so only the
+// Performance and Cinematic tiers (0.85 and 1) pay for it. Low, Mobile and
+// Desktop Light (0.6/0.75) sit on the same <= 0.76 "lightweight" line the HUD
+// uses and keep the faceted crag. Until the game has mirrored a value, stay
+// cheap: a high tier rebuilds once, a phone never builds the dense pool.
+export const REFINED_ROCK_MIN_DRAW_SCALE = 0.76;
+
+export function rockGeometryQualityForDrawScale(foliageDrawScale) {
+  const scale = Number(foliageDrawScale);
+  if (foliageDrawScale == null || !Number.isFinite(scale)) return 'standard';
+  return scale > REFINED_ROCK_MIN_DRAW_SCALE ? 'refined' : 'standard';
+}

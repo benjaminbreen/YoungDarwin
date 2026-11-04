@@ -35,8 +35,10 @@ import {
 } from '../../components/scene/ecology/RockField';
 import { useDeferredDisposal } from '../../components/assets/useDeferredDisposal';
 import { LOOSE_ROCK_GROUPS, ROCK_CATCHER_GROUPS } from '../collisionGroups';
-import { claimSwing, emitPropEvent, onPropEvent } from './propEvents';
-import { publishLooseRockCollider, removeLooseRockCollider } from './propRuntime';
+import { rockGeometryQualityForDrawScale } from '../../automaticQuality';
+import { selectLooseRockStrikeTarget } from '../looseRockContact';
+import { claimSwing, emitPropEvent, isSwingClaimed, onPropEvent } from './propEvents';
+import { getLooseRockStates, publishLooseRockCollider, removeLooseRockCollider } from './propRuntime';
 
 // The same seeds and faceted detail RockField uses, so a loose rock is one of
 // the island's familiar crag silhouettes: 0-2 standard, 3-4 hero.
@@ -53,9 +55,11 @@ const PUSH_FEEDBACK_COOLDOWN = 0.18;
 // Rapier resolves small overlaps gently; deeper ones pop the rock upward the
 // moment it turns dynamic, so spawn placement lifts it to within this.
 const MAX_SPAWN_EMBED = 0.03;
-const HAMMER_RANGE = 2.6;
-const HAMMER_FACING_DOT = 0.3;
 const HAMMER_IMPULSE_PER_KG = 0.9;
+// Loose rocks resolve a swing just after the shared impact moment, so a
+// boulder or prop that RockSampleSystem / PhysicsProp claimed keeps it, and
+// just before HammerStrikeResolver's generic fallback (CLAIM_GRACE 0.08).
+const HAMMER_CLAIM_GRACE = 0.04;
 const CATCHER_RANGE = 30;
 // Impact rules. Kinetic energy is from the closing speed only, so a rock
 // Darwin is shoving away from himself can never hurt him.
@@ -134,13 +138,14 @@ function closingSpeed(velocity, from, to) {
   return { distance, speed: velocity.x * nx + velocity.z * nz, nx, nz };
 }
 
-function LooseRock({ body, hull, geometry, material }) {
+function LooseRock({ body, hull, geometry, material, strikeHandlers }) {
   const bodyRef = useRef(null);
   const zoneId = body.zoneId;
   const savedPose = useThreeGameStore(state => state.looseRockPoses?.[body.key] || null);
   // Fixed until something moves it: a hillside rock must not roll away the
   // moment the zone loads. Settled rocks return to fixed where they stopped.
-  const [awake, setAwake] = useState(false);
+  // One saved mid-roll (Darwin left the zone) picks up its fall again.
+  const [awake, setAwake] = useState(() => Boolean(savedPose?.moving));
   const spawn = useMemo(() => {
     if (savedPose) {
       const rotation = new THREE.Euler().setFromQuaternion(
@@ -164,6 +169,11 @@ function LooseRock({ body, hull, geometry, material }) {
     footing: null,
     footingWobbleAt: -10,
     footingFallAt: -10,
+    // Last live pose read from the rigid body, and whether it has moved
+    // since the store last saw it. Unmount saves from this copy: the Rapier
+    // body may already be freed by the time React runs the cleanup.
+    livePose: null,
+    poseDirty: false,
   });
   const userData = useMemo(() => ({ id: body.key, kind: 'physics-loose-rock' }), [body.key]);
   const actorRadius = body.footprint * 0.85;
@@ -254,22 +264,42 @@ function LooseRock({ body, hull, geometry, material }) {
     wake();
   }));
 
-  useEffect(() => onPropEvent('tool-swing', event => {
-    if (event.tool !== 'hammer') return;
-    state.current.pendingStrikes.push({ ...event, at: state.current.clock + (event.impactDelay ?? 0.55) });
-  }), []);
+  // A hammer blow LooseRocks picked this rock for (one rock per swing).
+  useEffect(() => {
+    strikeHandlers.set(body.key, strike => {
+      state.current.pendingStrikes.push(strike);
+      wake();
+    });
+    return () => strikeHandlers.delete(body.key);
+  });
+
+  const savePose = (t, q, moving = false) => {
+    useThreeGameStore.getState().settleLooseRock?.(body.key, {
+      x: t.x, y: t.y, z: t.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w, moving,
+    });
+    state.current.poseDirty = false;
+  };
 
   const settle = () => {
     const rigid = bodyRef.current;
     if (!rigid) return;
     const t = rigid.translation();
     const q = rigid.rotation();
-    useThreeGameStore.getState().settleLooseRock?.(body.key, {
-      x: t.x, y: t.y, z: t.z, qx: q.x, qy: q.y, qz: q.z, qw: q.w,
-    });
+    savePose(t, q);
     publishState(t, q);
     setAwake(false);
   };
+
+  // Leaving the zone (or any unmount) mid-roll keeps the rock where it got
+  // to instead of snapping back to its last settled pose.
+  useEffect(() => () => {
+    const local = state.current;
+    if (!local.poseDirty || !local.livePose) return;
+    const { t, q } = local.livePose;
+    savePose(t, q, true);
+  // Unmount only; the body key is fixed for this component's life.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const applyFooting = (rigid, translation) => {
     const local = state.current;
@@ -432,21 +462,10 @@ function LooseRock({ body, hull, geometry, material }) {
     const translation = rigid.translation();
 
     if (local.pendingStrikes.length) {
-      const due = local.pendingStrikes.filter(strike => strike.at <= local.clock);
-      local.pendingStrikes = local.pendingStrikes.filter(strike => strike.at > local.clock);
-      for (const strike of due) {
-        const origin = strike.position || {};
-        const facing = strike.facing || { x: 0, z: -1 };
-        const dx = translation.x - (origin.x || 0);
-        const dz = translation.z - (origin.z || 0);
-        const distance = Math.hypot(dx, dz);
-        if (distance - actorRadius > HAMMER_RANGE) continue;
-        const facingLength = Math.hypot(facing.x || 0, facing.z || 0) || 1;
-        const dot = distance > 0.2 ? (dx * facing.x + dz * facing.z) / (distance * facingLength) : 1;
-        if (dot < HAMMER_FACING_DOT) continue;
-        claimSwing(strike.swingId);
-        const nx = distance > 0.2 ? dx / distance : facing.x / facingLength;
-        const nz = distance > 0.2 ? dz / distance : facing.z / facingLength;
+      for (const strike of local.pendingStrikes) {
+        const length = Math.hypot(strike.direction.x, strike.direction.z) || 1;
+        const nx = strike.direction.x / length;
+        const nz = strike.direction.z / length;
         local.pendingImpulses.push({ magnitude: body.mass * HAMMER_IMPULSE_PER_KG, x: nx, z: nz, lift: 0.18 });
         emitPropEvent('prop-struck', {
           propId: body.key,
@@ -455,8 +474,8 @@ function LooseRock({ body, hull, geometry, material }) {
           dustCount: 16,
           sparkCount: 5,
         });
-        wake();
       }
+      local.pendingStrikes.length = 0;
     }
 
     if (!rigid.isDynamic()) return;
@@ -484,14 +503,25 @@ function LooseRock({ body, hull, geometry, material }) {
     if (local.footing?.pending) applyFooting(rigid, translation);
 
     const velocity = rigid.linvel();
-    publishState(translation, rigid.rotation());
+    const rotation = rigid.rotation();
+    publishState(translation, rotation);
+    local.livePose = {
+      t: { x: translation.x, y: translation.y, z: translation.z },
+      q: { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w },
+    };
+    if (!rigid.isSleeping()) local.poseDirty = true;
     resolveImpacts(rigid, translation, velocity);
 
-    // Fail-safe: a rock that tunnels out of the world goes back where it lay.
+    // Fail-safe: a rock that tunnels out of the world goes back where it lay,
+    // and that is where it stays if Darwin leaves before it sleeps again.
     if (translation.y < terrainHeight(translation.x, translation.z, zoneId) - 4) {
-      rigid.setTranslation({ x: spawn.position[0], y: spawn.position[1] + 0.05, z: spawn.position[2] }, true);
+      const reset = { x: spawn.position[0], y: spawn.position[1] + 0.05, z: spawn.position[2] };
+      rigid.setTranslation(reset, true);
       rigid.setLinvel({ x: 0, y: 0, z: 0 }, true);
       rigid.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      savePose(reset, rotation, true);
+      local.livePose = { t: reset, q: local.livePose.q };
+      publishState(reset, rotation);
     }
   });
 
@@ -601,7 +631,9 @@ export function LooseRocks() {
   const bodies = useMemo(() => (ecology?.rocks || [])
     .filter(rock => isLooseRock(rock, zoneId))
     .map(rock => looseRockBody(rock, zoneId)), [ecology, zoneId]);
-  const refined = (ecology?.rockGeometryQuality || 'refined') === 'refined';
+  // Same tier gate as RockField, so loose rocks match the field around them.
+  const tierRockQuality = useThreeGameStore(state => rockGeometryQualityForDrawScale(state.foliageDrawScale));
+  const refined = (ecology?.rockGeometryQuality || 'refined') === 'refined' && tierRockQuality === 'refined';
   const dust = ecology?.rockDust || null;
 
   const variants = useMemo(() => {
@@ -630,6 +662,35 @@ export function LooseRocks() {
     scaledHull(variants.get(variantKeyFor(body, refined)).hull, body.radii),
   ])), [bodies, variants, refined]);
 
+  // Hammer swings resolve here, not per rock, so one blow moves at most the
+  // single best loose rock, and never one a boulder or prop already took.
+  const strikeHandlers = useMemo(() => new Map(), []);
+  const swings = useRef({ clock: 0, pending: [] });
+  useEffect(() => {
+    swings.current.pending = [];
+  }, [zoneId]);
+  useEffect(() => onPropEvent('tool-swing', event => {
+    if (event.tool !== 'hammer') return;
+    const local = swings.current;
+    local.pending.push({ ...event, at: local.clock + (event.impactDelay ?? 0.55) + HAMMER_CLAIM_GRACE });
+  }), []);
+  useFrame((_, delta) => {
+    const local = swings.current;
+    local.clock += delta;
+    if (!local.pending.length) return;
+    const due = local.pending.filter(strike => strike.at <= local.clock);
+    if (!due.length) return;
+    local.pending = local.pending.filter(strike => strike.at > local.clock);
+    for (const strike of due) {
+      if (strike.swingId && isSwingClaimed(strike.swingId)) continue;
+      const target = selectLooseRockStrikeTarget(getLooseRockStates(zoneId), strike.position, strike.facing);
+      const hit = target && strikeHandlers.get(target.key);
+      if (!hit) continue;
+      claimSwing(strike.swingId);
+      hit({ direction: target.direction });
+    }
+  });
+
   if (!bodies.length) return null;
   return (
     <group userData={{
@@ -645,6 +706,7 @@ export function LooseRocks() {
           hull={hulls.get(body.key)}
           geometry={variants.get(variantKeyFor(body, refined)).geometry}
           material={materials.get(rockMaterialKey(body.rock))}
+          strikeHandlers={strikeHandlers}
         />
       ))}
       <RockCatchers zoneId={zoneId} bodies={bodies} />

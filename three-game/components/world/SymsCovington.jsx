@@ -351,10 +351,12 @@ export function SymsCovington({ motionPaused = false }) {
     return () => removeNpcPose(currentZoneId, 'syms');
   }, [currentZoneId, visible]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame((_, delta) => {
     if (!visible || !group.current) return;
-    const time = clock.elapsedTime;
-    clockRef.current = time;
+    // His own clock stops while the game is paused, so errand deadlines and
+    // reactions don't run out behind a menu.
+    if (!motionPaused) clockRef.current += delta;
+    const time = clockRef.current;
     const dt = Math.min(0.05, Math.max(0.001, delta));
     const motion = motionRef.current;
     const reaction = reactionRef.current;

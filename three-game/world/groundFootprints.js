@@ -20,6 +20,7 @@
 
 import * as THREE from 'three';
 import { classifyFoliagePushProfile } from './ecology/foliagePushProfiles';
+import { isLooseRock } from './looseRocks';
 import { getRuntimeObstacles } from './obstacles';
 
 // Metres per texel. Fine enough that a 0.6 m saltbush still gets a soft
@@ -155,7 +156,12 @@ export function collectGroundFootprints(ecology, zoneId = ecology?.zoneId) {
   for (const layer of ecology.proceduralFlora || []) collectFloraLayer(layer, out);
   for (const layer of ecology.generatedTrees || []) collectGeneratedTrees(layer, out);
   for (const layer of ecology.interactiveFlora || []) collectInteractiveFlora(layer, out);
-  for (const rock of ecology.rocks || []) collectRock(rock, out);
+  // A loose rock is a live rigid body (physics/props/LooseRocks.jsx): a collar
+  // baked where it lay would stay behind once Darwin pushes it away, so it
+  // only gets the dynamic contact shadow that follows the body.
+  for (const rock of ecology.rocks || []) {
+    if (!isLooseRock(rock, zoneId)) collectRock(rock, out);
+  }
 
   // Authored obstacles: hero boulders and the few hand-placed trees. Their
   // collider radius is the trunk or rock footprint, not the crown.

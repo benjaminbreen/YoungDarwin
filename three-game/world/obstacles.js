@@ -11,6 +11,7 @@ import {
 import { getEcology } from './ecology';
 import { buildMatureCactusObstacles } from './ecology/matureCactusInteractions';
 import { isLooseRock } from './looseRocks';
+import { POST_OFFICE_BAY_WHALERS_REST } from './regions/postOfficeBay/terrain';
 
 const WALK_OVER_TRAVERSAL_MAX_HEIGHT = 2.0;
 const WALK_OVER_CROWN = 0.42;
@@ -363,6 +364,130 @@ function applyRuntimeObstacleOffset(obstacle, zoneId = currentZoneId, offsets = 
   };
 }
 
+// Post Office Bay whalers' rest (components/scene/PostOfficeWhalersRest.jsx).
+// The hearth ring and the carapaces are drawn from this layout and collide
+// through the obstacles built from it, so the two cannot drift apart. Every
+// piece sits below the 0.75 m support-stone line, so each is a walk-over
+// step-up body like the procedural support stones: Darwin stands on the shell
+// rather than wading through it, small fauna climb it, and anything taller
+// than its climb height walks round. The ash bed and the burnt plate in it are
+// below the 0.18 m walk-over floor and stay purely visual.
+const WHALERS_REST_ZONE_ID = 'POST_OFFICE_BAY';
+const WHALERS_REST_SHELLS = [
+  // [dx, dz, size, yaw, roll, bleach]
+  [1.7, 0.6, 0.42, 0.4, 0.12, 0.92],
+  [2.4, -1.1, 0.37, 2.1, -0.22, 1.0],
+  [-1.6, 1.5, 0.45, 4.2, 0.3, 0.85],
+  [0.6, 2.4, 0.33, 1.2, 2.9, 0.96],
+  [-2.3, -0.9, 0.39, 5.4, -0.08, 0.9],
+];
+const WHALERS_REST_HEARTH_STONES = 9;
+// A dodecahedron's inradius is ~0.79 of the circumradius the mesh is scaled
+// from; support follows the middle of its faces, not the tips of its corners.
+const HEARTH_STONE_FACE_RADIUS = 0.9;
+
+let whalersRestLayoutCache = null;
+
+export function postOfficeWhalersRestLayout() {
+  if (whalersRestLayoutCache) return whalersRestLayoutCache;
+  const rest = POST_OFFICE_BAY_WHALERS_REST;
+  const hearth = { x: rest.x - 0.4, z: rest.z - 0.2 };
+  const stones = Array.from({ length: WHALERS_REST_HEARTH_STONES }, (_, i) => {
+    const angle = (i / WHALERS_REST_HEARTH_STONES) * Math.PI * 2 + Math.sin(i * 3.1) * 0.18;
+    const reach = 0.62 + Math.sin(i * 1.7) * 0.06;
+    return {
+      x: hearth.x + Math.cos(angle) * reach,
+      z: hearth.z + Math.sin(angle) * reach,
+      s: 0.13 + ((i * 37) % 7) * 0.012,
+      yaw: i * 1.3,
+    };
+  });
+  const shells = WHALERS_REST_SHELLS.map(([dx, dz, size, yaw, roll, bleach]) => ({
+    x: hearth.x + dx,
+    z: hearth.z + dz,
+    size,
+    yaw,
+    roll,
+    bleach,
+    upturned: Math.abs(roll) > 1.5,
+  }));
+  whalersRestLayoutCache = { hearth, stones, shells };
+  return whalersRestLayoutCache;
+}
+
+function whalersRestSupportObstacle({ id, kind, x, z, yaw, ellipsoid, traversalLabel }) {
+  const top = ellipsoid.cy + ellipsoid.ry;
+  const radius = Math.max(ellipsoid.rx, ellipsoid.rz);
+  const collider = { type: 'cylinder', radius, height: top, offset: [0, top * 0.5, 0] };
+  return {
+    id,
+    kind,
+    supportOnly: true,
+    path: null,
+    x,
+    z,
+    radius,
+    height: top,
+    colliderTop: top,
+    colliderBottom: 0,
+    scale: 1,
+    yaw,
+    jumpable: false,
+    climbable: false,
+    edgeRisk: false,
+    pushable: false,
+    pushMass: 1,
+    mobility: { mode: 'fixed' },
+    traversal: 'step-up',
+    traversalLabel,
+    definition: { collider },
+    zoneId: WHALERS_REST_ZONE_ID,
+    shapes: [collider],
+    ellipsoid,
+  };
+}
+
+export function getPostOfficeWhalersRestObstacles() {
+  const { stones, shells } = postOfficeWhalersRestLayout();
+  return [
+    ...stones.map((stone, i) => whalersRestSupportObstacle({
+      id: `post-office-whalers-rest-hearth-stone-${i}`,
+      kind: 'stone',
+      x: stone.x,
+      z: stone.z,
+      yaw: stone.yaw,
+      // Matches the mesh: centred s * 0.45 up, scaled (1.3, 1, 1.1) * s.
+      ellipsoid: {
+        rx: stone.s * 1.3 * HEARTH_STONE_FACE_RADIUS,
+        ry: stone.s * HEARTH_STONE_FACE_RADIUS,
+        rz: stone.s * 1.1 * HEARTH_STONE_FACE_RADIUS,
+        cy: stone.s * 0.45,
+      },
+      traversalLabel: 'step over the hearth stones',
+    })),
+    ...shells.map((shell, i) => whalersRestSupportObstacle({
+      id: `post-office-whalers-rest-carapace-${i}`,
+      kind: 'carapace',
+      x: shell.x,
+      z: shell.z,
+      yaw: shell.yaw,
+      // Dome scaled (1.15, 0.66, 1) * size. An upturned shell is the same
+      // bowl hung from a rim size * 0.68 up, so its support tops out there.
+      ellipsoid: shell.upturned
+        ? { rx: shell.size * 1.15, ry: shell.size * 0.68, rz: shell.size, cy: 0 }
+        : { rx: shell.size * 1.15, ry: shell.size * 0.66, rz: shell.size, cy: 0.01 },
+      traversalLabel: 'step over the old carapace',
+    })),
+  // The smallest hearth stones fall under the walk-over floor; like pebbles
+  // they stay visual rather than becoming a tiny blocking collider.
+  ].filter(obstacle => isWalkOverTraversalObstacle(obstacle));
+}
+
+// Set pieces whose layout lives here rather than in a region layout module.
+const SET_PIECE_OBSTACLE_SOURCES = {
+  [WHALERS_REST_ZONE_ID]: [getPostOfficeWhalersRestObstacles],
+};
+
 // The store replaces pushableObstacleOffsets immutably on every push commit,
 // so object identity is a valid cache key. Without this, the first pushed
 // crate disabled obstacle caching for the rest of the session and every
@@ -380,9 +505,10 @@ export function getRuntimeObstacles(zoneId = currentZoneId, offsets = {}) {
   }
   const mapped = getZoneObstacles(zoneId).map(obstacle => toRuntimeObstacle(obstacle, zoneId, offsets));
   const withMobility = obstacles => obstacles.map(applyObstacleMobility);
-  const regional = (REGION_OBSTACLE_SOURCES[zoneId] || [])
+  const regional = [...(REGION_OBSTACLE_SOURCES[zoneId] || []), ...(SET_PIECE_OBSTACLE_SOURCES[zoneId] || [])]
     .flatMap(source => source())
-    // Loose rocks are Rapier rigid bodies; the KCC meets them directly.
+    // Loose rocks are Rapier bodies Darwin's capsule never meets; he is
+    // supported and blocked analytically (physics/looseRockContact.js).
     .filter(obstacle => !obstacle.sourceRock || !isLooseRock(obstacle.sourceRock, zoneId))
     .map(obstacle => applyRuntimeObstacleOffset(obstacle, zoneId, offsets));
   // Mature cactus GLBs render through ecology instancing, but their collision

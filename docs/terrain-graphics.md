@@ -308,14 +308,16 @@ one interchangeable suitability curve for every plant.
 
 ## Procedural rock geometry
 
-RockField now defaults to the approved 980-triangle geometry for both ordinary
-rocks and larger boulders. Existing shape seeds and proportions are preserved;
-two shallow fracture cuts retain broad planes, with restrained 18-degree crease
-smoothing at the transitions. Textures, placement and collision sources stay in
-their existing owners. An authored region can explicitly select
-`rockGeometryQuality: 'current'` to retain the older 320/500-triangle geometry.
-The approved comparison is `test-results/rock-angular-review/angular-abc.png`
-(column B). The denser 1,620/3,380-triangle trials are not the default.
+RockField builds two geometry pools. The refined pool (about 3.4k/5.8k
+triangles per rock, chiseled or smooth-muted by material) is used only when the
+region allows it (`rockGeometryQuality`, default `'refined'`) and the graphics
+tier can afford it: `rockGeometryQualityForDrawScale` in
+`three-game/automaticQuality.js` maps the tier's `foliageDrawScale` so
+Performance and Cinematic get refined rocks while Low, Mobile and Desktop Light
+get the faceted 320/500-triangle crag. Loose rocks (`physics/props/LooseRocks.jsx`)
+use the same gate so they match the field around them. Shape seeds,
+proportions, textures, placement and collision sources are shared by both
+pools.
 
 `denseFracturedBasalt` remains an additional material option for procedural rocks
 and volcanic formations; no region selects it by default.

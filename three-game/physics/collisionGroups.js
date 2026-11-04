@@ -13,8 +13,9 @@ const PLAYER_FILTER = ALL_BITS.filter(bit => bit !== ROCK_CATCHER && bit !== LOO
 // instead of passing through it.
 export const ROCK_CATCHER_GROUPS = interactionGroups(ROCK_CATCHER, LOOSE_ROCK);
 // Loose rocks meet the terrain, props, obstacles and each other, but never
-// Darwin's capsule: he walks over them on analytic support and moves them
-// only through explicit forces (his weight, a deliberate push).
+// Darwin's capsule: he walks over step-high ones on analytic support, is held
+// off taller ones analytically (looseRockContact.js), and moves them only
+// through explicit forces (his weight, a deliberate push, a hammer blow).
 export const LOOSE_ROCK_GROUPS = interactionGroups(LOOSE_ROCK);
 export const PLAYER_COLLIDER_GROUPS = interactionGroups(0, PLAYER_FILTER);
 // The character controller's query ignores catchers and loose rocks.

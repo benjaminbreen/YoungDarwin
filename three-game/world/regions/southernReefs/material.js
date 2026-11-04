@@ -165,6 +165,8 @@ export function createSouthernReefsTerrainMaterial() {
         #include <dithering_fragment>`,
       );
   };
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+  material.userData.ownsShoreDamp = true;
   material.customProgramCacheKey = () => 'southern-reefs-neutral-wet-white-sand-v1';
   material.needsUpdate = true;
   return material;

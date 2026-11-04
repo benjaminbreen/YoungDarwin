@@ -2768,12 +2768,18 @@ function GLBPrimitive({
     if (!bypassAnimationLod) {
       group.current.getWorldPosition(animLodWorldPos);
       const distanceSq = frameState.camera.position.distanceToSquared(animLodWorldPos);
+      // Skipped mixer frames still run afterPose: props posed from the
+      // skeleton (Covington's gun) must keep following the body as it moves.
       if (distanceSq > ANIM_LOD_FAR_SQ) {
+        afterPoseRef.current?.(frameState, delta);
         return;
       }
       if (distanceSq > ANIM_LOD_NEAR_SQ) {
         animLodSkipParity.current = !animLodSkipParity.current;
-        if (animLodSkipParity.current) return;
+        if (animLodSkipParity.current) {
+          afterPoseRef.current?.(frameState, delta);
+          return;
+        }
         mixerDelta = delta * 2;
       }
     }

@@ -20,6 +20,7 @@ import {
 } from '../world/obstacles';
 import { caveRayDistance, getCaveSpec } from '../interiors/cave/caveRuntime';
 import { looseRockSurfaceY } from '../world/looseRocks';
+import { MAX_WALK_STEP_HEIGHT, resolveLooseRockBlock } from './looseRockContact';
 import { getLooseRockStates } from './props/propRuntime';
 
 const DEFAULT_SUPPORT_RADIUS = 0.28;
@@ -29,7 +30,9 @@ const STANCE_HALF_LENGTH = 0.34;
 const STANCE_TILT_SCALE = 0.32;
 const CACHE_PRECISION = 1000;
 const PLAYER_GROUND_CLEARANCE = 0.015;
-const LOOSE_ROCK_MAX_STEP = 1.0;
+// Same rise as any other walk-into step: a taller loose rock blocks him
+// sideways instead (resolveLooseRockBlock) rather than lifting him onto it.
+const LOOSE_ROCK_MAX_STEP = MAX_WALK_STEP_HEIGHT;
 
 function cacheCoord(value) {
   return Math.round((Number(value) || 0) * CACHE_PRECISION);
@@ -314,7 +317,41 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     groundY: position => getGroundInfo(position).y,
     findClimbTarget: (position, facing) => findClimbTarget(position, facing, { obstacles }),
     findTraversalTarget: (position, movement, facing) => findTraversalTarget(position, movement, facing, { obstacles }),
-    resolveCollision: (position, previousPosition) => resolveObstacleCollision(position, previousPosition, { obstacles }),
+    resolveCollision: (position, previousPosition) => {
+      const obstacleHit = resolveObstacleCollision(position, previousPosition, { obstacles });
+      // Loose rocks have no collider for Darwin's capsule, so one too tall
+      // to step onto blocks him analytically against its live pose.
+      const resolved = obstacleHit?.position || position;
+      const rockHit = resolveLooseRockBlock(
+        resolved,
+        getLooseRockStates(zoneId),
+        (state, x, z) => looseRockSurfaceY(state, state.radii, x, z),
+        { stepHeight: LOOSE_ROCK_MAX_STEP },
+      );
+      if (!rockHit) return obstacleHit;
+      const p = resolved.clone ? resolved.clone() : { ...resolved };
+      p.x = rockHit.x;
+      p.z = rockHit.z;
+      const { state } = rockHit;
+      const height = rockHit.top - position.y;
+      return {
+        obstacle: {
+          id: state.id,
+          kind: 'loose-rock',
+          looseRockKey: state.id,
+          x: state.x,
+          z: state.z,
+          height,
+          colliderTop: height,
+          pushMass: state.mass,
+          pushable: false,
+        },
+        impact: 0,
+        normal: rockHit.normal,
+        penetration: rockHit.penetration + (obstacleHit?.penetration || 0),
+        position: p,
+      };
+    },
     edgeRisk: (position, facing) => (
       getObstacleEdgeRisk(position.x, position.z, position.y, 0.42, obstacles)
       || getTerrainEdgeRisk(position.x, position.z, facing, zoneId)

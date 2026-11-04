@@ -4,6 +4,7 @@ import { ACTION_DURATION } from './playerConfig';
 import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { tryFireShotgun } from '../../shooting/fireShotgun';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import { SLING, slingDrawState } from './shotgunSling';
 import { toolTargetDirection } from './toolTargeting';
 import { NET_SWEEP, beginNetSweep, netSweepState } from './netSweep';
 
@@ -83,19 +84,31 @@ export function triggerDirectPlayerActions({
     return true;
   };
   triggerAction('pray', 'pray', ACTION_DURATION.pray, actionOptions);
-  triggerAction('fireRifle', 'fireRifle', SHOTGUN.fireActionDuration, {
-    ...actionOptions,
-    onStart: () => {
-      // Direct fire (touch Fire button) shoots through the crosshair while
-      // aiming, level along Darwin's facing otherwise; empty barrels make the
-      // gesture a dry one — no blast, no smoke.
-      if (useThreeGameStore.getState().activeToolId !== 'shotgun') return;
-      tryFireShotgun({
-        position: group.current?.position,
-        facing: facing.current,
-      });
+  // With the gun still on his back a hip shot draws it first; the shot itself
+  // waits in slingDrawState until it is shouldered (playerEquipmentState).
+  const gunDrawn = slingDrawState.t >= 1;
+  triggerAction(
+    'fireRifle',
+    gunDrawn ? 'fireRifle' : 'rifleEquip',
+    gunDrawn ? SHOTGUN.fireActionDuration : ACTION_DURATION.rifleEquip,
+    {
+      ...actionOptions,
+      onStart: () => {
+        // Direct fire (touch Fire button) shoots through the crosshair while
+        // aiming, level along Darwin's facing otherwise; empty barrels make the
+        // gesture a dry one — no blast, no smoke.
+        if (useThreeGameStore.getState().activeToolId !== 'shotgun') return;
+        if (!gunDrawn) {
+          slingDrawState.pendingShotUntil = performance.now() / 1000 + SLING.drawSeconds + 0.6;
+          return;
+        }
+        tryFireShotgun({
+          position: group.current?.position,
+          facing: facing.current,
+        });
+      },
     },
-  });
+  );
   const hammerBlocked = toolBlocked('hammer', 'hammer');
   triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
     ...actionOptions,

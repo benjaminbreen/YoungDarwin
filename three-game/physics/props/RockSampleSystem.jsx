@@ -13,7 +13,9 @@ import {
   disposePbrTerrainSet,
   loadPbrTerrainSet,
 } from '../../world/regions/materials/pbrTerrainTextures';
+import { selectLooseRockStrikeTarget } from '../looseRockContact';
 import { claimSwing, emitPropEvent, onPropEvent } from './propEvents';
+import { getLooseRockStates } from './propRuntime';
 import { triggerHitstop } from '../../world/worldTime';
 import { makeChipGeometry, makeFragmentGeometry, seededUnit } from './rockDebrisGeometry';
 import {
@@ -952,6 +954,14 @@ export function RockSampleSystem() {
         sampledRockIds: exhaustedRockKeysRef.current,
         activeSourceKeys: activeKeys,
       });
+      // A loose rock nearer than any boulder takes the blow instead: leave
+      // the swing unclaimed for LooseRocks.jsx, which resolves it a beat later.
+      const looseTarget = selectLooseRockStrikeTarget(
+        getLooseRockStates(currentZoneId),
+        strike.position,
+        strike.facing,
+      );
+      if (looseTarget && (!target || looseTarget.rim < target.edgeDistance)) continue;
       if (!target) {
         target = makeGroundSampleTarget(strike, currentZoneId, sampledRockIdsRef.current, activeKeys);
       }

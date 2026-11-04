@@ -827,9 +827,24 @@ async function ensureAmbientTrack(key, url) {
   return promise;
 }
 
+const SPATIAL_REROUTE_SILENCE = 0.0005;
+
+// A loop that loses its place while it fades (the brook as Darwin walks
+// away) keeps sounding from where it was until it is silent; moving the
+// gain to the stereo route mid-fade jumped the tail to dead centre.
+export function spatialRouteFor(currentRoute, { hasPoint, targetGain, currentGain }) {
+  if (hasPoint) return 'world';
+  if (currentRoute === 'world' && !(targetGain > 0) && currentGain > SPATIAL_REROUTE_SILENCE) return 'world';
+  return 'stereo';
+}
+
 function routeSpatialTrack(track, target) {
   const point = audioListener.ready && track.worldPanner ? worldPoint(target.position) : null;
-  const route = point ? 'world' : 'stereo';
+  const route = spatialRouteFor(track.route, {
+    hasPoint: Boolean(point),
+    targetGain: target.gain,
+    currentGain: track.gain.gain.value,
+  });
   if (point) setPannerPosition(track.worldPanner, point, track.route === 'world' ? 0.15 : 0);
   if (route === track.route) return;
   track.gain.disconnect();
@@ -1045,6 +1060,23 @@ export function setSpatialAudioTarget(key, {
   exposeDebugState();
 }
 
+// Would playAudioSprite start this sprite right now? Callers that schedule a
+// voice for later (a distant call's travel delay) ask first, so a call dropped
+// for a full voice budget or an undecoded bank is not counted as heard.
+export function audioSpriteReady(sprite, { family = null, priority = false } = {}) {
+  const context = audioState.context;
+  if ((!audioState.enabled && !audioState.debugControl.forceEnabled)
+    || !context
+    || context.state !== 'running'
+    || !sprite?.url
+    || !audioState.buffers.get(sprite.url)
+    // Footfalls now carry a foliage brush and cloth layer, so a run through
+    // scrub holds several short voices at once; the old cap of 7 started
+    // dropping the footsteps themselves.
+    || audioState.voices.size >= (priority ? 12 : 10)) return false;
+  return debugAllowsTrack(family);
+}
+
 export function playAudioSprite(sprite, {
   family,
   index,
@@ -1056,17 +1088,9 @@ export function playAudioSprite(sprite, {
   send = 1,
   position = null,
 } = {}) {
+  if (!audioSpriteReady(sprite, { family, priority })) return false;
   const context = audioState.context;
   const buffer = audioState.buffers.get(sprite.url);
-  if ((!audioState.enabled && !audioState.debugControl.forceEnabled)
-    || !context
-    || context.state !== 'running'
-    || !buffer
-    // Footfalls now carry a foliage brush and cloth layer, so a run through
-    // scrub holds several short voices at once; the old cap of 7 started
-    // dropping the footsteps themselves.
-    || audioState.voices.size >= (priority ? 12 : 10)) return false;
-  if (!debugAllowsTrack(family)) return false;
 
   const safeIndex = Math.max(0, Math.min(sprite.variants - 1, Math.floor(index || 0)));
   const source = context.createBufferSource();
