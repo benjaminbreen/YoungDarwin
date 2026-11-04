@@ -552,6 +552,8 @@ ${postOfficeNormalFragment()}`,
         #include <dithering_fragment>`,
       );
   };
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+  material.userData.ownsShoreDamp = true;
   material.customProgramCacheKey = () => 'post-office-bay-inland-valley-v6';
   material.needsUpdate = true;
   return material;

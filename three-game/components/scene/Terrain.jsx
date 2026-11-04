@@ -39,6 +39,7 @@ import { computeOutdoorLightRig } from '../../world/outdoorLighting';
 import { weatherEnv } from '../../world/weatherEnvRuntime';
 import { terrainLookTuning } from '../../world/terrainLook';
 import { getGroundFootprintMap } from '../../world/groundFootprints';
+import { DEW_GLSL, dewAmount, dewUniforms, updateDewUniforms } from '../../world/dewRuntime';
 
 // Matches the water surface in Water.jsx; used for the damp-shore band.
 const WATER_SURFACE_Y = TERRAIN_WATER_SURFACE_Y;
@@ -62,6 +63,8 @@ const CAUSTICS_GLSL = /* glsl */`
   uniform float uTerrainSunWarmth;
   uniform float uTerrainCoolShade;
   uniform float uTerrainWetShine;
+  // (swash clock, swash height, film gloss, waterline offset)
+  uniform vec4 uTerrainSwash;
   varying vec3 vCausticsW;
   vec2 cstHash2(vec2 p) {
     return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
@@ -94,6 +97,8 @@ const CAUSTICS_GLSL = /* glsl */`
     return 0.78 + 0.30 * pow(clamp(ridge * 0.5 + 0.5, 0.0, 1.0), 1.85);
   }
 `;
+
+const _dewSun = new THREE.Vector3();
 
 const CAUSTICS_APPLY = /* glsl */`
   vec3 terrainWorldNormal = normalize(cross(dFdx(vCausticsW), dFdy(vCausticsW)));
@@ -148,6 +153,75 @@ const CAUSTICS_APPLY = /* glsl */`
     float wetSpec = terrainWet * uTerrainWetShine * wetSunGlint * (1.0 - uTerrainWeatherSoftness * 0.42);
     outgoingLight += vec3(1.0, 0.93, 0.72) * clamp(wetSpec, 0.0, 0.16);
     outgoingLight = mix(outgoingLight, outgoingLight * vec3(0.86, 0.94, 0.92), terrainWet * (0.045 + uRainWetness * 0.04));
+  }
+
+  // Dawn dew on open ground: a faint wet sheen at grazing angles and sparse
+  // droplet glints. Upward faces hold it; steep faces shed it.
+  if (uDew > 0.001) {
+    vec3 dewNormal = inverseTransformDirection(normal, viewMatrix);
+    float dewHold = smoothstep(0.45, 0.85, dewNormal.y) * uDew;
+    vec3 dewView = normalize(cameraPosition - vCausticsW);
+    float dewFresnel = pow(1.0 - clamp(dot(dewNormal, dewView), 0.0, 1.0), 5.0);
+    vec3 dewSky = vec3(0.0);
+    #ifdef USE_ENVMAP
+      dewSky = getIBLRadiance(geometryViewDir, normal, 0.32);
+    #endif
+    outgoingLight += dewSky * dewFresnel * dewHold * 0.35;
+    outgoingLight += dewGlints(vCausticsW, dewNormal, 0.14, 30.0) * dewHold;
+  }
+
+  // Shore wetness, shared by every coast. Heights are above still water.
+  float shoreY = vCausticsW.y - ${WATER_SURFACE_Y.toFixed(2)};
+  if (shoreY > -0.3 && shoreY < 1.6) {
+    float shoreWobble = sin(vCausticsW.x * 0.23 + vCausticsW.z * 0.17) * 0.07
+      + sin(vCausticsW.z * 0.61 - vCausticsW.x * 0.4) * 0.04;
+    #ifndef TERRAIN_OWNS_SHORE_DAMP
+    // Damp band up to the reach of the last high water. Pore water darkens
+    // ground and deepens its colour rather than greying it. Regions that
+    // author their own wet band define TERRAIN_OWNS_SHORE_DAMP.
+    float shoreDamp = 1.0 - smoothstep(0.5, 1.3 + shoreWobble * 2.5, shoreY);
+    float shoreDampLuma = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722));
+    vec3 shoreDampLight = max(mix(vec3(shoreDampLuma), outgoingLight, 1.3), vec3(0.0)) * 0.6;
+    outgoingLight = mix(outgoingLight, shoreDampLight, shoreDamp * 0.85);
+    #endif
+
+    // Draining swash film. Water.jsx lifts the waterline on the same clock
+    // (swashLift), so the sand just above the retreating line is the sand the
+    // wave has only now uncovered: a film of water still lies on it and it
+    // mirrors the sky and the sun. The film thins toward the last reach of
+    // the run-up and is freshest during the backwash.
+    float swashPhase = uTerrainSwash.x * 0.5984;
+    float swashLine = ((sin(swashPhase) * 0.5) * 1.7
+      + sin(vCausticsW.x * 0.17 + uTerrainSwash.x * 0.30) * 0.3) * uTerrainSwash.y
+      + uTerrainSwash.w;
+    float swashReach = 1.15 * uTerrainSwash.y + uTerrainSwash.w + 0.32 + shoreWobble;
+    float swashAbove = shoreY - swashLine;
+    float swashSpan = max(swashReach - swashLine, 0.05);
+    float backwash = clamp(-cos(swashPhase), 0.0, 1.0);
+    float swashFilm = smoothstep(-0.02, 0.03, swashAbove)
+      * (1.0 - smoothstep(0.0, swashSpan, swashAbove))
+      * (0.5 + 0.5 * backwash)
+      * uTerrainSwash.z;
+    if (swashFilm > 0.001) {
+      // A water film fills the grain, so it reflects off a much flatter
+      // surface than the sand's own normal map describes.
+      vec3 filmNormal = normalize(mix(inverseTransformDirection(normal, viewMatrix), vec3(0.0, 1.0, 0.0), 0.65));
+      vec3 filmView = normalize(cameraPosition - vCausticsW);
+      float filmFresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(filmNormal, filmView), 0.0, 1.0), 5.0);
+      vec3 filmReflect = reflect(-filmView, filmNormal);
+      vec3 filmSky = vec3(0.0);
+      #ifdef USE_ENVMAP
+        filmSky = getIBLRadiance(geometryViewDir, transformDirection(filmNormal, viewMatrix), 0.05);
+      #endif
+      float filmSunAlign = max(dot(filmReflect, terrainSunDir), 0.0);
+      float filmSun = (pow(filmSunAlign, 900.0) * 40.0 + pow(filmSunAlign, 48.0) * 0.9)
+        * uTerrainDaylight * step(0.0, terrainSunDir.y)
+        * (1.0 - uTerrainWeatherSoftness * 0.85);
+      vec3 filmSunColor = mix(vec3(1.0, 0.95, 0.86), vec3(1.0, 0.7, 0.42), uTerrainGolden);
+      // Saturated sand is darker still under the film.
+      outgoingLight *= 1.0 - swashFilm * 0.22;
+      outgoingLight += swashFilm * filmFresnel * (filmSky * 3.0 + filmSunColor * filmSun);
+    }
   }
 `;
 
@@ -298,6 +372,13 @@ function injectTerrainRenderingExtensions(material) {
     shader.uniforms.uTerrainSunWarmth = { value: 0 };
     shader.uniforms.uTerrainCoolShade = { value: 0 };
     shader.uniforms.uTerrainWetShine = { value: 0 };
+    shader.uniforms.uTerrainSwash = { value: new THREE.Vector4(0, 0.12, 1, 0) };
+    shader.uniforms.uDew = dewUniforms.uDew;
+    shader.uniforms.uDewSun = dewUniforms.uDewSun;
+    shader.uniforms.uDewSunColor = dewUniforms.uDewSunColor;
+    if (material.userData.ownsShoreDamp) {
+      shader.fragmentShader = `#define TERRAIN_OWNS_SHORE_DAMP\n${shader.fragmentShader}`;
+    }
     shader.uniforms.uLocalApronTexture = terrainSeamUniforms.uLocalApronTexture;
     shader.uniforms.uTextureCarrySeam = terrainSeamUniforms.uTextureCarrySeam;
     // Global terrain grade (world/terrainLook.js). Packed into two vectors so
@@ -346,7 +427,8 @@ function injectTerrainRenderingExtensions(material) {
         varying float vTerrainOcclusion;
         ${TERRAIN_FOOTPRINT_GLSL}
         ${TERRAIN_TEXTURE_CARRY_GLSL}
-        ${CAUSTICS_GLSL}`,
+        ${CAUSTICS_GLSL}
+        ${DEW_GLSL}`,
       )
       // Applied at metalnessmap_fragment: every authored region writes its
       // albedo at color_fragment and its roughness at roughnessmap_fragment,
@@ -394,7 +476,7 @@ function injectTerrainRenderingExtensions(material) {
       );
   };
   material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry-baked-ao-footprints`;
+    `${previousKey ? previousKey.call(material) : 'terrain-default'}|caustics-terrain-light-v3-texture-carry-baked-ao-footprints-shore-v1-dew${material.userData.ownsShoreDamp ? '-own-damp' : ''}`;
   material.needsUpdate = true;
   return material;
 }
@@ -490,6 +572,14 @@ export function Terrain({ segmentCap = null }) {
     const shader = material.userData?.shader;
     if (!shader?.uniforms) return;
     if (shader.uniforms.uSwashTime) shader.uniforms.uSwashTime.value = clock.elapsedTime;
+    if (shader.uniforms.uTerrainSwash) {
+      shader.uniforms.uTerrainSwash.value.set(
+        clock.elapsedTime,
+        waterDev.swashHeight,
+        terrainLookTuning.shoreGloss,
+        terrainLookTuning.swashOffset,
+      );
+    }
     if (shader.uniforms.uCausticsTime) {
       const store = useThreeGameStore.getState();
       const time = ((store.timeOfDay % 24) + 24) % 24;
@@ -518,6 +608,19 @@ export function Terrain({ segmentCap = null }) {
       if (shader.uniforms.uTerrainWeatherSoftness) shader.uniforms.uTerrainWeatherSoftness.value = lightRig.weatherSoftness;
       if (shader.uniforms.uTerrainSunWarmth) shader.uniforms.uTerrainSunWarmth.value = lightRig.terrainSunWarmth;
       if (shader.uniforms.uTerrainCoolShade) shader.uniforms.uTerrainCoolShade.value = lightRig.terrainCoolShade;
+      // Dawn dew for every outdoor surface (foliage and rocks read it too).
+      _dewSun.set(sky.sun[0], sky.sun[1], sky.sun[2]);
+      updateDewUniforms({
+        amount: dewAmount({
+          solarAltitude: sky.solarAltitude,
+          overcast: weatherEnv.overcast,
+          windGain: weatherEnv.foliageWindGain,
+          rain: rainWetness,
+        }),
+        sunDirection: _dewSun,
+        golden: sky.golden,
+        daylight: sky.daylight * (1 - lightRig.weatherSoftness * 0.8),
+      });
       if (shader.uniforms.uTerrainGrade) {
         shader.uniforms.uTerrainGrade.value.set(
           terrainLookTuning.brightness,

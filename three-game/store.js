@@ -82,6 +82,8 @@ import { normalizeWeatherState } from './world/weatherStates';
 import { restFlavor } from './restFlavor';
 import { sameFieldAction } from './fieldActions';
 import { createShotgunActions } from './storeSlices/shotgunSlice';
+import { createSymsGunActions } from './storeSlices/symsGunSlice';
+import { GUN_HOLDERS } from './npcs/symsGunErrand';
 import { createWarinessActions } from './storeSlices/warinessSlice';
 import { createObservationActions } from './storeSlices/observationSlice';
 import { sanitizeFieldObservations } from './fauna/behavior/fieldObservations';
@@ -114,6 +116,15 @@ export {
   updateRuntimePlayerMotion,
   updateRuntimePlayerPose,
 } from './storeSlices/shared';
+
+function emitToolChangeFoley(fromToolId, toToolId) {
+  emitPropEvent('equipment-foley', {
+    kind: 'tool-change',
+    fromToolId,
+    toToolId,
+    position: getRuntimePlayerPose()?.position,
+  });
+}
 
 export const useThreeGameStore = create((set, get) => ({
   ...createExpeditionSlice(),
@@ -174,6 +185,12 @@ export const useThreeGameStore = create((set, get) => ({
       : FIRST_DIRECTIVE_ID;
     assign('symsDirective', snapshot.symsDirective, initial.symsDirective);
     assign('symsZoneId', snapshot.symsZoneId, initial.symsZoneId);
+    // A save made with the gun in hand resumes with it on Darwin's back.
+    patch.shotgunHolder = snapshot.shotgunHolder === GUN_HOLDERS.DARWIN || snapshot.activeToolId === 'shotgun'
+      ? GUN_HOLDERS.DARWIN
+      : GUN_HOLDERS.SYMS;
+    patch.symsGunErrand = null;
+    patch.shotgunChoiceOpen = false;
     patch.weather = normalizeWeatherState(snapshot.weather, initial.weather);
     patch.inventory = Array.isArray(snapshot.inventory) ? snapshot.inventory : initial.inventory;
     patch.shipCollection = Array.isArray(snapshot.shipCollection)
@@ -470,21 +487,34 @@ export const useThreeGameStore = create((set, get) => ({
     return patch;
   }),
   setActiveTool: activeToolId => {
-    const previousToolId = get().activeToolId;
+    const state = get();
+    const previousToolId = state.activeToolId;
     if (previousToolId === activeToolId) return;
+    // Darwin does not carry the gun: Covington does. Taking it up asks him for
+    // it, and putting it down means handing it back (symsGunSlice).
+    if (state.playableModeId === 'darwin') {
+      if (activeToolId === 'shotgun' && state.shotgunHolder !== GUN_HOLDERS.DARWIN) {
+        state.requestShotgun();
+        return;
+      }
+      if (previousToolId === 'shotgun' && state.shotgunHolder === GUN_HOLDERS.DARWIN) {
+        if (!state.returnShotgunFor(activeToolId)) return;
+        emitToolChangeFoley(previousToolId, activeToolId);
+        return;
+      }
+    }
     set({ activeToolId });
-    emitPropEvent('equipment-foley', {
-      kind: 'tool-change',
-      fromToolId: previousToolId,
-      toToolId: activeToolId,
-      position: getRuntimePlayerPose()?.position,
-    });
+    emitToolChangeFoley(previousToolId, activeToolId);
   },
+  // Hands the gun to Darwin without Covington's walk: tests and the E2E
+  // harness, which select the shotgun directly.
+  grantShotgunToDarwin: () => set({ shotgunHolder: GUN_HOLDERS.DARWIN, symsGunErrand: null, shotgunChoiceOpen: false }),
   // Double-barreled shotgun ammo. Timestamps are performance.now()-seconds so
   // the aim/HUD layers can share the clock without a store tick per frame.
   shotgunShells: 2,
   shotgunReloadUntil: 0,
   ...createShotgunActions(set, get),
+  ...createSymsGunActions(set, get),
   ...createWarinessActions(set, get),
   ...createObservationActions(set, get),
 

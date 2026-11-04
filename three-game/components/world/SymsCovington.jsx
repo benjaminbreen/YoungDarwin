@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import {
@@ -38,6 +38,11 @@ import { resolveSymsStatus } from '../../npcs/symsStatus';
 import { getThreeSpecimens } from '../../data';
 import { NpcStatusOrb } from './NpcStatusOrb';
 import { TerrainRingMarker } from './TerrainRingMarker';
+import { SymsGun } from './SymsGun';
+import { GUN_HOLDERS, SYMS_GUN, SYMS_GUN_ERRANDS } from '../../npcs/symsGunErrand';
+import { getSpecimenRuntimePoses } from '../../world/specimenRuntime';
+import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
+import { SHOTGUN } from '../../shooting/shotgunConfig';
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';
 const SYMS_GROUND_CLEARANCE = 0.04;
@@ -170,6 +175,18 @@ export function SymsCovington({ motionPaused = false }) {
   const animationRef = useRef('idle');
   const footstepRef = useRef({ phase: 0, side: 'left' });
   const visible = currentZoneId === symsZoneId;
+  const [modelScene, setModelScene] = useState(null);
+  // Gun posing runs after his animation is applied (ModelAsset afterPose).
+  const postPose = useMemo(() => new Set(), []);
+  const afterPose = useCallback((frameState, delta) => {
+    postPose.forEach(handler => handler(frameState, delta));
+  }, [postPose]);
+  // Written each frame: whether he has the gun on him and what he is aiming
+  // at (SymsGun reads it).
+  const gunRef = useRef({ visible: true, aimAt: null });
+  const aimPointRef = useRef(new THREE.Vector3());
+  // Progress through the current gun errand (symsGunErrand in the store).
+  const errandRef = useRef({ key: null, phase: 'approach', until: 0, deadline: 0, blockedSince: 0 });
   const activityPlan = useMemo(() => buildSymsPostOfficeBayPlan(), []);
   // Status drives the orb colour and the plate text. It is written from the
   // frame loop but only when the pair actually changes — a directive flip or a
@@ -292,6 +309,7 @@ export function SymsCovington({ motionPaused = false }) {
 
   // Any nearby report makes him duck aside even when the shot misses.
   useEffect(() => onPropEvent('shotgun-fired', event => {
+    if (event.shooter === 'syms') return;
     const reaction = reactionRef.current;
     if (reaction.mode === 'flee') return;
     const position = motionRef.current.position;
@@ -468,6 +486,146 @@ export function SymsCovington({ motionPaused = false }) {
       }
     }
 
+    const facePoint = (x, z) => {
+      const fx = x - position.x;
+      const fz = z - position.z;
+      if (Math.hypot(fx, fz) > 0.05) motion.desiredYaw = Math.atan2(fx, fz);
+    };
+
+    // Covington's errands with the gun: bring it to Darwin, take it back, or
+    // go and shoot something himself. Returns this frame's speed and pose.
+    const runGunErrand = (errand, gameState) => {
+      const state = errandRef.current;
+      const key = `${errand.kind}:${errand.startedAt}`;
+      if (state.key !== key) {
+        state.key = key;
+        state.phase = 'approach';
+        state.until = 0;
+        state.blockedSince = 0;
+        state.deadline = time + (errand.kind === SYMS_GUN_ERRANDS.SHOOT ? SYMS_GUN.shootTimeoutSeconds : 75);
+      }
+      let speed = 0;
+      if (errand.kind === SYMS_GUN_ERRANDS.FETCH || errand.kind === SYMS_GUN_ERRANDS.COLLECT) {
+        const px = finiteOr(player.x, position.x);
+        const pz = finiteOr(player.z, position.z);
+        const dx = px - position.x;
+        const dz = pz - position.z;
+        const distance = Math.hypot(dx, dz);
+        if (state.phase === 'approach') {
+          if (distance > SYMS_GUN.handoverDistance) {
+            const stopShort = Math.min(distance, 1.15);
+            const result = moveToward(
+              px - (dx / distance) * stopShort,
+              pz - (dz / distance) * stopShort,
+              distance > 9 ? 3.6 : SYMS_GUN.fetchSpeed,
+            );
+            speed = result.moved / dt;
+            if (time > state.deadline) {
+              gameState.abandonSymsGunErrand('Covington cannot find a way through to you.');
+            }
+            return { movementSpeed: speed, animation: 'idle' };
+          }
+          state.phase = 'handover';
+          state.until = time + 0.7;
+        }
+        facePoint(px, pz);
+        if (time >= state.until) {
+          if (errand.kind === SYMS_GUN_ERRANDS.FETCH) gameState.completeSymsGunHandover();
+          else gameState.completeSymsGunReturn();
+        }
+        return { movementSpeed: 0, animation: 'gather' };
+      }
+
+      // Shooting: close to a range that kills cleanly without ruining the
+      // skin, shoulder the gun, wait for Darwin to be out of the line of
+      // fire, and fire through the shared shotgun pipeline.
+      const targetId = errand.targetActorId;
+      const quarryPose = getSpecimenRuntimePoses(currentZoneId)?.get(targetId);
+      const gone = !quarryPose
+        || gameState.downedSpecimenActors?.[targetId]
+        || gameState.collectedSpecimenActorIds?.includes(targetId);
+      if (state.phase === 'fired') {
+        if (time >= state.until) {
+          gameState.finishSymsShot({ downed: Boolean(gameState.downedSpecimenActors?.[targetId]) });
+          gunRef.current.aimAt = null;
+        }
+        return { movementSpeed: 0, animation: 'idle' };
+      }
+      if (gone || time > state.deadline) {
+        gunRef.current.aimAt = null;
+        gameState.abandonSymsGunErrand();
+        return { movementSpeed: 0, animation: 'lookAroundShort' };
+      }
+      const specimen = zoneSpecimens.find(item => (item.instanceId || item.id) === targetId);
+      const quarryY = (quarryPose.y ?? 0) + Math.max(0.15, (getWildlifeInteractionHeight(specimen) || 0.3) * 0.6);
+      const dx = quarryPose.x - position.x;
+      const dz = quarryPose.z - position.z;
+      const distance = Math.hypot(dx, dz);
+      if (state.phase === 'approach') {
+        if (distance > SYMS_GUN.shootMaxRange) {
+          const result = moveToward(quarryPose.x, quarryPose.z, SYMS_GUN.stalkSpeed);
+          speed = result.moved / dt;
+          gunRef.current.aimAt = null;
+          return { movementSpeed: speed, animation: 'idle' };
+        }
+        if (distance < SHOTGUN.ruinRange + 0.6) {
+          const back = chooseEscapeTarget(position, quarryPose, 2, currentZoneId, obstacles);
+          const result = moveToward(back.x, back.z, SYMS_GUN.stalkSpeed);
+          speed = result.moved / dt;
+          return { movementSpeed: speed, animation: 'idle' };
+        }
+        state.phase = 'aim';
+        state.until = time + SYMS_GUN.aimSeconds;
+      }
+      facePoint(quarryPose.x, quarryPose.z);
+      aimPointRef.current.set(quarryPose.x, quarryY, quarryPose.z);
+      gunRef.current.aimAt = aimPointRef.current;
+      if (distance > SYMS_GUN.shootMaxRange + 4) {
+        // It moved off while he was shouldering: lower and follow.
+        state.phase = 'approach';
+        gunRef.current.aimAt = null;
+        return { movementSpeed: 0, animation: 'idle' };
+      }
+      if (time < state.until) return { movementSpeed: 0, animation: 'idle' };
+      const yaw = Math.atan2(dx, dz);
+      const muzzle = {
+        x: position.x + Math.sin(yaw) * SHOTGUN.muzzleForward,
+        y: position.y + SHOTGUN.muzzleHeight,
+        z: position.z + Math.cos(yaw) * SHOTGUN.muzzleForward,
+      };
+      let dirX = quarryPose.x - muzzle.x;
+      let dirY = quarryY - muzzle.y;
+      let dirZ = quarryPose.z - muzzle.z;
+      const length = Math.hypot(dirX, dirY, dirZ) || 1;
+      dirX /= length;
+      dirY /= length;
+      dirZ /= length;
+      // Never across Darwin: hold the shot while he stands in the line.
+      const px = finiteOr(player.x, Infinity);
+      const pz = finiteOr(player.z, Infinity);
+      const along = (px - muzzle.x) * dirX + (pz - muzzle.z) * dirZ;
+      const across = Math.hypot(px - (muzzle.x + dirX * along), pz - (muzzle.z + dirZ * along));
+      if (along > 0 && along < length + 1 && across < 1.4) {
+        if (!state.blockedSince) {
+          state.blockedSince = time;
+          useThreeGameStore.setState({ symsLine: '"Stand clear of the line, sir!"' });
+        }
+        return { movementSpeed: 0, animation: 'idle' };
+      }
+      emitPropEvent('shotgun-fired', {
+        position: muzzle,
+        dir: { x: dirX, y: dirY, z: dirZ },
+        barrel: 1,
+        shellsLeft: 1,
+        reloadStarted: false,
+        reloadDuration: 0,
+        shooter: 'syms',
+      });
+      state.phase = 'fired';
+      state.until = time + 0.9;
+      return { movementSpeed: 0, animation: 'idle' };
+    };
+
     let movementSpeed = 0;
     let stationaryAnimation = 'idle';
     let activeDirective = SYMS_DIRECTIVES.RANGE;
@@ -503,7 +661,13 @@ export function SymsCovington({ motionPaused = false }) {
         motion.dwellUntil = 0;
       }
 
-      if (conversationOpen) {
+      const gameState = useThreeGameStore.getState();
+      const errand = playableModeId === 'darwin' ? gameState.symsGunErrand : null;
+      if (errand) {
+        const outcome = runGunErrand(errand, gameState);
+        movementSpeed = outcome.movementSpeed;
+        stationaryAnimation = outcome.animation;
+      } else if (conversationOpen) {
         stationaryAnimation = 'idle';
         const faceX = finiteOr(player.x, position.x) - position.x;
         const faceZ = finiteOr(player.z, position.z) - position.z;
@@ -567,6 +731,11 @@ export function SymsCovington({ motionPaused = false }) {
 
     group.current.position.set(position.x, position.y, position.z);
     group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, motion.desiredYaw, 8, dt);
+    const holder = useThreeGameStore.getState().shotgunHolder;
+    gunRef.current.visible = playableModeId !== 'darwin' || holder !== GUN_HOLDERS.DARWIN;
+    if (!gunRef.current.visible || useThreeGameStore.getState().symsGunErrand?.kind !== SYMS_GUN_ERRANDS.SHOOT) {
+      gunRef.current.aimAt = null;
+    }
     publishSymsPose(currentZoneId, position);
     if (movementSpeed > 3) animationRef.current = 'run';
     else if (movementSpeed > 1.8) animationRef.current = 'jog';
@@ -614,8 +783,16 @@ export function SymsCovington({ motionPaused = false }) {
       renderPath: null,
     }}>
       <group ref={body}>
-        <ModelAsset id="syms" animationSelector={() => animationRef.current} reflect fallback={<ProceduralCrewFigure motion={0.16} />} />
+        <ModelAsset
+          id="syms"
+          animationSelector={() => animationRef.current}
+          reflect
+          onSceneReady={setModelScene}
+          afterPose={afterPose}
+          fallback={<ProceduralCrewFigure motion={0.16} />}
+        />
       </group>
+      {modelScene && <SymsGun scene={modelScene} gunRef={gunRef} postPose={postPose} />}
       <TerrainRingMarker
         radius={0.82}
         innerRadius={0.72 / 0.82}

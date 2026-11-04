@@ -76,11 +76,13 @@ import { InventoryModal } from './expedition/InventoryModal';
 import { CollectionCelebration, celebrationVisibleMs } from './CollectionCelebration';
 import { FieldDilemmaModal } from './FieldDilemmaModal';
 import { CaseFullModal } from './CaseFullModal';
+import { ShotgunChoiceModal } from './ShotgunChoiceModal';
 import { NightlyDebriefModal } from './NightlyDebriefModal';
 import { getSpecimenRarity, rarityForTier } from '../rarity';
 import { RarityBadge } from './RarityBadge';
 import { SpecimenPortrait } from './SpecimenPortrait';
 import { playInterfaceCue, playSightingSting } from '../audio/audioRuntime';
+import { installInterfaceButtonCues } from '../audio/interfaceFoley';
 import { useZoneSpecimenProgress } from './useZoneSpecimenProgress';
 import { SpecimenDetailModal } from './expedition/SpecimenDetailModal';
 import { IslandMapModal } from './expedition/map/IslandMapModal';
@@ -2390,6 +2392,13 @@ function ToolBelt({ onOpenJournal, compact = false }) {
   const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const animalMode = getPlayableMode(playableModeId).kind === 'animal';
+  const shotgunHolder = useThreeGameStore(state => state.shotgunHolder);
+  const gunErrandKind = useThreeGameStore(state => state.symsGunErrand?.kind || null);
+  const gunStatus = playableModeId !== 'darwin' ? null
+    : gunErrandKind === 'fetch' ? 'Covington is bringing it'
+      : gunErrandKind === 'collect' ? 'Covington is coming for it'
+        : gunErrandKind === 'shoot' ? 'Covington is out shooting'
+          : shotgunHolder === 'darwin' ? 'On your back' : 'Covington has it';
   return (
     <ExpeditionPanel
       variant={compact ? 'quiet' : 'hud'}
@@ -2455,8 +2464,20 @@ function ToolBelt({ onOpenJournal, compact = false }) {
               {index + 1}
             </span>
             {compact && active && <span className="pointer-events-none absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-expedition-goldbright shadow-[0_0_5px_rgba(227,197,133,0.5)]" />}
-            <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[9rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-gold/60 bg-[rgba(12,20,38,0.92)] px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
-              {tool.name}
+            {tool.id === 'shotgun' && gunStatus && (
+              // Whose hands the gun is in: a pulse while Covington is on an
+              // errand with it, a quiet mark while he simply has it.
+              <span
+                data-testid="shotgun-holder-mark"
+                className={`pointer-events-none absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${
+                  gunErrandKind
+                    ? 'animate-pulse bg-expedition-goldbright'
+                    : shotgunHolder === 'darwin' ? 'bg-expedition-goldbright/90' : 'border border-expedition-parchment/60 bg-transparent'
+                }`}
+              />
+            )}
+            <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 max-w-[11rem] -translate-x-1/2 whitespace-nowrap rounded-sm border border-expedition-gold/60 bg-[rgba(12,20,38,0.92)] px-2 py-1 font-expedition text-[11px] text-expedition-parchment opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
+              {tool.name}{tool.id === 'shotgun' && gunStatus ? ` · ${gunStatus}` : ''}
             </span>
           </button>
         );
@@ -5270,6 +5291,9 @@ export function ThreeHUD({
   const entranceCompleteReportedRef = useRef(false);
   // Load → "Read journal" resumes the saved session with the notebook open.
   const [panel, setPanel] = useState(openJournalOnLaunch ? 'journal' : null);
+  // Tabs, sealed choices, toggles and refused presses sound by delegation
+  // (audio/interfaceFoley.js); ordinary buttons stay silent.
+  useEffect(() => installInterfaceButtonCues(), []);
   const [mapOpen, setMapOpen] = useState(() => hasDevelopmentQueryFlag('islandMap'));
   const [compassOpen, setCompassOpen] = useState(() => hasDevelopmentQueryFlag('compass'));
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -5295,6 +5319,7 @@ export function ThreeHUD({
   const nightlyDebriefOpen = useThreeGameStore(state => Boolean(state.nightlyDebrief));
   const fieldDilemmaOpen = useThreeGameStore(state => Boolean(state.activeConstraint && getFieldDilemma(state.activeConstraint.type)));
   const caseFullOpen = useThreeGameStore(state => Boolean(state.caseFullChoice));
+  const shotgunChoiceOpen = useThreeGameStore(state => state.shotgunChoiceOpen);
   const caseReleaseMode = useThreeGameStore(state => state.caseReleaseMode);
 
   // The Beagle sails after the third field day. Whichever way the clock got
@@ -5304,7 +5329,7 @@ export function ThreeHUD({
     if (expeditionDeparted && !finalAssessment) void beginFinalAssessment();
   }, [expeditionDeparted, finalAssessment, beginFinalAssessment]);
 
-  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || fieldDilemmaOpen || caseFullOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
+  const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || fieldDilemmaOpen || caseFullOpen || shotgunChoiceOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
   const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);
   const confirmEndGame = useCallback(() => {
     setEndGameConfirmationOpen(false);
@@ -5334,7 +5359,7 @@ export function ThreeHUD({
   const otherOverlayOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen
     || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen
     || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen
-    || fieldDilemmaOpen || caseFullOpen || endGameConfirmationOpen);
+    || fieldDilemmaOpen || caseFullOpen || shotgunChoiceOpen || endGameConfirmationOpen);
 
   useEffect(() => {
     if (!entranceActive) return undefined;
@@ -5678,6 +5703,7 @@ export function ThreeHUD({
       <NightlyDebriefModal />
       <FieldDilemmaModal />
       <CaseFullModal />
+      <ShotgunChoiceModal />
 
       <FieldNotebook
         panel={panel}

@@ -327,7 +327,8 @@ export default function ShotgunSystem() {
     // Firing steeply into the ground at his own feet: an accident, not
     // fieldwork. Damage + stumble are consumed by the player controller.
     if (
-      blocker?.kind === 'terrain'
+      event.shooter !== 'syms'
+      && blocker?.kind === 'terrain'
       && blocker.t <= SHOTGUN.selfHit.maxDistance
       && -d.y >= SHOTGUN.selfHit.minDownComponent
     ) {

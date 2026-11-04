@@ -8,8 +8,9 @@ import { getZoneProps } from '../physics/props/propRegistry';
 import { inferContactResponseKind } from '../world/surfaceContactResponse';
 import { isRockBody } from './contactTargets';
 import { getSpecimenRuntimePoses } from '../world/specimenRuntime';
+import { getSocialEntry } from '../fauna/behavior/socialField';
 import { getZone } from '../world/floreanaZones';
-import { terrainBiomeAt } from '../world/terrain';
+import { terrainBiomeAt, terrainHeight } from '../world/terrain';
 import { WATER_LEVEL } from '../world/water';
 import { getSurfaceContactProfile } from '../world/surfaceContact';
 import { currentFoliageImmersion } from '../world/ecology/foliageContact';
@@ -19,10 +20,12 @@ import { exhaustionAmount } from '../world/exhaustionLook';
 import {
   CONTEXTUAL_WORLD_AUDIO,
   DARWIN_BODY_AUDIO,
+  FAUNA_AUDIO,
   FIELD_FOLEY_AUDIO,
   FOLEY_AUDIO,
   HAMMER_STRIKE_AUDIO,
   INTERACTION_AUDIO,
+  MOTION_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
   POST_OFFICE_BAY_AUDIO,
   TOOL_FOLEY_AUDIO,
@@ -39,14 +42,22 @@ import {
 } from './interactionMaterials';
 import {
   computeEnvironmentalAudioTargets,
-  diurnalBirdCallsAllowed,
   dryInsectHabitat,
   isInteriorAmbienceZone,
-  nocturnalOwlCallsAllowed,
   surfPresenceForZone,
   zoneHasDirectCoast,
 } from './environmentMix';
 import { crossedDusk, playDuskBell, playJournalEntryCue } from './interfaceFoley';
+import {
+  WILDLIFE_VOICE_PROFILES,
+  createWildlifeVoiceDirector,
+  lineOccluded,
+  propagate,
+  seabirdColonyBed,
+  stepWildlifeVoices,
+} from './wildlifeVoices';
+import { jumpSoundShape } from './jumpSounds';
+import { pickPlaceSound, placeAmbienceGains, placeLoopGains, probeWaterAround, soundPlacesForZone } from './placeSounds';
 import {
   activatePostOfficeBayAudio,
   playAudioSprite,
@@ -60,17 +71,35 @@ import {
   soundscapeAudioIsRunning,
 } from './audioRuntime';
 
-const WILDLIFE_CALL_PROFILES = Object.freeze({
-  gull: Object.freeze({ speciesIds: new Set(['lavagull']), maxDistance: 38, nearDistance: 6, gain: 0.12, retry: [3500, 6500], interval: [13000, 29000], initial: [6500, 12500], nocturnal: false }),
-  finch: Object.freeze({ speciesIds: new Set(['largegroundfinch', 'mediumgroundfinch']), maxDistance: 21, nearDistance: 3, gain: 0.085, retry: [3500, 6500], interval: [8000, 18000], initial: [4000, 9000], nocturnal: false }),
-  dove: Object.freeze({ speciesIds: new Set(['galapagosdove']), maxDistance: 25, nearDistance: 4, gain: 0.09, retry: [5000, 8500], interval: [19000, 41000], initial: [9000, 18000], nocturnal: false }),
-  mockingbird: Object.freeze({ speciesIds: new Set(['floreanamockingbird', 'galapagosmockingbird']), maxDistance: 28, nearDistance: 4, gain: 0.085, retry: [5000, 8500], interval: [16000, 36000], initial: [8000, 17000], nocturnal: false }),
-  hawk: Object.freeze({ speciesIds: new Set(['galapagoshawk']), maxDistance: 50, nearDistance: 10, gain: 0.11, retry: [7000, 11000], interval: [36000, 76000], initial: [16000, 35000], nocturnal: false }),
-  owl: Object.freeze({ speciesIds: new Set(['shortearedowl']), maxDistance: 34, nearDistance: 6, gain: 0.095, retry: [6000, 10000], interval: [24000, 56000], initial: [12000, 26000], nocturnal: true }),
-  goatBleat: Object.freeze({ speciesIds: new Set(['feralgoat']), maxDistance: 34, nearDistance: 6, gain: 0.085, retry: [7000, 12000], interval: [38000, 82000], initial: [18000, 41000], nocturnal: false }),
+// The sprites behind every voice the wildlife director can ask for. Calls
+// recorded in the field keep their original families so mixer trims carry
+// over; modelled sounds use their own keys.
+const WILDLIFE_SOUND_SPRITES = Object.freeze({
+  gull: MOVEMENT_WILDLIFE_AUDIO.gull,
+  finch: MOVEMENT_WILDLIFE_AUDIO.finch,
+  dove: WILDLIFE_FIELDWORK_AUDIO.dove,
+  mockingbird: WILDLIFE_FIELDWORK_AUDIO.mockingbird,
+  hawk: WILDLIFE_FIELDWORK_AUDIO.hawk,
+  owl: WILDLIFE_FIELDWORK_AUDIO.owl,
+  goatBleat: CONTEXTUAL_WORLD_AUDIO.goatBleat,
+  ...Object.fromEntries(Object.entries(FAUNA_AUDIO).filter(([, asset]) => asset?.url)),
 });
 
+function resolveWildlifeSound(sound) {
+  return WILDLIFE_SOUND_SPRITES[sound] || null;
+}
+
+// Swimming, Darwin's controller rides about a metre below the waterline;
+// wading never gets that deep.
+function listenerSwimming(position) {
+  return Number.isFinite(position?.y) && WATER_LEVEL - position.y > 0.85;
+}
+
 const ANIMAL_CONTACT_PROFILES = Object.freeze({
+  floreanagianttortoise: Object.freeze({ family: 'tortoiseFootfall', stepDistance: 0.55, maxDistance: 18, nearDistance: 2, gain: 0.08, rate: 1 }),
+  // Lava lizards are only heard when they dash, not as they creep.
+  lavalizard: Object.freeze({ family: 'lizardScurry', stepDistance: 0.9, maxDistance: 9, nearDistance: 1.2, gain: 0.06, rate: 1, minSpeed: 0.9 }),
+  galapagosracer: Object.freeze({ family: 'racerSlither', stepDistance: 1.6, maxDistance: 10, nearDistance: 1.5, gain: 0.07, rate: 1 }),
   crab: Object.freeze({ family: 'crabScuttle', stepDistance: 0.32, maxDistance: 12, nearDistance: 1.2, gain: 0.06, rate: 1.03 }),
   marineiguana: Object.freeze({ family: 'iguanaClaws', stepDistance: 0.48, maxDistance: 15, nearDistance: 1.5, gain: 0.072, rate: 0.94 }),
   feralgoat: Object.freeze({ family: 'goatHoof', stepDistance: 0.72, maxDistance: 25, nearDistance: 2.5, gain: 0.09, rate: 1.05 }),
@@ -109,6 +138,13 @@ function wildlifePanFromWorldPosition(position) {
   return Math.max(-0.42, Math.min(0.42, panFromWorldPosition(position) * 1.9));
 }
 
+// A sound with a place in the world: the runtime pans it through an HRTF
+// panner at that position (camera-relative, full width, front and back);
+// the stereo pan is only the fallback before the listener is live.
+function worldSpatial(position) {
+  return { position, pan: wildlifePanFromWorldPosition(position) };
+}
+
 function targetLooksLikeRock(target) {
   const text = [target?.contactMaterial, target?.material, target?.kind, target?.type, target?.id, target?.label]
     .filter(Boolean)
@@ -129,6 +165,9 @@ const TAKEOFF_RATE = [
   [/gull|hawk|owl|heron|pelican|frigate|booby|cormorant/, 0.9],
   [/dove|mockingbird|tern|noddy|tattler|egret/, 0.96],
 ];
+
+// Spatial loops the place probe drives (placeSounds.js).
+const PLACE_LOOP_KEYS = ['springBrook', 'rockLap', 'leaves', 'scrubInsects', 'crickets', 'edgeWind', 'tidePool'];
 
 // Darwin's footfalls follow his pace: a stroll is soft and dark, a run lands
 // harder and brighter, and each foot sits a touch to its own side of centre
@@ -161,29 +200,6 @@ const FOLIAGE_BRUSH = {
   shrub: { track: 'brushShrub', sprite: 'shrub', gain: 0.32, rate: 0.98, filterHz: 6000 },
   spine: { track: 'brushSpine', sprite: 'shrub', gain: 0.17, rate: 1.2, filterHz: 4200 },
 };
-
-function nearestAudibleWildlife(zoneId, family) {
-  const player = getRuntimePlayerPose()?.position;
-  const poses = getSpecimenRuntimePoses(zoneId);
-  if (!player || !poses) return null;
-  let nearest = null;
-  const profile = WILDLIFE_CALL_PROFILES[family];
-  if (!profile) return null;
-  for (const specimen of getThreeSpecimens(zoneId)) {
-    if (!specimen?.id) continue;
-    if (!profile.speciesIds.has(specimen.id)) continue;
-    const actorId = specimen.instanceId || specimen.id;
-    const position = poses.get(actorId);
-    if (!position) continue;
-    const distance = Math.hypot(
-      position.x - player.x,
-      position.y - player.y,
-      position.z - player.z,
-    );
-    if (!nearest || distance < nearest.distance) nearest = { actorId, position, distance };
-  }
-  return nearest;
-}
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min);
@@ -311,8 +327,10 @@ export function IslandSoundscape({ active, enabled }) {
   const pelletAudioRef = useRef(new Map());
   const takeoffAudioRef = useRef({ lastAt: 0, actors: new Map() });
   const scheduledAudioRef = useRef(new Set());
-  const wildlifeScheduleRef = useRef({ zoneId: null });
+  const voiceDirectorRef = useRef(null);
+  if (!voiceDirectorRef.current) voiceDirectorRef.current = createWildlifeVoiceDirector();
   const waveBreakScheduleRef = useRef({ zoneId: null, nextAt: 0 });
+  const placeProbeRef = useRef({ zoneId: null, probe: null, at: 0 });
   const animalMotionRef = useRef(new Map());
   const microDetailRef = useRef({ zoneId: null, lastRain: 0, postRainUntil: 0, nextDripAt: 0, nextBranchAt: 0, nextSettlementAt: 0 });
   latestRef.current = { currentZoneId, playableModeId, runtimeEnabled, timeOfDay, health };
@@ -322,10 +340,6 @@ export function IslandSoundscape({ active, enabled }) {
     pushAudioRef.current.clear();
     animalMotionRef.current.clear();
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
-    wildlifeScheduleRef.current = { zoneId: currentZoneId };
-    for (const [family, profile] of Object.entries(WILDLIFE_CALL_PROFILES)) {
-      wildlifeScheduleRef.current[family] = now + randomBetween(...profile.initial);
-    }
     waveBreakScheduleRef.current = { zoneId: currentZoneId, nextAt: now + randomBetween(9000, 19000) };
     microDetailRef.current = {
       zoneId: currentZoneId,
@@ -375,7 +389,7 @@ export function IslandSoundscape({ active, enabled }) {
       const phaseRate = event.phase === 'dart' ? 1.045 : event.phase === 'descend' ? 0.955 : 0.99;
       setSpatialAudioTarget('bee', {
         gain: 0.06 * presence * presence * phaseGain * clamp01(event.gate),
-        pan: wildlifePanFromWorldPosition(position),
+        ...worldSpatial(position),
         playbackRate: phaseRate,
       }, 0.07);
     });
@@ -480,49 +494,221 @@ export function IslandSoundscape({ active, enabled }) {
     };
   }, [runtimeEnabled]);
 
+  // Every call comes from a real animal, chosen by what it is doing (see
+  // wildlifeVoices.js), and travels to Darwin: later and duller with range,
+  // muffled behind ground, through the cave and cliff space.
   useEffect(() => {
     if (!runtimeEnabled) return undefined;
+    const director = voiceDirectorRef.current;
+    const pending = new Set();
     const updateWildlife = () => {
       const current = latestRef.current;
-      if (!current.runtimeEnabled || document.hidden || !soundscapeAudioIsRunning()) return;
-      const birdCallsAllowed = diurnalBirdCallsAllowed({
-        timeOfDay: current.timeOfDay,
-        rainIntensity: weatherEnv.rainIntensity,
-      });
-      const now = performance.now();
-      const schedule = wildlifeScheduleRef.current;
-      if (schedule.zoneId !== current.currentZoneId) return;
-
-      for (const [family, profile] of Object.entries(WILDLIFE_CALL_PROFILES)) {
-        if (now < schedule[family]) continue;
-        const actor = nearestAudibleWildlife(current.currentZoneId, family);
-        const callsAllowed = profile.nocturnal
-          ? nocturnalOwlCallsAllowed({ timeOfDay: current.timeOfDay, rainIntensity: weatherEnv.rainIntensity })
-          : birdCallsAllowed;
-        if (!callsAllowed || !actor || actor.distance > profile.maxDistance) {
-          schedule[family] = now + randomBetween(...profile.retry);
-          continue;
-        }
-        const presence = 1 - smoothstep(profile.nearDistance, profile.maxDistance, actor.distance);
-        const sprite = MOVEMENT_WILDLIFE_AUDIO[family]
-          || WILDLIFE_FIELDWORK_AUDIO[family]
-          || CONTEXTUAL_WORLD_AUDIO[family];
-        const previous = variantsRef.current[family];
-        const index = chooseVariant(previous, sprite.variants);
-        variantsRef.current[family] = index;
-        playAudioSprite(sprite, {
-          family,
-          index,
-          gain: profile.gain * (0.4 + presence * 0.6),
-          playbackRate: 0.98 + Math.random() * 0.04,
-          pan: wildlifePanFromWorldPosition(actor.position),
-        });
-        schedule[family] = now + randomBetween(...profile.interval);
+      const zoneId = current.currentZoneId;
+      const listener = getRuntimePlayerPose()?.position;
+      const poses = getSpecimenRuntimePoses(zoneId);
+      if (!current.runtimeEnabled || document.hidden || !soundscapeAudioIsRunning() || !listener || !poses) {
+        setSpatialAudioTarget('seabirdColony', { gain: 0 }, 0.6);
+        return;
       }
+      const nowSeconds = performance.now() / 1000;
+      const animals = [];
+      for (const specimen of getThreeSpecimens(zoneId)) {
+        if (!specimen?.id || !WILDLIFE_VOICE_PROFILES[specimen.id]) continue;
+        const actorId = specimen.instanceId || specimen.id;
+        const position = poses.get(actorId);
+        if (!position || nowSeconds - Number(position.updatedAt || 0) > 3) continue;
+        const social = getSocialEntry(zoneId, actorId);
+        animals.push({
+          actorId,
+          speciesId: specimen.id,
+          position,
+          activity: social?.activity || 'default',
+          alarmed: Boolean(social?.alarmed),
+        });
+      }
+      const started = stepWildlifeVoices(director, {
+        zoneId,
+        animals,
+        listener,
+        heightAt: (x, z) => terrainHeight(x, z, zoneId),
+        hour: Number(current.timeOfDay) || 12,
+        rain: Number(weatherEnv.rainIntensity) || 0,
+        underwater: listenerSwimming(listener),
+        now: performance.now(),
+        resolve: resolveWildlifeSound,
+        play: request => {
+          const start = () => playRandomVariant(variantsRef, request.sound, request.sprite, {
+            gain: request.gain,
+            playbackRate: request.playbackRate,
+            ...worldSpatial(request.position),
+            filterHz: request.filterHz,
+          });
+          if (request.delayMs <= 0) {
+            start();
+            return;
+          }
+          const id = window.setTimeout(() => {
+            pending.delete(id);
+            start();
+          }, request.delayMs);
+          pending.add(id);
+        },
+      });
+      const colony = seabirdColonyBed(animals, listener, {
+        hour: Number(current.timeOfDay) || 12,
+        rain: Number(weatherEnv.rainIntensity) || 0,
+      });
+      setSpatialAudioTarget('seabirdColony', {
+        gain: colony?.gain || 0,
+        ...(colony ? worldSpatial(colony.position) : { pan: 0 }),
+        filterHz: colony?.filterHz || 20000,
+      }, 1.6);
+      // Read by the sound diagnostics and the play harness.
+      const debug = window.__darwinWildlifeVoices || { recent: [] };
+      debug.colony = colony && { gain: Number(colony.gain.toFixed(4)), distance: Math.round(colony.distance), count: colony.count };
+      debug.zoneId = zoneId;
+      debug.hour = Number(current.timeOfDay) || 0;
+      debug.animals = animals.map(animal => ({
+        actorId: animal.actorId,
+        activity: animal.activity,
+        alarmed: animal.alarmed,
+        distance: Math.round(Math.hypot(animal.position.x - listener.x, animal.position.z - listener.z)),
+      }));
+      for (const request of started) {
+        debug.recent = [...debug.recent.slice(-19), {
+          actorId: request.actorId,
+          sound: request.sound,
+          kind: request.kind,
+          distance: Math.round(request.distance),
+          occluded: request.occluded,
+          gain: Number(request.gain.toFixed(4)),
+          filterHz: Math.round(request.filterHz),
+          delayMs: Math.round(request.delayMs),
+        }];
+      }
+      window.__darwinWildlifeVoices = debug;
     };
     updateWildlife();
-    const timer = window.setInterval(updateWildlife, 750);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(updateWildlife, 250);
+    return () => {
+      window.clearInterval(timer);
+      pending.forEach(id => window.clearTimeout(id));
+      setSpatialAudioTarget('seabirdColony', { gain: 0 }, 0.6);
+    };
+  }, [runtimeEnabled]);
+
+  // Water where it actually is: the nearest running spring water and the
+  // nearest rocky sea edge, found by probing the ground around Darwin, plus
+  // the authored places that boom on their own (placeSounds.js).
+  useEffect(() => {
+    if (!runtimeEnabled) return undefined;
+    const placeState = { zoneId: null, nextAt: new Map() };
+    const pending = new Set();
+    const silence = () => {
+      for (const key of PLACE_LOOP_KEYS) setSpatialAudioTarget(key, { gain: 0 }, 0.4);
+    };
+    const updatePlaces = () => {
+      const current = latestRef.current;
+      const zoneId = current.currentZoneId;
+      const listener = getRuntimePlayerPose()?.position;
+      if (!current.runtimeEnabled || document.hidden || !listener) {
+        silence();
+        return;
+      }
+      const heightAt = (x, z) => terrainHeight(x, z, zoneId);
+      const probe = probeWaterAround(listener, {
+        heightAt,
+        biomeAt: (x, z, y) => terrainBiomeAt(x, z, y, zoneId),
+        waterLevel: WATER_LEVEL,
+      }) || {};
+      // Gabriel's fern spring seeps inside the cave, out of the terrain's
+      // reach.
+      if (zoneId === 'GABRIEL_SPRING' && !probe.brook) {
+        probe.brook = { x: listener.x, z: listener.z, distance: 6, strength: 0.45 };
+      }
+      const gains = placeLoopGains(probe);
+      setSpatialAudioTarget('springBrook', {
+        gain: gains.brook,
+        ...(probe.brook ? worldSpatial(probe.brook) : { pan: 0 }),
+        filterHz: 20000 / (1 + (probe.brook?.distance || 0) / 10),
+      }, 0.9);
+      setSpatialAudioTarget('rockLap', {
+        gain: gains.rockLap,
+        ...(probe.rockSea ? worldSpatial(probe.rockSea) : { pan: 0 }),
+        filterHz: 20000 / (1 + (probe.rockSea?.distance || 0) / 6),
+      }, 0.9);
+      // The probe's other finds, for the shore crashes and the spots below.
+      placeProbeRef.current = { zoneId, probe, at: performance.now() };
+      const indoors = isInteriorAmbienceZone(getZone(zoneId));
+      const ambience = placeAmbienceGains(probe, {
+        windStrength: clamp01((Number(weatherEnv.windSpeed) - 0.5) / 1.2),
+        rain: Number(weatherEnv.rainIntensity) || 0,
+        hour: Number(current.timeOfDay) || 12,
+      });
+      const spots = {
+        leaves: probe.canopy,
+        scrubInsects: probe.scrub,
+        crickets: probe.scrub,
+        edgeWind: probe.edge,
+        tidePool: probe.tidePool,
+      };
+      for (const [key, spot] of Object.entries(spots)) {
+        setSpatialAudioTarget(key, {
+          gain: indoors ? 0 : ambience[key],
+          ...(spot ? worldSpatial(spot) : { pan: 0 }),
+          filterHz: 20000 / (1 + (spot?.distance || 0) / 14),
+        }, 1.2);
+      }
+
+      if (placeState.zoneId !== zoneId) {
+        placeState.zoneId = zoneId;
+        placeState.nextAt.clear();
+      }
+      if (!soundscapeAudioIsRunning()) return;
+      const now = performance.now();
+      for (const place of soundPlacesForZone(zoneId)) {
+        if (!placeState.nextAt.has(place.id)) {
+          placeState.nextAt.set(place.id, now + randomBetween(place.every[0], place.every[1]) * 600);
+          continue;
+        }
+        if (now < placeState.nextAt.get(place.id)) continue;
+        placeState.nextAt.set(place.id, now + randomBetween(place.every[0], place.every[1]) * 1000);
+        const position = place.zoneWide ? null : { x: place.x, y: place.y, z: place.z };
+        const distance = position
+          ? Math.hypot(position.x - listener.x, position.y - listener.y, position.z - listener.z)
+          : place.distance;
+        const shaped = propagate(distance, {
+          near: place.near,
+          far: place.far,
+          occluded: position ? lineOccluded(listener, position, heightAt) : false,
+        });
+        const choice = pickPlaceSound(place);
+        const sprite = choice && resolveWildlifeSound(choice.sound);
+        if (!shaped || !sprite) continue;
+        const start = () => playRandomVariant(variantsRef, choice.sound, sprite, {
+          gain: place.gain * choice.gain * shaped.gain,
+          playbackRate: randomBetween(0.9, 1.04),
+          ...(position ? worldSpatial(position) : { pan: randomBetween(-0.2, 0.2) }),
+          filterHz: shaped.filterHz,
+        });
+        if (shaped.delayMs > 0) {
+          const id = window.setTimeout(() => {
+            pending.delete(id);
+            start();
+          }, shaped.delayMs);
+          pending.add(id);
+        } else {
+          start();
+        }
+      }
+    };
+    updatePlaces();
+    const timer = window.setInterval(updatePlaces, 400);
+    return () => {
+      window.clearInterval(timer);
+      pending.forEach(id => window.clearTimeout(id));
+      silence();
+    };
   }, [runtimeEnabled]);
 
   useEffect(() => {
@@ -565,7 +751,7 @@ export function IslandSoundscape({ active, enabled }) {
             playRandomVariant(variantsRef, 'water', POST_OFFICE_BAY_AUDIO.waterSteps, {
               gain: 0.065 * presence,
               playbackRate: randomBetween(0.94, 1.01),
-              pan: wildlifePanFromWorldPosition(position),
+              ...worldSpatial(position),
             });
           }
         }
@@ -582,11 +768,12 @@ export function IslandSoundscape({ active, enabled }) {
         if (distance >= profile.maxDistance) continue;
         const presence = 1 - smoothstep(profile.nearDistance, profile.maxDistance, distance);
         const speedPresence = clamp01((moved / elapsed - 0.04) / 1.35);
-        const sprite = CONTEXTUAL_WORLD_AUDIO[profile.family];
+        if (profile.minSpeed && moved / elapsed < profile.minSpeed) continue;
+        const sprite = CONTEXTUAL_WORLD_AUDIO[profile.family] || FAUNA_AUDIO[profile.family];
         playRandomVariant(variantsRef, profile.family, sprite, {
           gain: profile.gain * (0.28 + presence * 0.72) * (0.7 + speedPresence * 0.3),
           playbackRate: profile.rate * randomBetween(0.975, 1.025),
-          pan: wildlifePanFromWorldPosition(position),
+          ...worldSpatial(position),
         });
       }
 
@@ -754,13 +941,37 @@ export function IslandSoundscape({ active, enabled }) {
         && directCoast
         && surfPresence >= 0.45
         && now >= waveSchedule.nextAt) {
-        const closeness = smoothstep(0.45, 1, surfPresence);
-        playRandomVariant(variantsRef, 'waveBreak', POST_OFFICE_BAY_AUDIO.waveBreak, {
-          gain: 0.035 + closeness * 0.045,
-          playbackRate: randomBetween(0.975, 1.025),
-          pan: randomBetween(-0.2, 0.2),
-        });
-        waveSchedule.nextAt = now + randomBetween(17000, 39000);
+        // Where the probe has found the shore, the swell breaks there and
+        // comes in sets on the swell's period; otherwise an occasional
+        // break somewhere along the coast.
+        const placed = placeProbeRef.current;
+        const shore = placed.zoneId === current.currentZoneId && now - placed.at < 2000
+          ? placed.probe?.seaEdge
+          : null;
+        if (shore && shore.distance <= 24) {
+          const closeness = 1 - smoothstep(2, 24, shore.distance);
+          playRandomVariant(variantsRef, 'waveBreak', POST_OFFICE_BAY_AUDIO.waveBreak, {
+            gain: (shore.rocky ? 0.045 : 0.035) + closeness * 0.05,
+            playbackRate: randomBetween(0.95, 1.03) * (shore.rocky ? 0.96 : 1),
+            ...worldSpatial({ x: shore.x, y: WATER_LEVEL, z: shore.z }),
+            filterHz: 18000 / (1 + shore.distance / 18),
+          });
+          const set = waveSchedule.set = (waveSchedule.set || 0) + 1;
+          if (set < 2 + Math.floor(Math.random() * 2)) {
+            waveSchedule.nextAt = now + randomBetween(7500, 11500);
+          } else {
+            waveSchedule.set = 0;
+            waveSchedule.nextAt = now + randomBetween(16000, 28000);
+          }
+        } else {
+          const closeness = smoothstep(0.45, 1, surfPresence);
+          playRandomVariant(variantsRef, 'waveBreak', POST_OFFICE_BAY_AUDIO.waveBreak, {
+            gain: 0.035 + closeness * 0.045,
+            playbackRate: randomBetween(0.975, 1.025),
+            pan: randomBetween(-0.2, 0.2),
+          });
+          waveSchedule.nextAt = now + randomBetween(17000, 39000);
+        }
       } else if (now >= waveSchedule.nextAt) {
         waveSchedule.nextAt = now + randomBetween(3500, 6000);
       }
@@ -782,6 +993,7 @@ export function IslandSoundscape({ active, enabled }) {
       playbackJitter = 0.05,
       playbackRateCenter = 1,
       filterHz = null,
+      position = null,
     } = {}) => {
       const previous = variantsRef.current[family];
       const index = chooseVariant(previous, sprite.variants);
@@ -794,6 +1006,7 @@ export function IslandSoundscape({ active, enabled }) {
         playbackRate: playbackRateCenter - playbackJitter * 0.5 + Math.random() * playbackJitter,
         pan,
         filterHz,
+        position,
       });
     };
 
@@ -916,6 +1129,13 @@ export function IslandSoundscape({ active, enabled }) {
             playbackRateCenter: gaitRate,
             pan: stepPan,
           });
+          playContact('rockGrit', MOTION_AUDIO.rockGrit, {
+            intensity: event.intensity,
+            baseGain: 0.06 * gaitGain,
+            playbackJitter: 0.08,
+            playbackRateCenter: gaitRate,
+            pan: stepPan,
+          });
         } else if (hardRock) {
           playContact('rockStep', MOVEMENT_WILDLIFE_AUDIO.rockStep, {
             intensity: event.intensity,
@@ -924,6 +1144,15 @@ export function IslandSoundscape({ active, enabled }) {
             playbackRateCenter: gaitRate,
             pan: stepPan,
             filterHz: stepFilterHz,
+          });
+          // Lava and basalt are never clean: cinder and grit crushed under
+          // the heel and toe, the nails scratching, a pebble kicked away.
+          playContact('rockGrit', MOTION_AUDIO.rockGrit, {
+            intensity: event.intensity,
+            baseGain: 0.13 * gaitGain * (0.8 + step.pace * 0.4),
+            playbackJitter: 0.08,
+            playbackRateCenter: gaitRate,
+            pan: stepPan,
           });
         } else if (responseKind === 'sand') {
           playContact('sand', POST_OFFICE_BAY_AUDIO.sandSteps, {
@@ -1026,39 +1255,50 @@ export function IslandSoundscape({ active, enabled }) {
         }
         return;
       }
-      if (landing && Number(event?.fallSpeed) >= 4.8 && now - lastGearAtRef.current >= 420) {
+      // Three kinds of jump, heard differently at both ends: a standing hop
+      // (both boots together, compact), a running leap (one boot driven off,
+      // the coat streaming; landing a beat apart and running out, the boot
+      // skidding in whatever the ground is), and a drop from a height (his
+      // whole weight down through bent knees, kit and breath following).
+      const jump = jumpSoundShape(event, contactKind);
+      if (jump.gear && now - lastGearAtRef.current >= 420) {
         lastGearAtRef.current = now;
         playRandomVariant(variantsRef, 'gear', DARWIN_BODY_AUDIO.gear, {
-          gain: 0.068 + fallStrength * 0.035,
+          gain: 0.06 + jump.weight * 0.05,
           playbackRate: randomBetween(0.965, 1.035),
           pan: panFromWorldPosition(event?.position) * 0.5,
         });
       }
-      if (landing && Number(event?.fallSpeed) >= 7.5 && now - lastBodyImpactAtRef.current >= 1400) {
+      if (jump.bodyImpact && now - lastBodyImpactAtRef.current >= 1400) {
         lastBodyImpactAtRef.current = now;
         playRandomVariant(variantsRef, 'bodyImpact', DARWIN_BODY_AUDIO.bodyImpact, {
-          gain: 0.105 + fallStrength * 0.04,
+          gain: 0.09 + jump.weight * 0.06,
           playbackRate: randomBetween(0.97, 1.02),
           pan: panFromWorldPosition(event?.position) * 0.35,
         });
       }
-      // His own body in a jump, under whatever the ground says: the push-off,
-      // and a landing's weight, coat and satchel. A small drop off a ledge
-      // only gets the body when it lands with some force.
-      if (contactKind === 'takeoff') {
-        playContact('jumpTakeoff', FOLEY_AUDIO.jumpTakeoff, {
+      if (jump.body) {
+        playContact(jump.body, MOTION_AUDIO[jump.body], {
           intensity: movementIntensity,
-          baseGain: 0.13,
-          pan: panFromWorldPosition(event?.position) * 0.5,
-          playbackJitter: 0.06,
-        });
-      } else if (contactKind === 'landing-jump' || (landing && Number(event?.fallSpeed) >= 2.6)) {
-        playContact('jumpLanding', FOLEY_AUDIO.jumpLanding, {
-          intensity: movementIntensity,
-          baseGain: 0.1 + fallStrength * 0.1,
+          baseGain: jump.bodyGain,
           pan: panFromWorldPosition(event?.position) * 0.5,
           playbackJitter: 0.05,
+          playbackRateCenter: jump.rate,
         });
+      }
+      if (jump.skid) {
+        const skid = hardRock || isRockBody(event?.target)
+          ? ['skidRock', 0.11]
+          : responseKind === 'sand' ? ['skidSand', 0.065]
+            : ['grit', 'dust', 'ash'].includes(responseKind) ? ['skidGrit', 0.07] : null;
+        if (skid) {
+          playContact(skid[0], MOTION_AUDIO[skid[0]], {
+            intensity: movementIntensity,
+            baseGain: skid[1] * jump.skid,
+            pan: panFromWorldPosition(event?.position) * 0.6,
+            playbackJitter: 0.06,
+          });
+        }
       }
       const rockBody = isRockBody(event?.target);
       if (rockBody && landing) {
@@ -1150,7 +1390,7 @@ export function IslandSoundscape({ active, enabled }) {
       const intensity = clamp01((Number(event.speed) || 0) / 3.7);
       const sharedOptions = {
         intensity,
-        pan: wildlifePanFromWorldPosition(position),
+        ...worldSpatial(position),
         playbackJitter: 0.045,
         playbackRateCenter: event.movementMode === 'run' ? 1.025 : event.movementMode === 'jog' ? 1.01 : 0.985,
       };
@@ -1642,7 +1882,7 @@ export function IslandSoundscape({ active, enabled }) {
         playRandomVariant(variantsRef, family, FIELD_FOLEY_AUDIO[family], {
           gain: base * (0.45 + intensity * 0.55) / (1 + distance / 14),
           playbackRate: randomBetween(0.95, 1.05),
-          pan: wildlifePanFromWorldPosition(event.position),
+          ...worldSpatial(event.position),
           filterHz: 16000 / (1 + distance / 22),
           priority: true,
         });
@@ -1654,10 +1894,21 @@ export function IslandSoundscape({ active, enabled }) {
       const current = latestRef.current;
       if (!current.runtimeEnabled || event?.zoneId !== current.currentZoneId) return;
       const speciesId = String(event?.speciesId || '').toLowerCase();
-      if (!FLYING_BIRD_PATTERN.test(speciesId) || /flightless/.test(speciesId)) return;
       const player = getRuntimePlayerPose()?.position;
       if (!player || !event?.position) return;
       const distance = Math.hypot(event.position.x - player.x, event.position.z - player.z);
+      // A painted locust breaking cover clatters its hindwings.
+      if (/locust/.test(speciesId)) {
+        if (distance > 12) return;
+        playRandomVariant(variantsRef, 'locustFlight', FAUNA_AUDIO.locustFlight, {
+          gain: 0.07 * (1 - distance / 12) ** 1.3,
+          playbackRate: randomBetween(0.95, 1.08),
+          ...worldSpatial(event.position),
+          filterHz: 16000 / (1 + distance / 14),
+        });
+        return;
+      }
+      if (!FLYING_BIRD_PATTERN.test(speciesId) || /flightless/.test(speciesId)) return;
       if (distance > 26) return;
       const now = performance.now();
       const audio = takeoffAudioRef.current;
@@ -1668,14 +1919,14 @@ export function IslandSoundscape({ active, enabled }) {
       const startled = now - loudEventAtRef.current < 2500;
       const rate = TAKEOFF_RATE.find(([pattern]) => pattern.test(speciesId))?.[1] ?? 1.08;
       const gain = 0.1 * (1 - distance / 26) ** 1.4 * (startled ? 1.25 : 1);
-      const pan = wildlifePanFromWorldPosition(event.position);
+      const spatial = worldSpatial(event.position);
       const beats = startled ? 2 : 1;
       for (let beat = 0; beat < beats; beat += 1) {
         scheduleToolFoley(beat * randomBetween(55, 90), () => {
           playRandomVariant(variantsRef, 'wildlifeFlush', MOVEMENT_WILDLIFE_AUDIO.finchWing, {
             gain: gain * (beat ? 0.7 : 1),
             playbackRate: rate * randomBetween(0.97, 1.04),
-            pan,
+            ...spatial,
             filterHz: 14000 / (1 + distance / 18),
           });
         });

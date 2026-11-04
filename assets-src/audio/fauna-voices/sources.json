@@ -1,0 +1,703 @@
+[
+  {
+    "key": "sealion",
+    "freesoundId": 503679,
+    "title": "Colony of sea lions on land barking and vocalizing",
+    "recordist": "RavenWolfProds",
+    "pageUrl": "https://freesound.org/people/RavenWolfProds/sounds/503679/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-503679-sea-lion-colony-barks-hq-preview.mp3",
+    "durationSec": 475.78,
+    "species": "California sea lion (Zalophus californianus) — same genus as Galápagos sea lion Z. wollebaeki; Crescent City CA colony (~200 animals)",
+    "notes": "Best bark source. Zoom H6 stereo at 1-2 m from nearest animals; quiet floor (~-44 dBFS) between calls, clean harmonic barks, growls, snores and huffs. Some flipper/body slaps (broadband clicks). A steady low ~200 Hz tone (likely idling vehicle, parking lot adjacent) runs ~120-170 s - avoid that stretch or high-pass. 280-370 s is a calmer growl/snore stretch usable as a close colony bed. No adult-female/pup bleats identified.",
+    "segments": [
+      {
+        "start": 40.5,
+        "duration": 1.1,
+        "description": "single loud bull bark, isolated"
+      },
+      {
+        "start": 46,
+        "duration": 5,
+        "description": "bark bout, clean tail"
+      },
+      {
+        "start": 89,
+        "duration": 7.4,
+        "description": "loud rhythmic bark train (bull)"
+      },
+      {
+        "start": 92.8,
+        "duration": 1.1,
+        "description": "single bark from the 89 s train, cleanest"
+      },
+      {
+        "start": 135.2,
+        "duration": 7,
+        "description": "bark bout with growl"
+      },
+      {
+        "start": 202.6,
+        "duration": 3.4,
+        "description": "growl into barks"
+      },
+      {
+        "start": 207,
+        "duration": 4.9,
+        "description": "classic repeated barks (bark train)"
+      },
+      {
+        "start": 212.8,
+        "duration": 0.8,
+        "description": "single short bark"
+      },
+      {
+        "start": 235,
+        "duration": 1.5,
+        "description": "single bark, very quiet surround"
+      },
+      {
+        "start": 244.7,
+        "duration": 1.5,
+        "description": "single softer bark"
+      },
+      {
+        "start": 372.6,
+        "duration": 4.5,
+        "description": "bark bout"
+      },
+      {
+        "start": 382.4,
+        "duration": 4.8,
+        "description": "bark bout"
+      },
+      {
+        "start": 425.4,
+        "duration": 0.7,
+        "description": "single bark, isolated"
+      }
+    ]
+  },
+  {
+    "key": "sealionPier",
+    "freesoundId": 89972,
+    "title": "sealspier39sf2009st.wav",
+    "recordist": "tec_studio",
+    "pageUrl": "https://freesound.org/people/tec_studio/sounds/89972/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-89972-sea-lion-pier39-colony-hq-preview.mp3",
+    "durationSec": 46.92,
+    "species": "California sea lion (Zalophus californianus), Pier 39 San Francisco haul-out",
+    "notes": "Dense continuous many-animal chorus with no gaps (floor ~-25 dBFS) - use as the distant/background colony bed, not for single calls. Public tourist pier: audition for faint crowd walla before shipping; low-passing / lowering under surf masks it. Loopable with a crossfade.",
+    "segments": [
+      {
+        "start": 0,
+        "duration": 46.9,
+        "description": "whole file as colony bed (crossfade loop)"
+      },
+      {
+        "start": 2.4,
+        "duration": 4.2,
+        "description": "dense chorus swell"
+      },
+      {
+        "start": 6.9,
+        "duration": 2.1,
+        "description": "bark cluster"
+      },
+      {
+        "start": 27.3,
+        "duration": 1.3,
+        "description": "bark peak"
+      },
+      {
+        "start": 34,
+        "duration": 1.3,
+        "description": "bark peak"
+      },
+      {
+        "start": 38.9,
+        "duration": 0.8,
+        "description": "loud bark in chorus"
+      }
+    ]
+  },
+  {
+    "key": "flamingo",
+    "freesoundId": 414367,
+    "title": "flamants pilou.WAV",
+    "recordist": "alexandredoc",
+    "pageUrl": "https://freesound.org/people/alexandredoc/sounds/414367/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-414367-flamingo-flock-hq-preview.mp3",
+    "durationSec": 200.88,
+    "species": "Greater flamingo (Phoenicopterus roseus), wild flock, Villeneuve-lès-Maguelone wetland, S France - close relative of the American flamingo (P. ruber) found on Floreana",
+    "notes": "Nagra IV-S + MC930 ORTF. 0-90 s is the recordist walking through wet ground (footsteps/water) - skip. Flock honking 104-162 s is excellent, goose-like gabble, mid distance. Constant LF rumble below ~100 Hz throughout: high-pass ~150 Hz. From ~150 s a broadband hiss (wind/water) rises - prefer 104-150 s.",
+    "segments": [
+      {
+        "start": 104.5,
+        "duration": 2.6,
+        "description": "first honks, sparse"
+      },
+      {
+        "start": 107.5,
+        "duration": 1.1,
+        "description": "single honk"
+      },
+      {
+        "start": 109.5,
+        "duration": 1.8,
+        "description": "two-three honks"
+      },
+      {
+        "start": 111.6,
+        "duration": 6.8,
+        "description": "flock gabble swelling"
+      },
+      {
+        "start": 118.6,
+        "duration": 10.8,
+        "description": "full flock honking - loop bed candidate"
+      },
+      {
+        "start": 129.6,
+        "duration": 2.4,
+        "description": "honk phrase"
+      },
+      {
+        "start": 132.2,
+        "duration": 9.6,
+        "description": "flock honking, dense"
+      },
+      {
+        "start": 142,
+        "duration": 6.7,
+        "description": "flock honking, thinning"
+      }
+    ]
+  },
+  {
+    "key": "horseDistant",
+    "freesoundId": 636554,
+    "title": "Whinnying horse-far away.WAV",
+    "recordist": "L.Finck",
+    "pageUrl": "https://freesound.org/people/L.Finck/sounds/636554/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-636554-horse-whinny-distant-hq-preview.mp3",
+    "durationSec": 11.6,
+    "species": "Domestic horse (Equus caballus)",
+    "notes": "Outdoor, distant whinnies with natural air and a very low floor (~-78 dBFS); faint bird chirps in gaps. Low level (peaks ~-32 dBFS) - normalise. Ideal for an off-screen horse.",
+    "segments": [
+      {
+        "start": 0.1,
+        "duration": 1.4,
+        "description": "distant whinny 1"
+      },
+      {
+        "start": 2.6,
+        "duration": 1,
+        "description": "soft nicker/breath"
+      },
+      {
+        "start": 4.4,
+        "duration": 1.6,
+        "description": "distant whinny 2, strongest, vibrato"
+      },
+      {
+        "start": 7.3,
+        "duration": 0.8,
+        "description": "soft nicker"
+      },
+      {
+        "start": 9.3,
+        "duration": 1.2,
+        "description": "distant whinny 3"
+      }
+    ]
+  },
+  {
+    "key": "horse",
+    "freesoundId": 538697,
+    "title": "horse snort.wav",
+    "recordist": "bruno.auzet",
+    "pageUrl": "https://freesound.org/people/bruno.auzet/sounds/538697/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-538697-horse-snort-hq-preview.mp3",
+    "durationSec": 10.11,
+    "species": "Domestic horse (Equus caballus)",
+    "notes": "Schoeps ORTF + SD 744T, outdoors in France 2009. Horse snorting/blowing while walking; hoof steps between snorts. Close, clean.",
+    "segments": [
+      {
+        "start": 0.1,
+        "duration": 0.65,
+        "description": "big snort/blow"
+      },
+      {
+        "start": 1.55,
+        "duration": 0.55,
+        "description": "snort"
+      },
+      {
+        "start": 4.85,
+        "duration": 0.7,
+        "description": "snort"
+      },
+      {
+        "start": 7.7,
+        "duration": 0.7,
+        "description": "strong snort"
+      },
+      {
+        "start": 8.75,
+        "duration": 1.1,
+        "description": "long blow/flutter"
+      }
+    ]
+  },
+  {
+    "key": "cat",
+    "freesoundId": 571216,
+    "title": "181118 Cat, various meows, squeeks, purrs from my 3yr old cat.flac",
+    "recordist": "TRP",
+    "pageUrl": "https://freesound.org/people/TRP/sounds/571216/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-571216-cat-meows-squeaks-hq-preview.mp3",
+    "durationSec": 51.68,
+    "species": "Domestic cat (Felis catus)",
+    "notes": "Indoor, close; calm meows and short squeaks, not distressed. File is an edited compilation (hard edit points near 1 s, 14 s, 37 s); room floor rises slightly after 37 s.",
+    "segments": [
+      {
+        "start": 0.15,
+        "duration": 0.45,
+        "description": "short chirp-meow"
+      },
+      {
+        "start": 1.65,
+        "duration": 0.7,
+        "description": "soft meow"
+      },
+      {
+        "start": 4.3,
+        "duration": 0.8,
+        "description": "meow"
+      },
+      {
+        "start": 14.65,
+        "duration": 0.85,
+        "description": "clear meow"
+      },
+      {
+        "start": 16.25,
+        "duration": 0.95,
+        "description": "meow, rising"
+      },
+      {
+        "start": 17.95,
+        "duration": 0.4,
+        "description": "squeak"
+      },
+      {
+        "start": 27.8,
+        "duration": 0.45,
+        "description": "short squeak"
+      },
+      {
+        "start": 33.7,
+        "duration": 0.4,
+        "description": "squeak"
+      },
+      {
+        "start": 35.15,
+        "duration": 0.55,
+        "description": "soft meow"
+      }
+    ]
+  },
+  {
+    "key": "catTrill",
+    "freesoundId": 200336,
+    "title": "Cat trilling",
+    "recordist": "jsbarrett",
+    "pageUrl": "https://freesound.org/people/jsbarrett/sounds/200336/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-200336-cat-trill-hq-preview.mp3",
+    "durationSec": 14.17,
+    "species": "Domestic cat (Felis catus)",
+    "notes": "iPhone 4S, processed in Reaper (gated - gaps drop to digital-quiet, so add a little room tone when splicing). Friendly trills/brrps, mono.",
+    "segments": [
+      {
+        "start": 0.05,
+        "duration": 0.7,
+        "description": "trill"
+      },
+      {
+        "start": 1.35,
+        "duration": 0.6,
+        "description": "soft trill"
+      },
+      {
+        "start": 3.4,
+        "duration": 0.8,
+        "description": "trill-meow"
+      },
+      {
+        "start": 5.1,
+        "duration": 0.8,
+        "description": "trill"
+      },
+      {
+        "start": 6,
+        "duration": 0.75,
+        "description": "trill"
+      },
+      {
+        "start": 7.65,
+        "duration": 0.75,
+        "description": "trill"
+      },
+      {
+        "start": 9.8,
+        "duration": 0.5,
+        "description": "short bright brrp"
+      },
+      {
+        "start": 12.35,
+        "duration": 0.65,
+        "description": "trill"
+      }
+    ]
+  },
+  {
+    "key": "monkey",
+    "freesoundId": 437953,
+    "title": "G12-21-Monkey Chattering.wav",
+    "recordist": "craigsmith",
+    "pageUrl": "https://freesound.org/people/craigsmith/sounds/437953/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-437953-monkey-chatter-hq-preview.mp3",
+    "durationSec": 31.25,
+    "species": "Unidentified small monkey (vintage SFX library tape) - chatter/squeaks, stand-in for capuchin",
+    "notes": "Best CC0 small-monkey chatter found; no capuchin recordings exist in Freesound CC0. Caveats: 0-1.4 s is a broadband slate/noise burst and the page notes a man saying 'that's good' (likely the last ~0.4 s) - avoid 0-1.4 s and >30.8 s. The material repeats with an exact ~6.65 s period (tape loop), so treat 1.6-8.25 s as the unique content. Clean otherwise, low floor.",
+    "segments": [
+      {
+        "start": 1.55,
+        "duration": 1.2,
+        "description": "chatter burst"
+      },
+      {
+        "start": 2.9,
+        "duration": 0.55,
+        "description": "squeak pair"
+      },
+      {
+        "start": 3.7,
+        "duration": 2.35,
+        "description": "excited chatter run"
+      },
+      {
+        "start": 6.2,
+        "duration": 0.3,
+        "description": "single squeak"
+      },
+      {
+        "start": 6.7,
+        "duration": 0.5,
+        "description": "squeak"
+      },
+      {
+        "start": 7.5,
+        "duration": 0.4,
+        "description": "short chirp"
+      },
+      {
+        "start": 1.55,
+        "duration": 6.65,
+        "description": "one full unique loop cycle"
+      }
+    ]
+  },
+  {
+    "key": "seabirdColony",
+    "freesoundId": 353967,
+    "title": "Tortugas Birds - Bush Key.wav",
+    "recordist": "mdvirtual",
+    "pageUrl": "https://freesound.org/people/mdvirtual/sounds/353967/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-353967-seabird-colony-bush-key-hq-preview.mp3",
+    "durationSec": 68.59,
+    "species": "Tropical tern colony, Bush Key, Dry Tortugas (sooty tern Onychoprion fuscatus / brown noddy Anous stolidus - both close kin of Galápagos noddies/terns)",
+    "notes": "Massive, very even colony wash (Zoom H1, HP-filtered by recordist for wind). No gaps, no obvious events - ideal looping bed. Slightly band-limited/narrow (H1) and low level (~-41 dBFS); normalise.",
+    "segments": [
+      {
+        "start": 0.5,
+        "duration": 67.5,
+        "description": "whole file as loop bed (trim fades)"
+      },
+      {
+        "start": 5,
+        "duration": 20,
+        "description": "bed section A"
+      },
+      {
+        "start": 27,
+        "duration": 20,
+        "description": "bed section B"
+      },
+      {
+        "start": 47,
+        "duration": 20,
+        "description": "bed section C"
+      }
+    ]
+  },
+  {
+    "key": "gullsScilly",
+    "freesoundId": 377107,
+    "title": "Gulls on The isles of Scilly",
+    "recordist": "plantmonkey",
+    "pageUrl": "https://freesound.org/people/plantmonkey/sounds/377107/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-377107-gulls-scilly-hq-preview.mp3",
+    "durationSec": 98.19,
+    "species": "Gulls (species not noted; likely herring/lesser black-backed), Gugh, Isles of Scilly, with distant Atlantic",
+    "notes": "Use as foreground gull call accents over the Bush Key bed (Galápagos has lava and swallow-tailed gulls). Edirol R-09HR; quiet ocean underlay. Bird species differ from Galápagos - use sparingly.",
+    "segments": [
+      {
+        "start": 8.7,
+        "duration": 0.9,
+        "description": "gull call"
+      },
+      {
+        "start": 10.65,
+        "duration": 1.1,
+        "description": "gull call"
+      },
+      {
+        "start": 12,
+        "duration": 0.85,
+        "description": "gull call"
+      },
+      {
+        "start": 32.9,
+        "duration": 0.45,
+        "description": "short yelp"
+      },
+      {
+        "start": 64.7,
+        "duration": 5.1,
+        "description": "long-call sequence"
+      },
+      {
+        "start": 79,
+        "duration": 0.9,
+        "description": "gull call"
+      },
+      {
+        "start": 80.4,
+        "duration": 0.7,
+        "description": "gull call"
+      },
+      {
+        "start": 81.4,
+        "duration": 1.1,
+        "description": "gull call"
+      },
+      {
+        "start": 90.6,
+        "duration": 1.2,
+        "description": "gull call"
+      }
+    ]
+  },
+  {
+    "key": "trickle",
+    "freesoundId": 660506,
+    "title": "Trickle Stream_1",
+    "recordist": "lukabea",
+    "pageUrl": "https://freesound.org/people/lukabea/sounds/660506/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-660506-trickle-stream-hq-preview.mp3",
+    "durationSec": 32.92,
+    "species": "n/a - small freshwater trickle",
+    "notes": "Recorded at 96 kHz. Steady fine trickle/bubbling (energy 1.5-3 kHz), no birds/traffic visible. Use for the Floreana spring dribbling into a rock basin; loop with crossfade.",
+    "segments": [
+      {
+        "start": 0.5,
+        "duration": 32,
+        "description": "whole file loop bed"
+      },
+      {
+        "start": 1,
+        "duration": 10,
+        "description": "loop section A"
+      },
+      {
+        "start": 12,
+        "duration": 10,
+        "description": "loop section B"
+      },
+      {
+        "start": 22,
+        "duration": 10,
+        "description": "loop section C"
+      }
+    ]
+  },
+  {
+    "key": "crevices",
+    "freesoundId": 186569,
+    "title": "Waves in Crevices",
+    "recordist": "LanDub",
+    "pageUrl": "https://freesound.org/people/LanDub/sounds/186569/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-186569-waves-in-crevices-hq-preview.mp3",
+    "durationSec": 63.95,
+    "species": "n/a - sea wash in rock crevices",
+    "notes": "Camcorder (Canon Legria) recording of waves splashing under rocks/crevices - distinct wash/gurgle events with quiet troughs. Slight steady low hum (~500 Hz and below) from the recorder; high-pass/notch if exposed.",
+    "segments": [
+      {
+        "start": 7.8,
+        "duration": 4.6,
+        "description": "wash surge into crevice and drain"
+      },
+      {
+        "start": 15.2,
+        "duration": 1.7,
+        "description": "small slap"
+      },
+      {
+        "start": 20.5,
+        "duration": 4,
+        "description": "surge"
+      },
+      {
+        "start": 25.3,
+        "duration": 3.2,
+        "description": "bright splash and gurgle"
+      },
+      {
+        "start": 29.9,
+        "duration": 4.2,
+        "description": "wash and drain"
+      },
+      {
+        "start": 37.8,
+        "duration": 4.5,
+        "description": "surge and suck-back"
+      },
+      {
+        "start": 45.8,
+        "duration": 3.8,
+        "description": "wash"
+      },
+      {
+        "start": 53.6,
+        "duration": 4.8,
+        "description": "wash and gurgle"
+      },
+      {
+        "start": 59.8,
+        "duration": 3.6,
+        "description": "splash and drain"
+      }
+    ]
+  },
+  {
+    "key": "seaCave",
+    "freesoundId": 376710,
+    "title": "Cornish Seacave",
+    "recordist": "plantmonkey",
+    "pageUrl": "https://freesound.org/people/plantmonkey/sounds/376710/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-376710-sea-cave-cornwall-hq-preview.mp3",
+    "durationSec": 110.5,
+    "species": "n/a - waves entering a small sea cave",
+    "notes": "Edirol R-09HR. Water surging in and out of a small Cornish sea cave: hollow low-mid swells with gurgling suck-back. Not a big 'boom' - layer a low-passed thump for heavier impacts.",
+    "segments": [
+      {
+        "start": 2,
+        "duration": 5.5,
+        "description": "inflow and gurgle"
+      },
+      {
+        "start": 8.3,
+        "duration": 3.1,
+        "description": "swell"
+      },
+      {
+        "start": 12.9,
+        "duration": 3.4,
+        "description": "swell"
+      },
+      {
+        "start": 24.2,
+        "duration": 7.6,
+        "description": "big surge in and out"
+      },
+      {
+        "start": 32.7,
+        "duration": 6.9,
+        "description": "surge and drain"
+      },
+      {
+        "start": 55.3,
+        "duration": 3.9,
+        "description": "swell"
+      },
+      {
+        "start": 64.4,
+        "duration": 12.2,
+        "description": "longest/strongest surge sequence"
+      },
+      {
+        "start": 85.3,
+        "duration": 1.2,
+        "description": "short hollow slap"
+      },
+      {
+        "start": 103.4,
+        "duration": 1.3,
+        "description": "short hollow slap"
+      }
+    ]
+  },
+  {
+    "key": "blowhole",
+    "freesoundId": 824088,
+    "title": "Sea blowhole, splashing. Bufador de mar, salpica.",
+    "recordist": "SonoRec",
+    "pageUrl": "https://freesound.org/people/SonoRec/sounds/824088/",
+    "license": "CC0",
+    "file": "assets-src/audio/fauna-voices/raw/freesound-824088-sea-blowhole-hq-preview.mp3",
+    "durationSec": 19.92,
+    "species": "n/a - sea blowhole, Mediterranean",
+    "notes": "iPhone 13. Three clear blowhole bursts (whoosh + splash spray) over continuous surf; phone mic so some LF limitation; continuous wave noise floor (~-33 dBFS) between bursts.",
+    "segments": [
+      {
+        "start": 1.2,
+        "duration": 2.4,
+        "description": "blowhole whoosh and spray 1"
+      },
+      {
+        "start": 4.85,
+        "duration": 1.1,
+        "description": "minor surge"
+      },
+      {
+        "start": 7.4,
+        "duration": 2.9,
+        "description": "blowhole whoosh and spray 2 (largest)"
+      },
+      {
+        "start": 12.1,
+        "duration": 1.6,
+        "description": "minor surge"
+      },
+      {
+        "start": 15.35,
+        "duration": 1.9,
+        "description": "blowhole whoosh 3"
+      }
+    ]
+  }
+]

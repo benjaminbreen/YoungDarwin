@@ -335,6 +335,9 @@ export function createLayeredDryPbrTerrainMaterial({
   // A directional surface uses one registered color/data sample instead of
   // the rotated color-only blend. Rotation is in radians in the x/z plane.
   coastalRotation = null,
+  // Regions that paint their own wet shore band set this so the shared one
+  // in Terrain.jsx does not darken the same sand twice.
+  ownsShoreDamp = false,
   cacheKey = 'layered-dry-pbr-terrain-v1',
 } = {}) {
   if (!pathPoints || pathPoints.length < 2) {
@@ -425,6 +428,7 @@ ${normalFragment(layerConfig, basaltTriplanar, coastalRotation)}`,
   // The factory suffix versions the shared GLSL independently of each
   // region's own key.
   material.customProgramCacheKey = () => `${cacheKey}|ldpt-v5:${basaltTriplanar ? 'triplanar' : 'planar'}:${coastalRotation ?? 'mixed'}`;
+  material.userData.ownsShoreDamp = ownsShoreDamp;
   material.needsUpdate = true;
   return material;
 }

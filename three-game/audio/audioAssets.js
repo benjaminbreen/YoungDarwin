@@ -133,11 +133,53 @@ export const INTERFACE_AUDIO = Object.freeze({
   pencil: Object.freeze({ url: `${INTERFACE_ROOT}/pencil.wav`, variants: 6, slotDuration: 0.9 }),
   nib: Object.freeze({ url: `${INTERFACE_ROOT}/nib.wav`, variants: 4, slotDuration: 1.4 }),
   shipBell: Object.freeze({ url: `${INTERFACE_ROOT}/ship-bell.wav`, variants: 2, slotDuration: 5 }),
+  tabFlick: Object.freeze({ url: `${INTERFACE_ROOT}/tab-flick.wav`, variants: 6, slotDuration: 0.25 }),
+  sealPress: Object.freeze({ url: `${INTERFACE_ROOT}/seal-press.wav`, variants: 4, slotDuration: 0.5 }),
+  detent: Object.freeze({ url: `${INTERFACE_ROOT}/detent.wav`, variants: 6, slotDuration: 0.18 }),
+  feltThud: Object.freeze({ url: `${INTERFACE_ROOT}/felt-thud.wav`, variants: 4, slotDuration: 0.25 }),
   heartbeat: `${INTERFACE_ROOT}/heartbeat-loop.wav`,
 });
 
 export const INTERFACE_AUDIO_URLS = Object.freeze(
   Object.values(INTERFACE_AUDIO).map(asset => asset?.url || asset),
+);
+
+// Modelled animal and water-place sounds (scripts/build-fauna-audio.mjs):
+// the non-vocal sounds of the island's animals, and the loops and one-shots
+// the place probe and authored sound places play.
+const FAUNA_ROOT = '/assets/audio/fauna';
+const FAUNA_VOICES_ROOT = '/assets/audio/fauna-voices';
+
+export const FAUNA_AUDIO = Object.freeze({
+  iguanaSneeze: Object.freeze({ url: `${FAUNA_ROOT}/iguana-sneeze.wav`, variants: 6, slotDuration: 0.7 }),
+  lizardScurry: Object.freeze({ url: `${FAUNA_ROOT}/lizard-scurry.wav`, variants: 6, slotDuration: 0.5 }),
+  racerSlither: Object.freeze({ url: `${FAUNA_ROOT}/racer-slither.wav`, variants: 4, slotDuration: 1.4 }),
+  locustFlight: Object.freeze({ url: `${FAUNA_ROOT}/locust-flight.wav`, variants: 6, slotDuration: 0.8 }),
+  tortoiseHiss: Object.freeze({ url: `${FAUNA_ROOT}/tortoise-hiss.wav`, variants: 4, slotDuration: 1.6 }),
+  tortoiseFootfall: Object.freeze({ url: `${FAUNA_ROOT}/tortoise-step.wav`, variants: 6, slotDuration: 0.6 }),
+  tortoiseGraze: Object.freeze({ url: `${FAUNA_ROOT}/tortoise-graze.wav`, variants: 4, slotDuration: 1.1 }),
+  turtleBreath: Object.freeze({ url: `${FAUNA_ROOT}/turtle-breath.wav`, variants: 4, slotDuration: 1.4 }),
+  parrotfishCrunch: Object.freeze({ url: `${FAUNA_ROOT}/parrotfish-crunch.wav`, variants: 6, slotDuration: 0.5 }),
+  frigateClatter: Object.freeze({ url: `${FAUNA_ROOT}/frigate-clatter.wav`, variants: 4, slotDuration: 1 }),
+  finchCrack: Object.freeze({ url: `${FAUNA_ROOT}/finch-crack.wav`, variants: 6, slotDuration: 0.2 }),
+  boobyWhistle: Object.freeze({ url: `${FAUNA_ROOT}/booby-whistle.wav`, variants: 5, slotDuration: 1.8 }),
+  seaCaveBoom: Object.freeze({ url: `${FAUNA_ROOT}/sea-cave-boom.wav`, variants: 4, slotDuration: 4.5 }),
+  // Cut from CC0 field recordings (scripts/build-fauna-voices-audio.mjs).
+  sealionBark: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/sealion-bark.wav`, variants: 6, slotDuration: 1.6 }),
+  sealionBarkBout: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/sealion-bark-bout.wav`, variants: 4, slotDuration: 3 }),
+  sealionGrunt: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/sealion-grunt.wav`, variants: 6, slotDuration: 1.8 }),
+  flamingoHonk: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/flamingo-honk.wav`, variants: 6, slotDuration: 2.6 }),
+  horseSnort: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/horse-snort.wav`, variants: 7, slotDuration: 1.2 }),
+  horseWhinny: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/horse-whinny.wav`, variants: 3, slotDuration: 1.7 }),
+  catMeow: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/cat-meow.wav`, variants: 9, slotDuration: 1 }),
+  seaCaveSurge: Object.freeze({ url: `${FAUNA_VOICES_ROOT}/sea-cave-surge.wav`, variants: 5, slotDuration: 4.5 }),
+  springBrook: `${FAUNA_VOICES_ROOT}/spring-trickle-loop.wav`,
+  seabirdColony: `${FAUNA_VOICES_ROOT}/seabird-colony-loop.wav`,
+  rockLap: `${FAUNA_ROOT}/rock-lap-loop.wav`,
+});
+
+export const FAUNA_AUDIO_URLS = Object.freeze(
+  Object.values(FAUNA_AUDIO).map(asset => asset?.url || asset),
 );
 
 const MOVEMENT_WILDLIFE_ROOT = '/assets/audio/movement-wildlife';
@@ -172,12 +214,38 @@ export const FOLEY_AUDIO = Object.freeze({
   rockBump: Object.freeze({ url: `${FOLEY_ROOT}/rock-bump.wav`, variants: 6, slotDuration: 0.8 }),
   rockScramble: Object.freeze({ url: `${FOLEY_ROOT}/rock-scramble.wav`, variants: 6, slotDuration: 0.6 }),
   looseStoneClonk: Object.freeze({ url: `${FOLEY_ROOT}/loose-stone-clonk.wav`, variants: 6, slotDuration: 0.75 }),
-  jumpTakeoff: Object.freeze({ url: `${FOLEY_ROOT}/jump-takeoff.wav`, variants: 6, slotDuration: 0.55 }),
-  jumpLanding: Object.freeze({ url: `${FOLEY_ROOT}/jump-landing.wav`, variants: 6, slotDuration: 0.8 }),
   gunBlast: Object.freeze({ url: `${FOLEY_ROOT}/gun-blast.wav`, variants: 4, slotDuration: 2.6 }),
 });
 
 export const FOLEY_AUDIO_URLS = Object.freeze(Object.values(FOLEY_AUDIO).map(sprite => sprite.url));
+
+// Modelled jump, skid and grit layers over the footfalls
+// (scripts/build-motion-audio.mjs).
+const MOTION_ROOT = '/assets/audio/motion';
+
+export const MOTION_AUDIO = Object.freeze({
+  jumpTakeoffStand: Object.freeze({ url: `${MOTION_ROOT}/jump-takeoff-stand.wav`, variants: 6, slotDuration: 0.55 }),
+  jumpTakeoffRun: Object.freeze({ url: `${MOTION_ROOT}/jump-takeoff-run.wav`, variants: 6, slotDuration: 0.7 }),
+  jumpLandStand: Object.freeze({ url: `${MOTION_ROOT}/jump-land-stand.wav`, variants: 6, slotDuration: 0.6 }),
+  jumpLandRun: Object.freeze({ url: `${MOTION_ROOT}/jump-land-run.wav`, variants: 6, slotDuration: 0.8 }),
+  jumpLandDrop: Object.freeze({ url: `${MOTION_ROOT}/jump-land-drop.wav`, variants: 6, slotDuration: 1 }),
+  skidGrit: Object.freeze({ url: `${MOTION_ROOT}/skid-grit.wav`, variants: 6, slotDuration: 0.55 }),
+  skidSand: Object.freeze({ url: `${MOTION_ROOT}/skid-sand.wav`, variants: 6, slotDuration: 0.55 }),
+  skidRock: Object.freeze({ url: `${MOTION_ROOT}/skid-rock.wav`, variants: 6, slotDuration: 0.45 }),
+  rockGrit: Object.freeze({ url: `${MOTION_ROOT}/rock-grit-step.wav`, variants: 10, slotDuration: 0.42 }),
+});
+
+export const MOTION_AUDIO_URLS = Object.freeze(Object.values(MOTION_AUDIO).map(sprite => sprite.url));
+
+// Modelled loops heard from particular spots (scripts/build-place-ambience-audio.mjs).
+const PLACES_ROOT = '/assets/audio/places';
+
+export const PLACE_AMBIENCE_AUDIO = Object.freeze({
+  leaves: `${PLACES_ROOT}/leaves-loop.wav`,
+  crickets: `${PLACES_ROOT}/crickets-loop.wav`,
+  edgeWind: `${PLACES_ROOT}/edge-wind-loop.wav`,
+  tidePool: `${PLACES_ROOT}/tide-pool-loop.wav`,
+});
 
 const WILDLIFE_FIELDWORK_ROOT = '/assets/audio/wildlife-fieldwork';
 

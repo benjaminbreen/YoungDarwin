@@ -139,6 +139,9 @@ export function updatePlayerJumpInputAndGravity({
       biome: terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId),
       direction: { x: takeoffDirection.x, y: 0, z: takeoffDirection.z },
       horizontalSpeed: launchHorizontalSpeed,
+      // The soundscape tells a running leap from a standing hop.
+      runningJump: launchRunning,
+      charge,
       radiusScale: launchRunning ? 1.05 : 0.82,
       target: launchGround?.obstacle || null,
     });
@@ -270,6 +273,11 @@ export function resolvePlayerLanding({
     const landedAirTime = wasAirborne.current && jumpState.current.launchedAt > 0
       ? now - jumpState.current.launchedAt
       : 0;
+    // How far below the launch he came down (for a walk-off, the height the
+    // fall speed implies): the soundscape hears a drop, not just a hop.
+    const landedDropHeight = intentionalPlayerJump && Number.isFinite(jumpState.current.launchY)
+      ? jumpState.current.launchY - group.current.position.y
+      : (falling * falling) / (2 * PLAYER.gravity * 1.28);
     // Fall-speed thresholds below are tuned for gravity 16.5 x 1.28: the same
     // drop heights as the old 10.8 x 1.34 tuning hit ~1.21x the impact speed.
     const ordinaryStandingJumpLanding = standingPlayerJump && falling < 11.5;
@@ -390,6 +398,7 @@ export function resolvePlayerLanding({
           horizontalSpeed: landingSpeed,
           travelDistance: landedJumpTravelDistance,
           airTime: landedAirTime,
+          dropHeight: landedDropHeight,
           charge: landedJumpCharge,
           runningJump: intentionalPlayerJump && landedJumpWasRunning,
           radiusScale: THREE.MathUtils.clamp(
@@ -502,6 +511,7 @@ export function resolvePlayerLanding({
             biome: terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId),
             fallSpeed: descentRate,
             horizontalSpeed: offLandingSpeed,
+            dropHeight: descent.drop,
           });
         }
         descent.drop = 0;

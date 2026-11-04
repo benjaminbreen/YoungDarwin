@@ -313,6 +313,10 @@ export function createWatkinsCampTerrainMaterial() {
       );
   };
 
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+
+  material.userData.ownsShoreDamp = true;
+
   material.customProgramCacheKey = () => 'watkins-camp-stream-hollow-v3';
   material.needsUpdate = true;
   return material;

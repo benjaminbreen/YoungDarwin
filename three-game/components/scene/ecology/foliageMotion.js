@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEW_GLSL, dewUniforms } from '../../../world/dewRuntime';
 import { weatherEnv } from '../../../world/weatherEnvRuntime';
 import { resolveFoliagePush } from '../../../world/ecology/foliagePushProfiles';
 
@@ -160,6 +161,9 @@ export function applyFoliageMotion(material, geometry, motion = {}, descriptor =
     shader.uniforms.uPushDrag = { value: push.drag };
     shader.uniforms.uTipWhip = { value: push.tipWhip };
     shader.uniforms.uPushRecoil = { value: push.recoilRatio };
+    shader.uniforms.uDew = dewUniforms.uDew;
+    shader.uniforms.uDewSun = dewUniforms.uDewSun;
+    shader.uniforms.uDewSunColor = dewUniforms.uDewSunColor;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -184,6 +188,7 @@ export function applyFoliageMotion(material, geometry, motion = {}, descriptor =
         uniform float uPushDrag;
         uniform float uTipWhip;
         uniform float uPushRecoil;
+        varying vec3 vDewWorld;
 
         // Smooth saturation. A hard min() clips the spring's overshoot flat,
         // which is exactly the part that reads as give; this stays linear for
@@ -288,8 +293,30 @@ export function applyFoliageMotion(material, geometry, motion = {}, descriptor =
         );
         fmWorld.xz += fmDir * fmTotal;
         fmWorld.y -= max(fmTotal, 0.0) * uBendDown;
+        vDewWorld = fmWorld.xyz;
         vec4 mvPosition = viewMatrix * fmWorld;
         gl_Position = projectionMatrix * mvPosition;`,
+      );
+    // Dawn dew: beaded leaves go glossy and throw pinpoint glints of sun
+    // (world/dewRuntime.js), gone by mid-morning.
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vDewWorld;
+        ${DEW_GLSL}`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, min(roughnessFactor, 0.38), uDew * 0.85);`,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        `if (uDew > 0.001) {
+          outgoingLight += dewGlints(vDewWorld, inverseTransformDirection(normal, viewMatrix), 0.12, 34.0);
+        }
+        #include <opaque_fragment>`,
       );
   };
   // One shared program: the injected GLSL is byte-identical for every
@@ -297,7 +324,7 @@ export function applyFoliageMotion(material, geometry, motion = {}, descriptor =
   // uniforms. Keying the cache on those numbers linked a separate identical
   // program per (species x geometry) bucket, ~80 of the ~365 programs a zone
   // boot paid for. Bump the suffix when the injected source changes.
-  material.customProgramCacheKey = () => 'foliage-motion-v2';
+  material.customProgramCacheKey = () => 'foliage-motion-v3-dew';
   material.needsUpdate = true;
   return material;
 }

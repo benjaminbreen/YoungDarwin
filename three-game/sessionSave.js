@@ -173,6 +173,7 @@ export function buildSessionSnapshot(state) {
     activeDirectiveId: typeof state.activeDirectiveId === 'string' ? state.activeDirectiveId : null,
     symsDirective: typeof state.symsDirective === 'string' ? state.symsDirective : null,
     symsZoneId: typeof state.symsZoneId === 'string' ? state.symsZoneId : null,
+    shotgunHolder: state.shotgunHolder === 'darwin' ? 'darwin' : 'syms',
     // These two bounded records feed the final assessment. Omitting them made a
     // resumed day-three expedition look as though Darwin had never spoken or
     // engaged with anyone during the earlier sittings.

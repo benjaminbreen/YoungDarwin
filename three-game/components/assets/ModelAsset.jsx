@@ -30,7 +30,10 @@ import { useTrackedGLTF } from './gltfCachePolicy';
 import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
 import { shotgunAimState } from '../../shooting/aimState';
 import { applyPlayerFabricDetail } from './playerFabricDetail';
+import { applyPlayerHairShading, applyPlayerSkinShading } from './playerSkinHairShading';
+import { installDarwinLookComparison } from './darwinLookComparison';
 import { DARWIN5_WATCH_CHAIN } from './darwin5WatchChain';
+import { DARWIN5_HAIR_FACE_SKIN, DARWIN5_HEAD_HAIR, DARWIN5_HEAD_SKIN } from './darwin5HeadSplits';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin5',
@@ -1028,7 +1031,9 @@ function applyPlayerMaterialUpgrade(scene, asset, renderer) {
       if (albedoMap && 'map' in material) material.map = albedoMap;
       // Baked contact occlusion (scripts/bake-darwin-ao.mjs). three applies
       // aoMap to indirect light only, so sun-lit faces keep their key light.
-      if (aoMap && samplesAtlas && 'aoMap' in material) {
+      // aoSkipMaterials: the face's AO was ray-traced against the hair and
+      // sideburn shells lying over it and reads as blotches on the skin.
+      if (aoMap && samplesAtlas && 'aoMap' in material && !cfg.aoSkipMaterials?.includes(material.name)) {
         material.aoMap = aoMap;
         material.aoMapIntensity = cfg.aoMapIntensity ?? 1;
         material.userData.aoDirectUniform = aoDirect;
@@ -1138,68 +1143,101 @@ void main() {`)
 
 const MATERIAL_SPLITS = {
   darwin5WatchChain: DARWIN5_WATCH_CHAIN,
+  darwin5HeadSkin: DARWIN5_HEAD_SKIN,
+  darwin5HeadHair: DARWIN5_HEAD_HAIR,
+  darwin5HairFaceSkin: DARWIN5_HAIR_FACE_SKIN,
 };
 
-// Move triangles fused into one primitive onto another material in the same
-// scene (e.g. the watch chain painted on the clothing atlas onto the brass
-// buttons' material). Triangles are matched by bind-pose centroid, so the
-// table survives a re-encode that reorders triangles; on any mismatch the mesh
-// is left alone. The index is reordered once per shared geometry (cached GLB
-// clones share it) and each mesh gets a [source, target] material array.
+// Move triangles fused into one primitive onto other materials in the same
+// scene (the watch chain painted on the clothing atlas onto the brass buttons'
+// material; head pieces of the clothing primitive onto skin and hair).
+// Triangles are matched by bind-pose centroid, so the tables survive a
+// re-encode that reorders triangles; a table that matches too little is
+// skipped. The index is reordered once per shared geometry (cached GLB clones
+// share it) into one group per material, and each mesh gets the material array.
 function applyMaterialSplits(scene, asset) {
-  for (const entry of asset.materialSplits || []) {
-    const splitId = typeof entry === 'string' ? entry : entry.id;
-    const split = MATERIAL_SPLITS[splitId];
-    if (!split) continue;
-    let target = null;
+  const findMaterial = name => {
+    let found = null;
     scene.traverse(object => {
-      if (target || !object.isMesh || Array.isArray(object.material)) return;
-      if (object.material?.name === split.targetMaterial) target = object.material;
+      if (found || !object.isMesh || Array.isArray(object.material)) return;
+      if (object.material?.name === name) found = object.material;
     });
+    return found;
+  };
+  const bySource = new Map();
+  for (const entry of asset.materialSplits || []) {
+    const id = typeof entry === 'string' ? entry : entry.id;
+    const split = MATERIAL_SPLITS[id];
+    let target = split && findMaterial(split.targetMaterial);
     if (!target) continue;
     if (entry.sparkle) target = getSparkleVariant(target, entry.sparkle, entry.name);
+    if (!bySource.has(split.sourceMaterial)) bySource.set(split.sourceMaterial, []);
+    bySource.get(split.sourceMaterial).push({ id, split, target });
+  }
+  bySource.forEach((splits, sourceName) => {
+    const layout = splits.map(entry => entry.id).join('+');
+    let matchedMesh = false;
     scene.traverse(object => {
-      if (!object.isMesh || Array.isArray(object.material) || object.material?.name !== split.sourceMaterial) return;
+      if (!object.isMesh || Array.isArray(object.material) || object.material?.name !== sourceName) return;
       const geometry = object.geometry;
-      if (!geometry.userData.materialSplits?.[splitId]) {
+      let active = geometry.userData.materialSplitLayout?.layout === layout
+        ? splits.filter(entry => geometry.userData.materialSplitLayout.ids.includes(entry.id))
+        : null;
+      if (!active) {
         const index = geometry.index;
         const position = geometry.attributes.position;
-        if (!index || index.count / 3 !== split.triangleCount || geometry.groups.length) {
-          console.warn(`[ModelAsset] ${splitId}: ${object.name} does not match the split table; skipped`);
-          return;
-        }
+        const triangleCount = index ? index.count / 3 : 0;
+        const candidates = splits.filter(entry => entry.split.triangleCount === triangleCount);
+        // Other meshes can share the source material (the small hair locks).
+        if (!candidates.length || geometry.groups.length) return;
+        const buckets = candidates.map(() => []);
         const keep = [];
-        const moved = [];
         const key = [0, 0, 0];
-        for (let t = 0; t < split.triangleCount; t += 1) {
+        for (let t = 0; t < triangleCount; t += 1) {
           const a = index.getX(t * 3);
           const b = index.getX(t * 3 + 1);
           const c = index.getX(t * 3 + 2);
           key[0] = Math.round((position.getX(a) + position.getX(b) + position.getX(c)) / 3 * 10000);
           key[1] = Math.round((position.getY(a) + position.getY(b) + position.getY(c)) / 3 * 10000);
           key[2] = Math.round((position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3 * 10000);
-          (split.centroids.has(key.join(',')) ? moved : keep).push(a, b, c);
+          const joined = key.join(',');
+          const slot = candidates.findIndex(entry => entry.split.centroids.has(joined));
+          (slot >= 0 ? buckets[slot] : keep).push(a, b, c);
         }
-        if (moved.length / 3 < split.centroids.size * 0.9) {
-          console.warn(`[ModelAsset] ${splitId}: matched ${moved.length / 3}/${split.centroids.size} triangles; skipped`);
-          return;
-        }
-        const reordered = new (index.array.constructor)(keep.length + moved.length);
-        reordered.set(keep);
-        reordered.set(moved, keep.length);
+        active = candidates.filter((entry, slot) => {
+          const matched = buckets[slot].length / 3;
+          if (matched >= entry.split.centroids.size * 0.9) return true;
+          console.warn(`[ModelAsset] ${entry.id}: matched ${matched}/${entry.split.centroids.size} triangles; skipped`);
+          keep.push(...buckets[slot]);
+          buckets[slot] = null;
+          return false;
+        });
+        const groups = [keep, ...buckets.filter(Boolean)];
+        if (groups.length === 1) return;
+        const reordered = new (index.array.constructor)(index.count);
+        let start = 0;
+        groups.forEach((triangles, materialIndex) => {
+          reordered.set(triangles, start);
+          geometry.addGroup(start, triangles.length, materialIndex);
+          start += triangles.length;
+        });
         geometry.setIndex(new THREE.BufferAttribute(reordered, 1));
-        geometry.addGroup(0, keep.length, 0);
-        geometry.addGroup(keep.length, moved.length, 1);
-        geometry.userData.materialSplits = { ...geometry.userData.materialSplits, [splitId]: true };
+        geometry.userData.materialSplitLayout = { layout, ids: active.map(entry => entry.id) };
       }
-      object.material = [object.material, target];
+      matchedMesh = true;
+      if (active.length) object.material = [object.material, ...active.map(entry => entry.target)];
     });
-  }
+    if (!matchedMesh) console.warn(`[ModelAsset] ${layout}: no ${sourceName} mesh matches the split tables; skipped`);
+  });
 }
 
-function applyEyeGlossUpgrade(scene) {
+function applyEyeGlossUpgrade(scene, asset) {
   scene.traverse(object => {
     if (!object.isMesh || !object.userData.eyeGloss) return;
+    if (asset.hideEyeGlossOverlays) {
+      object.visible = false;
+      return;
+    }
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     materials.forEach(material => {
       if (!material) return;
@@ -1333,6 +1371,8 @@ function applyMaterialRegionUpgrade(scene, asset) {
       if (entry.directSpecularGlint) {
         applyDirectSpecularGlint(material, entry.directSpecularGlint);
       }
+      if (entry.skinShading) applyPlayerSkinShading(material, entry.skinShading);
+      if (entry.hairShading) applyPlayerHairShading(material, entry.hairShading);
       if (typeof window !== 'undefined' && entry.anisotropy !== undefined) {
         window.__darwinHairMaterialDebug = {
           material: material.name,
@@ -1788,6 +1828,9 @@ function GLBPrimitive({
   grounding = null,
   timeScaled = false,
   overlaySelector = null,
+  // Called every frame once the animation pose is final (after the mixers and
+  // pose corrections), for procedural adjustments such as held-tool IK.
+  afterPose = null,
   castShadow = null,
   receiveShadow = null,
   instanceSeed = null,
@@ -1800,6 +1843,7 @@ function GLBPrimitive({
   const group = useRef(null);
   const gateRef = useRef(null);
   const gl = useThree(state => state.gl);
+  const getComparisonRuntime = useThree(state => state.get);
   const activeAction = useRef(null);
   const activeRequest = useRef(null);
 
@@ -1817,6 +1861,7 @@ function GLBPrimitive({
   const gaitBlend = useRef(null);
   const animationSelectorRef = useRef(animationSelector);
   const overlaySelectorRef = useRef(overlaySelector);
+  const afterPoseRef = useRef(afterPose);
   const overlayStateRef = useRef({ action: null, clip: null, weight: 0 });
   const additiveBreathingRef = useRef(null);
   const warnedMissing = useRef(new Set());
@@ -2300,9 +2345,10 @@ function GLBPrimitive({
   useEffect(() => {
     applyPlayerMaterialUpgrade(importedScene, asset, gl);
     applyMaterialRegionUpgrade(importedScene, asset);
-    applyEyeGlossUpgrade(importedScene);
+    applyEyeGlossUpgrade(importedScene, asset);
     applyMaterialSplits(importedScene, asset);
-  }, [asset, importedScene, gl]);
+    return installDarwinLookComparison(importedScene, getComparisonRuntime());
+  }, [asset, importedScene, gl, getComparisonRuntime]);
 
   useEffect(() => {
     applyDamageFlash(importedScene, damageFlash);
@@ -2322,6 +2368,10 @@ function GLBPrimitive({
   useEffect(() => {
     overlaySelectorRef.current = overlaySelector;
   }, [overlaySelector]);
+
+  useEffect(() => {
+    afterPoseRef.current = afterPose;
+  }, [afterPose]);
 
   // Mixer mutation belongs in a committed effect. Creating an action from
   // useMemo can leak a half-registered action when React abandons or repeats a
@@ -2847,6 +2897,7 @@ function GLBPrimitive({
       });
     }
     footContactRig.update(mixerDelta, activeAction.current, activeRequest.current);
+    afterPoseRef.current?.(frameState, delta);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {
       const elapsed = frameState.clock.elapsedTime;
       if (group.current && elapsed - lastBoundsDebugAt.current >= 0.3) {
@@ -2907,6 +2958,7 @@ export function ModelAsset({
   grounding = null,
   timeScaled = false,
   overlaySelector = null,
+  afterPose = null,
   castShadow = null,
   receiveShadow = null,
   instanceSeed = null,
@@ -2933,6 +2985,7 @@ export function ModelAsset({
         grounding={grounding}
         timeScaled={timeScaled}
         overlaySelector={overlaySelector}
+        afterPose={afterPose}
         castShadow={castShadow}
         receiveShadow={receiveShadow}
         instanceSeed={instanceSeed}

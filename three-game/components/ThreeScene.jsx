@@ -21,6 +21,7 @@ import { PhysicsProvider } from '../physics/PhysicsProvider';
 import { useThreeGameStore } from '../store';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
 import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
+import { AudioListenerSync } from '../audio/AudioListenerSync';
 import { ObservationWatcher } from '../fauna/behavior/ObservationWatcher';
 import { TargetBracketProjector } from './player/TargetBracketProjector';
 import { RemotePlayerActors } from '../multiplayer/RemotePlayerActors';
@@ -110,6 +111,7 @@ export function ThreeScene({
         debug={settings.physicsDebug === true}
       >
         <FaunaFrameScheduler />
+        <AudioListenerSync />
         <ObservationWatcher />
         <TargetBracketProjector />
         {/* World and player stream independently. A late prop/specimen GLB can

@@ -69,6 +69,9 @@ desktop.ini
 !/assets-src/processed/.gitkeep
 !/assets-src/references/
 !/assets-src/references/.gitkeep
+!/assets-src/audio/
+!/assets-src/audio/fauna-voices/
+!/assets-src/audio/fauna-voices/sources.json
 
 # public should contain runtime-ready assets only; ignore source/import leftovers
 /public/assets/models/**/source/

@@ -209,6 +209,10 @@ export function createDevilsCrownTerrainMaterial() {
       );
   };
 
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+
+  material.userData.ownsShoreDamp = true;
+
   material.customProgramCacheKey = () => 'devils-crown-pbr-basalt-coral-v2-low-sampler';
   material.needsUpdate = true;
   return material;

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { WATER_LEVEL } from '../../terrainShared';
+import { DEW_GLSL, dewUniforms } from '../../dewRuntime';
 import { FLOREANA_PBR_TEXTURES, loadPackedPbrTerrainSet, disposePackedPbrTerrainSet } from './pbrTerrainTextures';
 
 const VARYINGS = /* glsl */`
@@ -6,6 +8,7 @@ const VARYINGS = /* glsl */`
   varying vec3 vRockMetricNormal;
   varying mat3 vRockOrientation;
   varying float vRockDust;
+  varying vec3 vRockWorld;
 `;
 
 // Project in metre-scaled object space, so neither sphere poles nor elongated
@@ -28,6 +31,9 @@ export function createTriplanarRockMaterial(profile, dust = null) {
     shader.uniforms.uRockNrh = { value: packed.nrh };
     shader.uniforms.uRockDustColor = { value: new THREE.Color(dust?.color || '#ffffff') };
     shader.uniforms.uRockDustStrength = { value: dust?.color ? dust.strength ?? 0.4 : 0 };
+    shader.uniforms.uDew = dewUniforms.uDew;
+    shader.uniforms.uDewSun = dewUniforms.uDewSun;
+    shader.uniforms.uDewSunColor = dewUniforms.uDewSunColor;
     material.userData.shader = shader;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${VARYINGS}`)
@@ -41,6 +47,11 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         vRockMetricNormal = normalize(objectNormal / rockMetricScale);
         vRockOrientation = mat3(rockTransform[0] / rockMetricScale.x, rockTransform[1] / rockMetricScale.y, rockTransform[2] / rockMetricScale.z);
         vRockDust = 1.0 - smoothstep(-0.92, -0.18, position.y);
+        vec4 rockWorld = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          rockWorld = instanceMatrix * rockWorld;
+        #endif
+        vRockWorld = (modelMatrix * rockWorld).xyz;
       `);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', /* glsl */`#include <common>
@@ -48,6 +59,7 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         uniform sampler2D uRockNrh;
         uniform vec3 uRockDustColor;
         uniform float uRockDustStrength;
+        ${DEW_GLSL}
         vec3 rockBlend;
         vec3 rockFacing;
         vec2 rockUvX;
@@ -56,6 +68,14 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         vec4 rockDataX;
         vec4 rockDataY;
         vec4 rockDataZ;
+        // Splash zone: stone below the reach of the swash and spray is wet,
+        // darker and glassier, and dries out over a ragged tide line.
+        float rockWetness() {
+          float h = vRockWorld.y - ${WATER_LEVEL.toFixed(2)};
+          float ragged = sin(vRockWorld.x * 1.7 + vRockWorld.z * 1.3) * 0.08
+            + sin(vRockWorld.z * 4.1 - vRockWorld.x * 2.9) * 0.04;
+          return 1.0 - smoothstep(0.35, 0.95 + ragged, h);
+        }
         vec2 rockSlope(vec4 dataValue) {
           vec2 xy = dataValue.rg * 2.0 - 1.0;
           return xy / sqrt(max(1.0 - min(dot(xy, xy), 0.98), 0.02));
@@ -79,7 +99,9 @@ export function createTriplanarRockMaterial(profile, dust = null) {
       `)
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
         ${profile.albedoScale !== undefined ? `diffuseColor.rgb *= ${profile.albedoScale.toFixed(3)};` : ''}
-        diffuseColor.rgb = mix(diffuseColor.rgb, uRockDustColor, vRockDust * uRockDustStrength);
+        float rockWet = rockWetness();
+        diffuseColor.rgb = mix(diffuseColor.rgb, uRockDustColor, vRockDust * uRockDustStrength * (1.0 - rockWet));
+        diffuseColor.rgb *= 1.0 - rockWet * 0.45;
       `)
       .replace('#include <roughnessmap_fragment>', profile.roughnessMode === 'multiply'
         // Roughness map applied as three's roughnessMap does (a multiply), so
@@ -87,10 +109,23 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         ? /* glsl */`
         float roughnessFactor = ${profile.roughness.toFixed(3)}
           * dot(vec3(rockDataX.b, rockDataY.b, rockDataZ.b), rockBlend);
+        roughnessFactor = mix(roughnessFactor, min(roughnessFactor, 0.12), rockWetness());
+        roughnessFactor *= 1.0 - uDew * 0.3;
       `
         : /* glsl */`
         float roughnessFactor = mix(${(profile.roughness - 0.12).toFixed(3)}, ${Math.min(0.995, profile.roughness + 0.04).toFixed(3)},
           dot(vec3(rockDataX.b, rockDataY.b, rockDataZ.b), rockBlend));
+        roughnessFactor = mix(roughnessFactor, 0.2, rockWetness());
+        roughnessFactor *= 1.0 - uDew * 0.3;
+      `)
+      .replace('#include <opaque_fragment>', /* glsl */`
+        // Dawn dew beads on the upper faces (world/dewRuntime.js).
+        if (uDew > 0.001) {
+          vec3 rockDewNormal = inverseTransformDirection(normal, viewMatrix);
+          outgoingLight += dewGlints(vRockWorld, rockDewNormal, 0.1, 30.0)
+            * smoothstep(0.2, 0.7, rockDewNormal.y);
+        }
+        #include <opaque_fragment>
       `)
       .replace('#include <normal_fragment_maps>', /* glsl */`
         vec2 rockSx = rockSlope(rockDataX);
@@ -104,6 +139,6 @@ export function createTriplanarRockMaterial(profile, dust = null) {
         normal = normalize(normal + mat3(viewMatrix) * vRockOrientation * rockDetail * ${profile.normalScale.toFixed(3)});
       `);
   };
-  material.customProgramCacheKey = () => `triplanar-rock-v1:${profile.textureKey}:${profile.textureScale ?? 0.8}:${profile.normalScale}:${profile.roughness}:${profile.albedoScale ?? 1}:${profile.roughnessMode ?? 'band'}`;
+  material.customProgramCacheKey = () => `triplanar-rock-v3-wet-dew:${profile.textureKey}:${profile.textureScale ?? 0.8}:${profile.normalScale}:${profile.roughness}:${profile.albedoScale ?? 1}:${profile.roughnessMode ?? 'band'}`;
   return material;
 }

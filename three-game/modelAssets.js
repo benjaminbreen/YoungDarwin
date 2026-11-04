@@ -85,8 +85,11 @@ export const modelAssets = {
       rimColor: '#ffdca8', rimPower: 5.0, rimIntensity: 0.045,
       roughness: 0.72, envMapIntensity: 0.3, toneMapped: true,
       roughnessMapUrl: '/assets/models/darwin5-roughness.webp?v=1',
-      albedoMapUrl: '/assets/models/darwin5-albedo-enh.webp?v=1',
+      // Enhanced albedo with the face's painted smudges filled
+      // (node scripts/clean-darwin-skin-albedo.mjs; source: darwin5-albedo-enh).
+      albedoMapUrl: '/assets/models/darwin5-albedo-clean.webp?v=11',
       aoMapUrl: '/assets/models/darwin5-ao.webp?v=1', aoMapIntensity: 1, aoDirectStrength: 0.5,
+      aoSkipMaterials: ['Darwin5 skin'],
       // Existing ImageGen period wool, projected before skinning at 18 cm per
       // tile. Rebuild: node scripts/build-darwin-fabric.mjs. No atlas-derived
       // normal; distant/subpixel detail fades to the original smooth surface.
@@ -101,11 +104,26 @@ export const modelAssets = {
     // material at load. Rebuild: node scripts/build-darwin-watch-chain.mjs.
     // `sparkle` gives the links their own facet tilts (cell = one link) so they
     // twinkle into the button glint's bloom instead of reading as flat paint.
-    materialSplits: [{
-      id: 'darwin5WatchChain',
-      name: 'Darwin5 watch chain',
-      sparkle: { cellMetres: 0.003, tilt: 0.6, roughness: 0.12 },
-    }],
+    // The "eye gloss" overlays authored by blender_author_darwin5_blink.py
+    // picked up the brow islands, not the eyes: they floated a glossy copy of
+    // each brow (a shiny mustard stripe) and the eyes got no gloss. Hidden
+    // until the overlays are re-authored on the real eye islands.
+    hideEyeGlossOverlays: true,
+    materialSplits: [
+      {
+        id: 'darwin5WatchChain',
+        name: 'Darwin5 watch chain',
+        sparkle: { cellMetres: 0.003, tilt: 0.6, roughness: 0.12 },
+      },
+      // The clothing primitive also runs up over the head (forehead patches,
+      // brows, much of the hair), which rendered as cloth: smudges on the
+      // face, mustard brows. Rebuild: node scripts/build-darwin-head-splits.mjs.
+      'darwin5HeadSkin',
+      'darwin5HeadHair',
+      // Skin-painted hair triangles lying flat on the temples and cheeks; as
+      // hair they took the hair fill and read as dark flecks on the face.
+      'darwin5HairFaceSkin',
+    ],
     materialRegionUpgrade: {
       skin: {
         materialNames: ['Darwin5 skin', 'Darwin5 eyelid skin', 'Darwin5 forehead underlay'],
@@ -117,6 +135,28 @@ export const modelAssets = {
         clearcoat: 0.025,
         clearcoatRoughness: 0.5,
         envMapIntensity: 0.2,
+        // playerSkinHairShading.js: albedo grade, red-wrapped diffuse
+        // (subsurface falloff) and pore-scale specular breakup.
+        skinShading: {
+          saturation: 0.88,
+          tint: '#ffffff',
+          wrap: [0.4, 0.16, 0.1],
+          scatterColor: '#ff6a4a',
+          poreMetres: 0.0007,
+          poreStrength: 0.2,
+          poreFade: [0.35, 1.4],
+          browColor: '#4a3226',
+          browAmount: 1,
+          // Bind-pose metres, from the face profile (midline x 0.0105).
+          tints: [
+            // Soft flush on the cheeks and nose, as in Richmond's 1840
+            // watercolour; the lips cover both lips with an edge (`core`).
+            { centre: [-0.028, 1.762, 0.098], radius: [0.026, 0.022, 0.04], color: '#ff9c8c', amount: 0.18 },
+            { centre: [0.049, 1.762, 0.098], radius: [0.026, 0.022, 0.04], color: '#ff9c8c', amount: 0.18 },
+            { centre: [0.0105, 1.763, 0.134], radius: [0.013, 0.014, 0.02], color: '#ff9c8c', amount: 0.12 },
+            { centre: [0.0098, 1.7335, 0.106], radius: [0.03, 0.0115, 0.02], color: '#d47e74', amount: 0.36, core: 0.6 },
+          ],
+        },
       },
       hair: {
         materialNames: ['Darwin5 hair'],
@@ -134,6 +174,19 @@ export const modelAssets = {
         anisotropy: 0,
         anisotropyRotation: 0,
         envMapIntensity: 0.2,
+        // playerSkinHairShading.js: albedo depth and a strand-aligned
+        // Kajiya-Kay highlight pair ([shift, exponent, strength]).
+        hairShading: {
+          saturation: 0.78,
+          tint: '#f4e4dc',
+          contrast: 1.08,
+          primaryColor: '#fff4e0',
+          primary: [-0.06, 220, 0.16],
+          secondary: [0.12, 44, 0.9],
+          strandMetres: [0.0007, 0.014, 0.0007],
+          strandBreakup: 0.25,
+          fillColor: '#6b4a30',
+        },
       },
       brassButtons: {
         materialNames: ['Darwin5 brass buttons'],

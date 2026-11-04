@@ -1,5 +1,9 @@
 """Build Darwin's percussion double-barreled fowling piece (shotgun.glb).
 
+SUPERSEDED: shotgun.glb is now built by scripts/build-shotgun.mjs
+(npm run asset:shotgun), with textured, turned and lofted geometry. Running
+this script would overwrite it with the older primitive model.
+
 Replaces the blocky primitive placeholder with a proper 1830s side-by-side:
 tapered browned-steel barrels with a top rib, percussion locks with hammers,
 a curved walnut wrist and cheeked butt with a brass butt plate, fore-end with

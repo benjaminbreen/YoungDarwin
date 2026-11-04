@@ -205,6 +205,8 @@ export function createMarineIguanaColonyTerrainMaterial() {
         vec3 miMappedWorldNormal = normalize(miWorldNormal + miWorldX * miMappedSlope.x + miWorldZ * miMappedSlope.y);
         normal = normalize(mat3(viewMatrix) * miMappedWorldNormal);`);
   };
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+  material.userData.ownsShoreDamp = true;
   material.customProgramCacheKey = () => 'marine-iguana-colony-severe-coast-v3';
   material.needsUpdate = true;
   return material;

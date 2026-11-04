@@ -402,8 +402,7 @@ the sole's duller slap, so a boulder underfoot is distinct from stony ground.
 | `rock-bump` | Walking into a rock: shoulder and coat thud, a hand on the stone, a scrape |
 | `rock-scramble` | Stepping or vaulting up onto a rock |
 | `loose-stone-clonk` | A loose rock rocking under him (first step, wobble, losing his footing) |
-| `jump-takeoff` | Every jump push-off, under the surface sound |
-| `jump-landing` | Every jump landing (and hard drops): weight, coat, satchel, buckle |
+| `jump-takeoff`, `jump-landing` | No longer played: superseded by the three kinds of jump in `motion/` (below); still built so later sprites keep their seeds |
 | `gun-blast` | Under the recorded black-powder crack: cap, boom, rolling tail, hill echoes |
 
 Footstep events carry the obstacle Darwin is standing on as their target, and
@@ -413,6 +412,31 @@ peak limiter (threshold -4 dB) keeps the gun and heavy landings from clipping.
 ```bash
 npm run asset:audio:foley
 ```
+
+## Jumps, skids and grit underfoot
+
+`scripts/build-motion-audio.mjs` (`npm run asset:audio:motion`,
+`public/assets/audio/motion/`) models how Darwin's body meets the ground in a
+jump, layered over the recorded surface footfall. `jumpSoundShape`
+(`three-game/audio/jumpSounds.js`) chooses from what the controller reports:
+
+| Jump | Push-off | Landing |
+| --- | --- | --- |
+| Standing hop | `jump-takeoff-stand`: a crouch, both boots driving off together, the coat swinging up | `jump-land-stand`: both feet at once, knees taking it, compact |
+| Running leap | `jump-takeoff-run`: one boot planted and driven back, a long rush of coat | `jump-land-run`: lead heel, trailing foot a beat later, a lighter run-out step |
+| Drop from height | (any push-off) | `jump-land-drop`: whole weight through bent knees, a hand put down, kit following, a breath forced out; heavier with the drop |
+
+Running push-offs and landings add the boot sliding in the ground: `skid-grit`
+in cinder and grit, `skid-sand` in sand, `skid-rock` (hobnails skating) on
+stone. A landing counts as a drop when he comes down more than 1.3 m below
+where he jumped from (a leap down a dune easily lands a metre lower; 0.65 m for walking off an edge), measured by the
+controller (`dropHeight` on the landing event), since a flat jump already
+lands at ~7 m/s. The coat-and-satchel shake joins running landings and drops,
+and the hard-fall body impact only drops of more than 2.6 m.
+
+Every footfall on lava, basalt or cliff ground also carries `rock-grit-step`:
+cinder crushed at heel and toe, the nails scratching, now and then a pebble
+kicked clicking away (lighter on a smooth boulder).
 
 ## Field tools, handling and space
 
@@ -457,7 +481,135 @@ the cave or cliff send, and have their own "Interface" group in the mixer.
 | The Beagle's bell | The clock passing six in the evening while walking or waiting; a rest or a voyage that jumps over it stays silent |
 | Heartbeat | A looping track that fades in with the exhaustion look (`world/exhaustionLook.js`) and quickens as it deepens; Darwin only |
 
+Buttons are mostly silent. One capture-phase listener
+(`installInterfaceButtonCues`, mounted by the HUD) sounds four kinds, all far
+quieter than the objects above and rate-limited so a fast run of presses never
+rattles:
+
+| Sound | Button |
+| --- | --- |
+| Page-edge flick | An inactive tab in `PanelTabs` (`data-ui-sound="tab"`), such as the journal's filters |
+| Seal pressed into wax | A consequential choice (`data-ui-sound="seal"`): field dilemmas, the case-full choice, replies and orders to Syms |
+| Brass detent | Any toggle: `aria-pressed`, `aria-checked` or `role="switch"` |
+| Felt knock | Pressing a disabled control, heard on pointerdown since the click never arrives; a chosen option disabled against re-picking stays silent |
+
+Hover never sounds, and neither do ordinary buttons such as Close or Back,
+since the panel they open or close is already heard. Mark a button
+`data-ui-sound="none"` to silence a toggle.
+
 The inventory case keeps its leather `equipment-foley` and opts out of the
 paper cue with `sound: null`, as do the developer jump menu and the
 multiplayer lobby. Collection and documentation entries are left to the
 existing field-note and specimen-container sounds in the world.
+
+## Where sounds come from
+
+Sounds with a place in the world (animal calls and contacts, water and rocky
+edges, the colony bed, birds taking off, the bee, Syms's footfalls, the sea
+tube) pass through an HRTF `PannerNode` at their world position
+(`worldSpatial` in `IslandSoundscape.jsx`, `createWorldPanner` in
+`audioRuntime.js`). The listener sits at Darwin's head and faces where the
+camera looks (`AudioListenerSync.jsx`, mounted in `ThreeScene`), so a call off
+to the left is fully left and swings round as the camera turns, and one behind
+is darker than one in front. The panner gives direction only (rolloff 0): level
+and dulling with distance stay with `propagate`. Darwin's own sounds (steps,
+tools, body) keep a narrow stereo pan, and everything falls back to that pan
+until the scene has reported a camera.
+
+## Wildlife voices and sound places
+
+Every animal call comes from a real actor in the landing, chosen by what that
+animal is doing (`three-game/audio/wildlifeVoices.js`). The director runs every
+250 ms over the zone's animals, reads each one's published activity and alarm
+from the fauna social field (`fauna/behavior/socialField.js`), and decides who
+speaks:
+
+- **Behaviour first.** Turning alarmed plays a species' alarm (a mockingbird's
+  scold, a sea lion bull's bark, a horse's whinny). An activity can sound once
+  as it starts (a tortoise hissing as it withdraws, a finch chasing a rival) or
+  at a cadence while it lasts (a finch singing, a mockingbird mobbing a hawk,
+  a finch cracking seed, a tortoise grazing, a basking iguana sneezing salt).
+  Otherwise calm animals call now and then at their own species' pace.
+- **Day, night and rain.** Day birds are silent at night and the owl only
+  calls at night, in the same hours as the bird beds; calm birds fall silent
+  in rain, though an alarm still sounds.
+- **Travel.** Level falls with distance past each species' near field and
+  fades to nothing at its far limit; air absorption dulls distant calls;
+  beyond 18 m a call arrives late at the speed of sound; a ridge between
+  Darwin and the animal (sampled from the terrain every 2.5 m) halves the
+  level and takes most of the top; the cave and cliff send adds its space.
+  Swimming, Darwin's ears ride at the waterline: air sounds dull slightly,
+  and the parrotfish crunching on the reef become audible.
+- **Budget.** At most four wildlife voices at once, alarms then nearest
+  first, one per animal, so a flock alarm or a colony never swamps the mix.
+  Each individual keeps its own pitch, so two finches in a bush are two birds.
+- **Arrival.** Newly met animals wait a moment before they speak, so arriving
+  in a landing is not met by a chorus.
+
+Animal movement contacts (`ANIMAL_CONTACT_PROFILES` in `IslandSoundscape.jsx`)
+add tortoise footfalls, lava lizards dashing (only at speed, never creeping)
+and racers moving through litter to the existing crab, iguana, goat and horse
+contacts. A painted locust breaking cover clatters its hindwings.
+
+Nesting boobies and frigatebirds also share one **colony bed** rather than
+many voices (`seabirdColonyBed`): a looped wash of colony calls heard from the
+centre of the nearest group of birds, swelling with their number, dulled and
+quieter with distance, thinned at night and in rain, and absent until at
+least two nesting birds are within 70 m.
+
+Modelled animal sounds are built by `scripts/build-fauna-audio.mjs`
+(`npm run asset:audio:fauna`): iguana sneeze, lizard scurry, racer slither,
+locust flight, tortoise hiss, footfall and grazing, turtle breath, parrotfish
+on coral, frigatebird bill clatter, finch seed crack, a blue-footed booby's
+whistle (a syrinx contour with breath and flutter), the sea-cave boom, and
+the sea working in rock crevices, a loop built from a bubble model (thousands
+of Minnaert-frequency bubbles).
+
+Vocal calls synthesis cannot make convincing are cut from CC0 field
+recordings by `scripts/build-fauna-voices-audio.mjs`
+(`npm run asset:audio:fauna-voices`). The raw HQ previews live in
+`assets-src/audio/fauna-voices/raw/` (not in Git) and are listed, with the cut
+points' sources, in `assets-src/audio/fauna-voices/sources.json`. Each call is
+cut singly, band-trimmed, de-clicked, faded and loudness-matched.
+
+| Runtime sound | Freesound source (CC0) | Recordist | Use |
+| --- | --- | --- | --- |
+| Sea lion bark, bark train, dozing grunt | [Colony of sea lions on land](https://freesound.org/people/RavenWolfProds/sounds/503679/) | RavenWolfProds | California sea lion, the Galápagos sea lion's genus; single barks, a bull's bark train for alarm, low growls and snores from the quiet stretch |
+| Flamingo honk | [flamants pilou](https://freesound.org/people/alexandredoc/sounds/414367/) | alexandredoc | Wild greater flamingos; honks and short phrases |
+| Horse snort and nicker | [horse snort](https://freesound.org/people/bruno.auzet/sounds/538697/) | bruno.auzet | Close outdoor snorts and blows |
+| Horse whinny and nicker | [Whinnying horse-far away](https://freesound.org/people/L.Finck/sounds/636554/) | L.Finck | Whinnies across open ground |
+| Cat meow | [Cat, various meows](https://freesound.org/people/TRP/sounds/571216/) | TRP | Settled meows only, never distress |
+| Cat trill | [Cat trilling](https://freesound.org/people/jsbarrett/sounds/200336/) | jsbarrett | Soft greeting trills |
+| Seabird colony bed | [Tortugas Birds - Bush Key](https://freesound.org/people/mdvirtual/sounds/353967/) | mdvirtual | Sooty tern and brown noddy colony; a 26 s seamless loop |
+| Spring trickle | [Trickle Stream_1](https://freesound.org/people/lukabea/sounds/660506/) | lukabea | Fine trickle over stones; a 28 s seamless loop for springs and creeks |
+| Sea-cave surge | [Cornish Seacave](https://freesound.org/people/plantmonkey/sounds/376710/) | plantmonkey | Swells surging into and draining from a small sea cave |
+
+No usable CC0 recording was found for blue-footed boobies, frigatebird
+calls, giant tortoises, cormorants or a capuchin, so the booby whistle and
+the tortoise sounds are modelled, frigatebirds keep to their bill clatter,
+and Jack the monkey stays silent rather than borrow another species' voice.
+
+### Sound places
+
+The same probe also finds tree canopy, scrub and grass, tide pools, drops
+below Darwin and the nearest shore of any kind. Modelled loops from
+`scripts/build-place-ambience-audio.mjs` (`npm run asset:audio:places`) are
+heard from each (`placeAmbienceGains`): leaves rustling with the wind in the
+canopy; by day the dry insect bed from the scrub and grass nearby (the
+zone-wide insect bed is 3.5 dB lower to make room), and after dark field
+crickets there instead; wind pouring over a rim or a drop of 5 m or more
+within 10 m, its whistle rising in gusts; a tide pool's snapping-shrimp
+crackle and drips. The swell breaks at the shore the probe found, in sets of
+two or three on its period, heavier on rock.
+
+`three-game/audio/placeSounds.js` probes the ground around Darwin every 400 ms
+(16 directions, out to 24 m) for the nearest running fresh water (Asilo's
+spring brook, Watkins's creek and stream; still pools are quieter) and the
+nearest edge where the sea meets rock rather than sand. Each drives a loop
+panned toward it, rising and brightening as he walks closer. Sandy edges stay
+with the surf and wave-break beds. Authored places in `SOUND_PLACES` play
+their own one-shots: the swell booming in the sea tube under Post Office
+Bay's lava mound (heard from the cove, muffled by the mound), and rolling
+throughout the sea gallery inside; recorded surges alternate with the
+modelled boom of air compressed at the back of the tube. Gabriel's fern spring seeps quietly inside
+the cave.

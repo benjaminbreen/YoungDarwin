@@ -128,6 +128,7 @@ export const WINDY_PROMONTORY_SPLAT_BOUNDS = { originX: -48, originZ: -45, width
 
 export function createWindyPromontoryTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
+    ownsShoreDamp: true,
     pathPoints: WINDY_PROMONTORY_PATH_POINTS,
     pathSplatBake: 'windy-promontory',
     pathSplatBounds: WINDY_PROMONTORY_SPLAT_BOUNDS,

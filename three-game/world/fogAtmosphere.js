@@ -25,16 +25,19 @@ import { weatherEnv } from './weatherEnvRuntime';
 // Defaults from the cloud-shadow tuning reference at Post Office Bay.
 export const CLOUD_SHADE_DEFAULTS = Object.freeze({
   // Peak darkening under an ideal broken-cumulus sky. The multiply happens in
-  // linear light, pre-tone-map (see cloud_shade_fragment below). 0.41 is the
-  // 2026-07-30 screenshot bake — a touch stronger than the earlier 0.34.
-  maxStrength: 0.41,
+  // linear light, pre-tone-map (see cloud_shade_fragment below). 0.41 was the
+  // 2026-07-30 screenshot bake; 2026-11-03 eased it to 0.32 along with the
+  // coverage cap below, so a shadow reads as a passing cloud, not dusk.
+  maxStrength: 0.32,
   // Feature size of the shadow pattern: base blobs ~this many meters across.
   featureMeters: 30,
   // Ground-track speed of the pattern in m/s at windSpeed 1, before the
   // cloudDriftSpeed channel scales it (~7.4 m/s with the default 0.32).
   driftMps: 14,
   // Added coverage: positive shadows more ground at a given cumulus level.
-  coverageBias: 0.12,
+  // At 0 the densest fair-weather field shades ~40% of the ground; the old
+  // 0.12 (with the steeper ramp) shaded ~78% at the late-morning cumulus peak.
+  coverageBias: 0,
   // fbm-value width of the shadow edge (bigger = softer penumbra).
   softness: 0.08,
   // Dev override: apply maxStrength directly, ignoring weather/sun gating, so
@@ -238,10 +241,12 @@ export function driveCloudShadeUniforms({ delta = 0, daylight = 0, elevation = 0
   shade.y = frequency;
   shade.z = cloudShadeDrift.x;
   shade.w = cloudShadeDrift.z;
-  // Denser cumulus fields shadow more ground, not just darker ground. The
-  // forced dev mode sits at a mid-cumulus coverage so the pattern is obvious.
+  // Denser cumulus fields shadow more ground, not just darker ground — but
+  // fair-weather cumulus rarely shades more than about two fifths of it, so
+  // the threshold stops at ~0.56 of the fbm (whose spread is ~0.2 about 0.5).
+  // The forced dev mode sits at a mid-cumulus coverage so the pattern is obvious.
   const coverage = tuning.forceOn ? 0.7 : cumulusPatch;
-  fogAtmosphereUniforms.uCloudShade2.value.x = 0.68 - coverage * 0.22 - tuning.coverageBias;
+  fogAtmosphereUniforms.uCloudShade2.value.x = 0.74 - coverage * 0.18 - tuning.coverageBias;
   fogAtmosphereUniforms.uCloudShade2.value.y = Math.max(0.02, tuning.softness);
   return strength;
 }

@@ -44,6 +44,8 @@ import { environmentLookTuning, setEnvironmentLookTuning } from '../world/enviro
 import { setSolarLookTuning, solarLookTuning } from '../world/solarLook';
 import { cloudShadeTuning } from '../world/fogAtmosphere';
 import { postGradeTuning, setPostGradeTuning } from '../world/postGrade';
+import { setTerrainLookTuning, terrainLookTuning } from '../world/terrainLook';
+import { dewTuning } from '../world/dewRuntime';
 
 const RECORDED_PROP_EVENTS = [
   'tool-swing', 'net-contact', 'net-brush', 'field-action-attempt', 'prop-struck',
@@ -740,11 +742,15 @@ function createHarnessApi() {
       // `cloud: { maxStrength: 0 }` holds drifting cloud shadows off an A/B.
       if (patch?.cloud) Object.assign(cloudShadeTuning, patch.cloud);
       if (patch?.post) setPostGradeTuning(patch.post);
+      if (patch?.terrain) setTerrainLookTuning(patch.terrain);
+      if (patch?.dew) Object.assign(dewTuning, patch.dew);
       return {
         environment: { ...environmentLookTuning },
         solar: { ...solarLookTuning },
         cloud: { ...cloudShadeTuning },
         post: { ...postGradeTuning },
+        terrain: { ...terrainLookTuning },
+        dew: { ...dewTuning },
       };
     },
     getReadiness: () => makeReadiness(),
@@ -879,9 +885,31 @@ function createHarnessApi() {
       });
       return makeSnapshot();
     },
+    // Direct tool selection, as before the gun went to Covington: the shotgun
+    // is put straight into Darwin's hands and taken back without the walk.
     setTool: toolId => {
+      const store = useThreeGameStore.getState();
+      if (toolId === 'shotgun') store.grantShotgunToDarwin();
+      else if (store.activeToolId === 'shotgun') useThreeGameStore.setState({ shotgunHolder: 'syms', symsGunErrand: null });
       useThreeGameStore.getState().setActiveTool(toolId);
       return makeSnapshot();
+    },
+    // The player-facing route: press the shotgun slot ('request'), then
+    // 'fetch' or 'shoot' as from the choice prompt.
+    gunErrand: step => {
+      const store = useThreeGameStore.getState();
+      if (step === 'request') store.setActiveTool('shotgun');
+      else if (step === 'fetch') store.summonSymsWithGun();
+      else if (step === 'shoot') store.askSymsToShoot();
+      else if (step === 'handBack') store.setActiveTool('hands');
+      const after = useThreeGameStore.getState();
+      return {
+        holder: after.shotgunHolder,
+        errand: after.symsGunErrand,
+        choiceOpen: after.shotgunChoiceOpen,
+        activeToolId: after.activeToolId,
+        message: after.message,
+      };
     },
     setViewMode: viewMode => {
       if (!['shoulder', 'hero', 'first', 'isometric', 'top'].includes(viewMode)) return makeSnapshot();

@@ -319,6 +319,8 @@ ${northShoreNormalFragment()}`,
         #include <dithering_fragment>`,
       );
   };
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+  material.userData.ownsShoreDamp = true;
   material.customProgramCacheKey = () => 'north-shore-packed-coastal-pbr-v1';
   material.needsUpdate = true;
   return material;

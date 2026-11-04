@@ -91,3 +91,64 @@ export function crossedDusk(previous, next) {
 export function playDuskBell() {
   return playInterfaceCue('shipBell', { gain: 0.07, playbackRate: vary(1, 0.01) });
 }
+
+// Button-level cues, by delegation rather than per component: a button marked
+// `data-ui-sound="tab"` or `"seal"` plays that cue, toggles (aria-pressed,
+// role="switch", aria-checked) play the brass detent, and pressing a disabled
+// control plays the felt knock. Ordinary buttons stay silent: the panels they
+// open and close already sound as their objects. Hover never sounds.
+const BUTTON_CUES = Object.freeze({
+  tab: { cue: 'tabFlick', gain: 0.045 },
+  seal: { cue: 'sealPress', gain: 0.06 },
+  toggle: { cue: 'detent', gain: 0.04 },
+  refused: { cue: 'feltThud', gain: 0.045 },
+});
+const BUTTON_REPEAT_MS = 70;
+const lastButtonCueAt = new Map();
+
+export function buttonCueKind(element) {
+  const control = element?.closest?.('button, [role="button"], [role="switch"], [role="radio"], [role="tab"]');
+  if (!control) return null;
+  if (control.disabled || control.getAttribute('aria-disabled') === 'true') {
+    // The chosen option in a set is often disabled to stop a re-pick; that is
+    // a state, not a refusal.
+    const chosen = control.getAttribute('aria-pressed') === 'true' || control.getAttribute('aria-checked') === 'true';
+    return chosen ? null : 'refused';
+  }
+  const marked = control.getAttribute('data-ui-sound');
+  if (marked) return marked === 'none' ? null : marked;
+  if (control.hasAttribute('aria-pressed') || control.hasAttribute('aria-checked') || control.getAttribute('role') === 'switch') {
+    return 'toggle';
+  }
+  return null;
+}
+
+export function playButtonCue(kind) {
+  const spec = BUTTON_CUES[kind];
+  if (!spec) return false;
+  const now = performance.now();
+  if (now - (lastButtonCueAt.get(kind) || 0) < BUTTON_REPEAT_MS) return false;
+  lastButtonCueAt.set(kind, now);
+  return playInterfaceCue(spec.cue, { gain: vary(spec.gain, 0.12), playbackRate: vary(1, 0.05) });
+}
+
+// A disabled button swallows its click, so the refusal is heard on
+// pointerdown; everything else waits for the click that actually acts.
+// Returns the uninstall function.
+export function installInterfaceButtonCues(root = typeof document !== 'undefined' ? document : null) {
+  if (!root) return () => {};
+  const onPointerDown = event => {
+    if (event.button !== 0) return;
+    if (buttonCueKind(event.target) === 'refused') playButtonCue('refused');
+  };
+  const onClick = event => {
+    const kind = buttonCueKind(event.target);
+    if (kind && kind !== 'refused') playButtonCue(kind);
+  };
+  root.addEventListener('pointerdown', onPointerDown, true);
+  root.addEventListener('click', onClick, true);
+  return () => {
+    root.removeEventListener('pointerdown', onPointerDown, true);
+    root.removeEventListener('click', onClick, true);
+  };
+}

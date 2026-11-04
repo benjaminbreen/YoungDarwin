@@ -38,10 +38,10 @@ export function updatePlayerEquipmentState({
   }
   if (lastToolId.current !== null && activeToolId !== lastToolId.current
     && !stateRef.current.action && !preInputMovementLocked && !stateRef.current.swimming) {
-    const transitionClip = activeToolId === 'shotgun'
-      ? 'rifleEquip'
-      : (lastToolId.current === 'shotgun' ? 'rifleUnequip' : 'changeItem');
-    startAction(transitionClip, ACTION_DURATION[transitionClip] || ACTION_DURATION.changeItem, { lockMovement: false });
+    // The shotgun changes hands with Covington and rides slung, so taking it
+    // up or giving it back is an ordinary change of item; the rifle clips
+    // belong to shouldering it (below).
+    startAction('changeItem', ACTION_DURATION.changeItem, { lockMovement: false });
   }
   lastToolId.current = activeToolId;
 

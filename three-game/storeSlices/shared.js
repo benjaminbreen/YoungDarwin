@@ -858,6 +858,10 @@ export function createSceneSlice() {
     npcEncounterState: { syms_covington: { trust: 50, flags: [] } },
     symsDirective: DEFAULT_SYMS_DIRECTIVE,
     symsZoneId: SYMS_HOME_ZONE_ID,
+    // Covington carries the collecting gun until Darwin sends for it.
+    shotgunHolder: 'syms',
+    symsGunErrand: null,
+    shotgunChoiceOpen: false,
     narratorScriptedKeys: {
       [`zone:${currentZoneId}`]: 1 * 1440 + INITIAL_NARRATOR_TIME * 60,
     },

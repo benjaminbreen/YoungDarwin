@@ -15,6 +15,7 @@ function ChoiceButton({ choice, onChoose }) {
   return (
     <button
       type="button"
+      data-ui-sound="seal"
       onClick={() => onChoose(choice.id)}
       className="group w-full rounded-sm border border-expedition-brass/50 bg-black/25 px-4 py-3 text-left transition hover:border-expedition-goldbright hover:bg-expedition-gold/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-goldbright/70"
     >

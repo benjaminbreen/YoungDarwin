@@ -136,6 +136,7 @@ export function NpcEncounterModal() {
                         type="button"
                         disabled={pending || selected}
                         aria-pressed={selected}
+                        data-ui-sound="seal"
                         onClick={() => setSymsDirective?.(order.directive)}
                         className={`min-h-9 border px-2 text-center font-expedition text-[0.82rem] transition sm:text-[0.9rem] ${selected
                           ? 'border-[#6d9e91] bg-[#527b77]/30 text-expedition-parchment'
@@ -154,6 +155,7 @@ export function NpcEncounterModal() {
                   key={reply}
                   type="button"
                   disabled={pending}
+                  data-ui-sound="seal"
                   onClick={() => submitReply(reply)}
                   className="grid min-h-10 grid-cols-[2rem_1fr] items-center border-b border-expedition-brass/20 px-1 text-left font-expedition text-[1rem] text-expedition-parchment transition hover:bg-[#527b77]/15 hover:pl-3 hover:shadow-[-3px_0_0_#A96F54_inset] focus-visible:bg-[#527b77]/15 focus-visible:pl-3 focus-visible:outline-none disabled:opacity-45 sm:text-[1.08rem]"
                 >

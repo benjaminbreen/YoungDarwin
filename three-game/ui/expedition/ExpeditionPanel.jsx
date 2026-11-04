@@ -108,6 +108,7 @@ export function PanelTabs({ tabs, active, onSelect, className = '', quiet = fals
           <button
             key={tab.id}
             type="button"
+            data-ui-sound={isActive ? undefined : 'tab'}
             onClick={() => onSelect(tab.id)}
             className={`relative flex-1 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-expedition-gold/60 ${quiet
               ? isActive

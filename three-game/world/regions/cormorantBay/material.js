@@ -275,6 +275,10 @@ ${normalFragment()}`,
       );
   };
 
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+
+  material.userData.ownsShoreDamp = true;
+
   material.customProgramCacheKey = () => 'cormorant-bay-layered-wetland-pbr-v1';
   material.needsUpdate = true;
   return material;

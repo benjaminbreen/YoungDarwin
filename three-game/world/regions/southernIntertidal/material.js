@@ -255,6 +255,10 @@ ${sharedFragment()}`,
       );
   };
 
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+
+  material.userData.ownsShoreDamp = true;
+
   material.customProgramCacheKey = () => 'southern-intertidal-packed-low-tide-v1';
   material.needsUpdate = true;
   return material;

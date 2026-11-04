@@ -11,6 +11,11 @@ import {
   HAMMER_STRIKE_AUDIO_URLS,
   INTERFACE_AUDIO,
   INTERFACE_AUDIO_URLS,
+  FAUNA_AUDIO,
+  FAUNA_AUDIO_URLS,
+  MOTION_AUDIO,
+  MOTION_AUDIO_URLS,
+  PLACE_AMBIENCE_AUDIO,
   INTERACTION_AUDIO,
   INTERACTION_AUDIO_URLS,
   ISLAND_AMBIENCE_AUDIO,
@@ -46,8 +51,15 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'rockBump', label: 'Walking into a rock', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.rockBump, diagnosticGain: 0.22 },
   { key: 'rockScramble', label: 'Scrambling onto a rock', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.rockScramble, diagnosticGain: 0.24 },
   { key: 'looseStone', label: 'Loose stone rocking', group: 'Rock contact', kind: 'sprite', sprite: FOLEY_AUDIO.looseStoneClonk, diagnosticGain: 0.22 },
-  { key: 'jumpTakeoff', label: 'Jump push-off', group: 'Darwin body', kind: 'sprite', sprite: FOLEY_AUDIO.jumpTakeoff, diagnosticGain: 0.2 },
-  { key: 'jumpLanding', label: 'Jump landing (body)', group: 'Darwin body', kind: 'sprite', sprite: FOLEY_AUDIO.jumpLanding, diagnosticGain: 0.2 },
+  { key: 'jumpTakeoffStand', label: 'Standing jump push-off', group: 'Darwin body', kind: 'sprite', sprite: MOTION_AUDIO.jumpTakeoffStand, diagnosticGain: 0.2 },
+  { key: 'jumpTakeoffRun', label: 'Running jump push-off', group: 'Darwin body', kind: 'sprite', sprite: MOTION_AUDIO.jumpTakeoffRun, diagnosticGain: 0.2 },
+  { key: 'jumpLandStand', label: 'Standing jump landing', group: 'Darwin body', kind: 'sprite', sprite: MOTION_AUDIO.jumpLandStand, diagnosticGain: 0.2 },
+  { key: 'jumpLandRun', label: 'Running jump landing', group: 'Darwin body', kind: 'sprite', sprite: MOTION_AUDIO.jumpLandRun, diagnosticGain: 0.2 },
+  { key: 'jumpLandDrop', label: 'Landing a drop', group: 'Darwin body', kind: 'sprite', sprite: MOTION_AUDIO.jumpLandDrop, diagnosticGain: 0.2 },
+  { key: 'skidGrit', label: 'Boot skid in grit', group: 'Footsteps', kind: 'sprite', sprite: MOTION_AUDIO.skidGrit, diagnosticGain: 0.2 },
+  { key: 'skidSand', label: 'Boot skid in sand', group: 'Footsteps', kind: 'sprite', sprite: MOTION_AUDIO.skidSand, diagnosticGain: 0.2 },
+  { key: 'skidRock', label: 'Hobnails skating on stone', group: 'Footsteps', kind: 'sprite', sprite: MOTION_AUDIO.skidRock, diagnosticGain: 0.2 },
+  { key: 'rockGrit', label: 'Grit under boots on rock', group: 'Footsteps', kind: 'sprite', sprite: MOTION_AUDIO.rockGrit, diagnosticGain: 0.2 },
   { key: 'shotgunReport', label: 'Black-powder report', group: 'Shotgun', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.shotgunReport, diagnosticGain: 0.32 },
   { key: 'gunBlast', label: 'Report boom and echoes', group: 'Shotgun', kind: 'sprite', sprite: FOLEY_AUDIO.gunBlast, diagnosticGain: 0.28 },
   { key: 'shotgunReload', label: 'Muzzle-loader reload', group: 'Shotgun', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.shotgunReload, diagnosticGain: 0.24 },
@@ -89,6 +101,35 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'pelletsWood', label: 'Pellets into timber', group: 'Shotgun', kind: 'sprite', sprite: FIELD_FOLEY_AUDIO.pelletsWood, diagnosticGain: 0.14 },
   { key: 'wildlifeFlush', label: 'Birds flushing', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finchWing, diagnosticGain: 0.16 },
   { key: 'coatFlap', label: 'Coat in the wind', group: 'Darwin body', kind: 'spatial', url: FIELD_FOLEY_AUDIO.coatFlap, diagnosticGain: 0.1 },
+  { key: 'iguanaSneeze', label: 'Marine iguana sneezing salt', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.iguanaSneeze, diagnosticGain: 0.16 },
+  { key: 'lizardScurry', label: 'Lava lizard dashing', group: 'Animal movement', kind: 'sprite', sprite: FAUNA_AUDIO.lizardScurry, diagnosticGain: 0.16 },
+  { key: 'racerSlither', label: 'Racer through litter', group: 'Animal movement', kind: 'sprite', sprite: FAUNA_AUDIO.racerSlither, diagnosticGain: 0.16 },
+  { key: 'locustFlight', label: 'Locust taking wing', group: 'Animal movement', kind: 'sprite', sprite: FAUNA_AUDIO.locustFlight, diagnosticGain: 0.16 },
+  { key: 'tortoiseHiss', label: 'Tortoise withdrawing', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.tortoiseHiss, diagnosticGain: 0.16 },
+  { key: 'tortoiseFootfall', label: 'Tortoise footfalls', group: 'Animal movement', kind: 'sprite', sprite: FAUNA_AUDIO.tortoiseFootfall, diagnosticGain: 0.16 },
+  { key: 'tortoiseGraze', label: 'Tortoise grazing', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.tortoiseGraze, diagnosticGain: 0.16 },
+  { key: 'turtleBreath', label: 'Turtle breathing at the surface', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.turtleBreath, diagnosticGain: 0.16 },
+  { key: 'parrotfishCrunch', label: 'Parrotfish on coral (swimming)', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.parrotfishCrunch, diagnosticGain: 0.16 },
+  { key: 'frigateClatter', label: 'Frigatebird bill clatter', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.frigateClatter, diagnosticGain: 0.16 },
+  { key: 'finchCrack', label: 'Finch cracking seed', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.finchCrack, diagnosticGain: 0.16 },
+  { key: 'boobyWhistle', label: 'Blue-footed booby whistle', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.boobyWhistle, diagnosticGain: 0.16 },
+  { key: 'seaCaveBoom', label: 'Swell in the sea tube', group: 'Places', kind: 'sprite', sprite: FAUNA_AUDIO.seaCaveBoom, diagnosticGain: 0.16 },
+  { key: 'sealionBark', label: 'Sea lion bark', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.sealionBark, diagnosticGain: 0.16 },
+  { key: 'sealionBarkBout', label: 'Sea lion bull barking', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.sealionBarkBout, diagnosticGain: 0.16 },
+  { key: 'sealionGrunt', label: 'Sea lion dozing grunt', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.sealionGrunt, diagnosticGain: 0.16 },
+  { key: 'flamingoHonk', label: 'Flamingo honk', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.flamingoHonk, diagnosticGain: 0.16 },
+  { key: 'horseSnort', label: 'Horse snort', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.horseSnort, diagnosticGain: 0.16 },
+  { key: 'horseWhinny', label: 'Horse whinny', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.horseWhinny, diagnosticGain: 0.16 },
+  { key: 'catMeow', label: 'Cat meow', group: 'Animal voices', kind: 'sprite', sprite: FAUNA_AUDIO.catMeow, diagnosticGain: 0.16 },
+  { key: 'seaCaveSurge', label: 'Surge in the sea tube', group: 'Places', kind: 'sprite', sprite: FAUNA_AUDIO.seaCaveSurge, diagnosticGain: 0.16 },
+  { key: 'seabirdColony', label: 'Seabird colony', group: 'Places', kind: 'spatial', url: FAUNA_AUDIO.seabirdColony, diagnosticGain: 0.14 },
+  { key: 'springBrook', label: 'Spring brook', group: 'Places', kind: 'spatial', url: FAUNA_AUDIO.springBrook, diagnosticGain: 0.14 },
+  { key: 'rockLap', label: 'Sea in rock crevices', group: 'Places', kind: 'spatial', url: FAUNA_AUDIO.rockLap, diagnosticGain: 0.14 },
+  { key: 'leaves', label: 'Leaves in the wind', group: 'Places', kind: 'spatial', url: PLACE_AMBIENCE_AUDIO.leaves, diagnosticGain: 0.14 },
+  { key: 'crickets', label: 'Crickets at night', group: 'Places', kind: 'spatial', url: PLACE_AMBIENCE_AUDIO.crickets, diagnosticGain: 0.14 },
+  { key: 'edgeWind', label: 'Wind over a rim', group: 'Places', kind: 'spatial', url: PLACE_AMBIENCE_AUDIO.edgeWind, diagnosticGain: 0.14 },
+  { key: 'tidePool', label: 'Tide pool', group: 'Places', kind: 'spatial', url: PLACE_AMBIENCE_AUDIO.tidePool, diagnosticGain: 0.14 },
+  { key: 'scrubInsects', label: 'Insects in nearby scrub', group: 'Places', kind: 'spatial', url: ISLAND_AMBIENCE_AUDIO.insects, diagnosticGain: 0.14 },
   { key: 'heartbeat', label: 'Heartbeat when spent', group: 'Darwin body', kind: 'spatial', url: INTERFACE_AUDIO.heartbeat, diagnosticGain: 0.16 },
   { key: 'uiBookOpen', label: 'Book opening', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.bookOpen, diagnosticGain: 0.14 },
   { key: 'uiBookClose', label: 'Book closing', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.bookClose, diagnosticGain: 0.14 },
@@ -100,6 +141,10 @@ const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'uiPencil', label: 'Pencil in the field book', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.pencil, diagnosticGain: 0.14 },
   { key: 'uiNib', label: 'Pen and ink', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.nib, diagnosticGain: 0.14 },
   { key: 'duskBell', label: "Beagle's bell at dusk", group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.shipBell, diagnosticGain: 0.14 },
+  { key: 'uiTab', label: 'Journal tab', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.tabFlick, diagnosticGain: 0.14 },
+  { key: 'uiSeal', label: 'Choice sealed', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.sealPress, diagnosticGain: 0.14 },
+  { key: 'uiDetent', label: 'Toggle', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.detent, diagnosticGain: 0.14 },
+  { key: 'uiRefused', label: 'Unavailable', group: 'Interface', kind: 'sprite', sprite: INTERFACE_AUDIO.feltThud, diagnosticGain: 0.14 },
   { key: 'gull', label: 'Gull call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.gull, diagnosticGain: 0.2 },
   { key: 'finch', label: 'Finch call', group: 'Wildlife calls', kind: 'sprite', sprite: MOVEMENT_WILDLIFE_AUDIO.finch, diagnosticGain: 0.18 },
   { key: 'dove', label: 'Dove call', group: 'Wildlife calls', kind: 'sprite', sprite: WILDLIFE_FIELDWORK_AUDIO.dove, diagnosticGain: 0.18 },
@@ -147,8 +192,13 @@ const BASE_MASTER_GAIN = 0.72;
 // 2026-11-02: footsteps raised ~6 dB; they were lost under the surf bed.
 // 2026-11-02 (later): a by-ear pass folded in. Footsteps, surf, rain and
 // insects came back down; the bee, breath and close wave break came up.
+// 2026-11-03: measured rather than by ear. Footfalls had fallen to about the
+// surf's level (sand ~-48 LUFS momentary against surf crests ~-42 before the
+// master), so every surface is now set to peak near -40, ~7 dB over the surf
+// body at the waterline; and the whole mix comes up 4.5 dB, having sat ~20 dB
+// under typical game loudness. The limiter still catches the gun.
 const AUTHORED_MIX = Object.freeze({
-  masterDb: -2.5,
+  masterDb: 2,
   tracks: Object.freeze({
     bee: 7,
     breath: 2,
@@ -157,17 +207,16 @@ const AUTHORED_MIX = Object.freeze({
     brushSpine: 4.5,
     cloth: -10,
     grass: -10.5,
-    grit: -15.5,
-    insects: -11.5,
-    jumpLanding: -2.5,
-    jumpTakeoff: -5.5,
-    litterStep: -10,
-    mudStep: -17.5,
+    grit: -4.5,
+    // The zone-wide bed steps back now that scrub nearby carries its own.
+    insects: -15,
+    litterStep: -2,
+    mudStep: -6,
     pain: 5.5,
     rain: -13.5,
-    rockStep: -6.5,
+    rockStep: -0.5,
     rockTakeoff: -6.5,
-    sand: -14,
+    sand: -6.5,
     shotgunReport: -3,
     spineSnag: 7.5,
     surf: -10,
@@ -175,7 +224,7 @@ const AUTHORED_MIX = Object.freeze({
     tortoiseStep: -6.5,
     water: -11,
     waveBreak: 2,
-    woodStep: -6.5,
+    woodStep: -5,
   }),
 });
 const MASTER_TRIM_MIN_DB = -18;
@@ -196,9 +245,11 @@ const DEFERRED_AUDIO_BANKS = Object.freeze([
   POST_OFFICE_BAY_AUDIO_URLS.slice(2),
   MOVEMENT_WILDLIFE_AUDIO_URLS,
   FOLEY_AUDIO_URLS,
+  MOTION_AUDIO_URLS,
   DARWIN_BODY_AUDIO_URLS,
   WILDLIFE_FIELDWORK_AUDIO_URLS,
   CONTEXTUAL_WORLD_AUDIO_URLS,
+  FAUNA_AUDIO_URLS,
 ]);
 let deferredAudioPreload = null;
 let toolFoleyPreload = null;
@@ -281,6 +332,31 @@ const audioState = {
       uiPencil: 0,
       uiNib: 0,
       duskBell: 0,
+      uiTab: 0,
+      uiSeal: 0,
+      uiDetent: 0,
+      uiRefused: 0,
+      iguanaSneeze: 0,
+      lizardScurry: 0,
+      racerSlither: 0,
+      locustFlight: 0,
+      tortoiseHiss: 0,
+      tortoiseFootfall: 0,
+      tortoiseGraze: 0,
+      turtleBreath: 0,
+      parrotfishCrunch: 0,
+      frigateClatter: 0,
+      finchCrack: 0,
+      seaCaveBoom: 0,
+      boobyWhistle: 0,
+      sealionBark: 0,
+      sealionBarkBout: 0,
+      sealionGrunt: 0,
+      flamingoHonk: 0,
+      horseSnort: 0,
+      horseWhinny: 0,
+      catMeow: 0,
+      seaCaveSurge: 0,
       rockStep: 0,
       woodStep: 0,
       mudStep: 0,
@@ -295,8 +371,15 @@ const audioState = {
       rockBump: 0,
       rockScramble: 0,
       looseStone: 0,
-      jumpTakeoff: 0,
-      jumpLanding: 0,
+      jumpTakeoffStand: 0,
+      jumpTakeoffRun: 0,
+      jumpLandStand: 0,
+      jumpLandRun: 0,
+      jumpLandDrop: 0,
+      skidGrit: 0,
+      skidSand: 0,
+      skidRock: 0,
+      rockGrit: 0,
       finchWing: 0,
       tortoiseStep: 0,
       gull: 0,
@@ -600,6 +683,78 @@ function rampValue(parameter, value, timeConstant = 0.12) {
   parameter.setTargetAtTime(value, context.currentTime, Math.max(0.02, timeConstant));
 }
 
+// The listener: Darwin's ears, turned the way the camera looks. Sounds with
+// a place in the world (animals, water, the colony) pass through an HRTF
+// panner placed there, so they sit fully left or right, behind or above, and
+// swing round as the camera turns. Their level and dulling with distance stay
+// with the callers (wildlifeVoices.propagate); the panner only gives
+// direction. Until the scene has reported a camera the stereo pan is used.
+const audioListener = { ready: false, x: 0, y: 0, z: 0 };
+
+function setAudioParam(parameter, value) {
+  if (parameter && Number.isFinite(value)) parameter.value = value;
+}
+
+export function updateAudioListener({ position, forward, up }) {
+  const context = audioState.context;
+  if (!context || !position || !forward || !up) return;
+  const listener = context.listener;
+  audioListener.x = position.x;
+  audioListener.y = position.y;
+  audioListener.z = position.z;
+  if (!audioListener.ready) audioState.debug.listener = audioListener;
+  audioListener.ready = true;
+  if (listener.positionX) {
+    setAudioParam(listener.positionX, position.x);
+    setAudioParam(listener.positionY, position.y);
+    setAudioParam(listener.positionZ, position.z);
+    setAudioParam(listener.forwardX, forward.x);
+    setAudioParam(listener.forwardY, forward.y);
+    setAudioParam(listener.forwardZ, forward.z);
+    setAudioParam(listener.upX, up.x);
+    setAudioParam(listener.upY, up.y);
+    setAudioParam(listener.upZ, up.z);
+  } else if (typeof listener.setPosition === 'function') {
+    listener.setPosition(position.x, position.y, position.z);
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+  }
+}
+
+function worldPoint(position) {
+  const x = Number(position?.x);
+  const z = Number(position?.z);
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const y = Number(position?.y);
+  return { x, y: Number.isFinite(y) ? y : audioListener.y, z };
+}
+
+function setPannerPosition(panner, point, timeConstant = 0) {
+  if (panner.positionX) {
+    if (timeConstant > 0) {
+      rampValue(panner.positionX, point.x, timeConstant);
+      rampValue(panner.positionY, point.y, timeConstant);
+      rampValue(panner.positionZ, point.z, timeConstant);
+    } else {
+      setAudioParam(panner.positionX, point.x);
+      setAudioParam(panner.positionY, point.y);
+      setAudioParam(panner.positionZ, point.z);
+    }
+  } else if (typeof panner.setPosition === 'function') {
+    panner.setPosition(point.x, point.y, point.z);
+  }
+}
+
+function createWorldPanner(context) {
+  if (typeof context.createPanner !== 'function') return null;
+  const panner = context.createPanner();
+  panner.panningModel = 'HRTF';
+  // Direction only: rolloff 0 holds the inverse-distance gain at 1.
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 1;
+  panner.rolloffFactor = 0;
+  return panner;
+}
+
 async function loadAudioBuffer(url) {
   const context = ensureAudioGraph();
   if (!context) return null;
@@ -672,6 +827,16 @@ async function ensureAmbientTrack(key, url) {
   return promise;
 }
 
+function routeSpatialTrack(track, target) {
+  const point = audioListener.ready && track.worldPanner ? worldPoint(target.position) : null;
+  const route = point ? 'world' : 'stereo';
+  if (point) setPannerPosition(track.worldPanner, point, track.route === 'world' ? 0.15 : 0);
+  if (route === track.route) return;
+  track.gain.disconnect();
+  track.gain.connect(route === 'world' ? track.worldPanner : (track.panner || audioState.master));
+  track.route = route;
+}
+
 async function ensureSpatialTrack(key, url) {
   if (audioState.spatial.has(key)) return audioState.spatial.get(key);
   const context = ensureAudioGraph();
@@ -680,22 +845,31 @@ async function ensureSpatialTrack(key, url) {
 
   const source = context.createBufferSource();
   const gain = context.createGain();
+  // Distance dulling for loops that sit somewhere in the world (a brook, the
+  // sea in the rocks); wide open unless a target asks for less.
+  const filter = context.createBiquadFilter();
+  const worldPanner = createWorldPanner(context);
   const panner = typeof context.createStereoPanner === 'function' ? context.createStereoPanner() : null;
-  const target = audioState.spatialTargets.get(key) || { gain: 0, pan: 0, playbackRate: 1 };
+  const target = audioState.spatialTargets.get(key) || { gain: 0, pan: 0, playbackRate: 1, filterHz: 20000 };
   source.buffer = buffer;
   source.loop = true;
   source.playbackRate.value = target.playbackRate;
+  filter.type = 'lowpass';
+  filter.Q.value = 0.5;
+  filter.frequency.value = target.filterHz || 20000;
   gain.gain.value = 0;
-  source.connect(gain);
+  source.connect(filter);
+  filter.connect(gain);
+  // Both routes exist; the gain feeds whichever the latest target asks for
+  // (a world position, or a plain stereo pan for sounds on Darwin himself).
   if (panner) {
     panner.pan.value = target.pan;
-    gain.connect(panner);
     panner.connect(audioState.master);
-  } else {
-    gain.connect(audioState.master);
   }
+  worldPanner?.connect(audioState.master);
   source.start(0, Math.random() * Math.max(0.01, buffer.duration - 0.1));
-  const track = { source, gain, panner };
+  const track = { source, gain, panner, worldPanner, filter, route: null };
+  routeSpatialTrack(track, target);
   audioState.spatial.set(key, track);
   rampGain(gain.gain, effectiveContinuousGain(key, target.gain), 0.16);
   exposeDebugState();
@@ -727,6 +901,14 @@ export function preloadSoundscapeEffects() {
     await ensureSpatialTrack('bee', MOVEMENT_WILDLIFE_AUDIO.bee);
     await ensureSpatialTrack('coatFlap', FIELD_FOLEY_AUDIO.coatFlap);
     await ensureSpatialTrack('heartbeat', INTERFACE_AUDIO.heartbeat);
+    await ensureSpatialTrack('springBrook', FAUNA_AUDIO.springBrook);
+    await ensureSpatialTrack('rockLap', FAUNA_AUDIO.rockLap);
+    await ensureSpatialTrack('seabirdColony', FAUNA_AUDIO.seabirdColony);
+    await ensureSpatialTrack('leaves', PLACE_AMBIENCE_AUDIO.leaves);
+    await ensureSpatialTrack('crickets', PLACE_AMBIENCE_AUDIO.crickets);
+    await ensureSpatialTrack('edgeWind', PLACE_AMBIENCE_AUDIO.edgeWind);
+    await ensureSpatialTrack('tidePool', PLACE_AMBIENCE_AUDIO.tidePool);
+    await ensureSpatialTrack('scrubInsects', ISLAND_AMBIENCE_AUDIO.insects);
     exposeDebugState();
     return true;
   })();
@@ -841,18 +1023,24 @@ export function setSpatialAudioTarget(key, {
   gain = 0,
   pan = 0,
   playbackRate = 1,
+  filterHz = 20000,
+  position = null,
 } = {}, timeConstant = 0.12) {
   const target = {
+    position: worldPoint(position),
     gain: Math.max(0, Math.min(0.25, Number(gain) || 0)),
     pan: Math.max(-0.75, Math.min(0.75, Number(pan) || 0)),
     playbackRate: Math.max(0.88, Math.min(1.12, Number(playbackRate) || 1)),
+    filterHz: Math.max(300, Math.min(20000, Number(filterHz) || 20000)),
   };
   audioState.spatialTargets.set(key, target);
   const track = audioState.spatial.get(key);
   if (track) {
     rampGain(track.gain.gain, effectiveContinuousGain(key, target.gain), timeConstant);
     rampValue(track.panner?.pan, target.pan, Math.min(timeConstant, 0.1));
+    routeSpatialTrack(track, target);
     rampValue(track.source.playbackRate, target.playbackRate, 0.16);
+    rampValue(track.filter?.frequency, target.filterHz, Math.max(0.2, timeConstant));
   }
   exposeDebugState();
 }
@@ -866,6 +1054,7 @@ export function playAudioSprite(sprite, {
   priority = false,
   filterHz = null,
   send = 1,
+  position = null,
 } = {}) {
   const context = audioState.context;
   const buffer = audioState.buffers.get(sprite.url);
@@ -883,7 +1072,9 @@ export function playAudioSprite(sprite, {
   const source = context.createBufferSource();
   const voiceGain = context.createGain();
   const filter = Number.isFinite(filterHz) ? context.createBiquadFilter() : null;
-  const panner = typeof context.createStereoPanner === 'function' ? context.createStereoPanner() : null;
+  const point = audioListener.ready ? worldPoint(position) : null;
+  const worldPanner = point ? createWorldPanner(context) : null;
+  const panner = worldPanner || (typeof context.createStereoPanner === 'function' ? context.createStereoPanner() : null);
   source.buffer = buffer;
   source.playbackRate.value = Math.max(0.88, Math.min(1.28, playbackRate));
   const baseGain = Math.max(0, Math.min(0.5, gain));
@@ -898,7 +1089,8 @@ export function playAudioSprite(sprite, {
     source.connect(voiceGain);
   }
   if (panner) {
-    panner.pan.value = Math.max(-0.25, Math.min(0.25, pan));
+    if (worldPanner) setPannerPosition(worldPanner, point);
+    else panner.pan.value = Math.max(-0.25, Math.min(0.25, pan));
     voiceGain.connect(panner);
     panner.connect(audioState.master);
   } else {
@@ -971,6 +1163,10 @@ const INTERFACE_CUE_FAMILIES = Object.freeze({
   pencil: 'uiPencil',
   nib: 'uiNib',
   shipBell: 'duskBell',
+  tabFlick: 'uiTab',
+  sealPress: 'uiSeal',
+  detent: 'uiDetent',
+  feltThud: 'uiRefused',
 });
 
 // Synthesized reward chime for the collection celebration — no sample asset,
@@ -1282,8 +1478,10 @@ export async function retrySoundscapeAudioTrack(key) {
     current.source.onended = null;
     try { current.source.stop(); } catch { /* Already stopped. */ }
     current.source.disconnect();
+    current.filter?.disconnect();
     current.gain.disconnect();
     current.panner?.disconnect();
+    current.worldPanner?.disconnect();
   }
   const url = definition.url || definition.sprite?.url;
   audioState.buffers.delete(url);

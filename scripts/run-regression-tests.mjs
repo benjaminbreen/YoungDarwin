@@ -442,7 +442,10 @@ const {
 } = loadModule('game-core/floreanaGeography.js');
 const {
   CONTEXTUAL_WORLD_AUDIO,
+  FAUNA_AUDIO,
   FIELD_FOLEY_AUDIO,
+  MOTION_AUDIO,
+  PLACE_AMBIENCE_AUDIO,
   HAMMER_STRIKE_AUDIO,
   INTERFACE_AUDIO,
   MOVEMENT_WILDLIFE_AUDIO,
@@ -2662,6 +2665,222 @@ test('interface cues write only player and aboard entries and ring the dusk bell
   // A rest or a voyage that jumps the clock past six is not heard.
   assert.equal(crossedDusk({ day: 3, timeOfDay: 16 }, { day: 3, timeOfDay: 19 }), false);
   assert.equal(crossedDusk({ day: 3, timeOfDay: 17.9 }, { day: 4, timeOfDay: 18.05 }), false);
+});
+
+test('button cues sound only for tabs, sealed choices, toggles and refused presses', () => {
+  const { buttonCueKind } = loadModule('three-game/audio/interfaceFoley.js');
+  const control = (attributes = {}, disabled = false) => {
+    const node = {
+      disabled,
+      getAttribute: name => attributes[name] ?? null,
+      hasAttribute: name => Object.hasOwn(attributes, name),
+    };
+    node.closest = () => node;
+    return node;
+  };
+  assert.equal(buttonCueKind(control()), null, 'an ordinary button is silent');
+  assert.equal(buttonCueKind(control({ 'data-ui-sound': 'tab' })), 'tab');
+  assert.equal(buttonCueKind(control({ 'data-ui-sound': 'seal', 'aria-pressed': 'false' })), 'seal');
+  assert.equal(buttonCueKind(control({ 'aria-pressed': 'false' })), 'toggle');
+  assert.equal(buttonCueKind(control({ role: 'switch', 'aria-checked': 'true' })), 'toggle');
+  assert.equal(buttonCueKind(control({}, true)), 'refused');
+  // The chosen option, disabled to stop a re-pick, is not a refusal.
+  assert.equal(buttonCueKind(control({ 'aria-pressed': 'true' }, true)), null);
+  assert.equal(buttonCueKind({ closest: () => null }), null);
+});
+
+test('wildlife voices travel: quieter, duller and later with range, muffled behind ground', () => {
+  const { lineOccluded, propagate } = loadModule('three-game/audio/wildlifeVoices.js');
+  const near = propagate(3, { near: 4, far: 40 });
+  const mid = propagate(15, { near: 4, far: 40 });
+  const far = propagate(32, { near: 4, far: 40 });
+  assert.equal(near.gain, 1);
+  assert.ok(mid.gain < near.gain && far.gain < mid.gain, 'level falls with distance');
+  assert.ok(mid.filterHz < near.filterHz && far.filterHz < mid.filterHz, 'air takes the highs');
+  assert.equal(near.delayMs, 0);
+  assert.ok(Math.abs(far.delayMs - 32 / 343 * 1000) < 0.01, 'distant calls arrive late');
+  assert.equal(propagate(41, { near: 4, far: 40 }), null, 'beyond far is silent');
+  const behind = propagate(15, { near: 4, far: 40, occluded: true });
+  assert.ok(behind.gain < mid.gain && behind.filterHz < mid.filterHz);
+  const ridge = (x) => (x > 8 && x < 12 ? 6 : 0);
+  assert.equal(lineOccluded({ x: 0, y: 0, z: 0 }, { x: 20, y: 0, z: 0 }, ridge), true);
+  assert.equal(lineOccluded({ x: 0, y: 0, z: 0 }, { x: 20, y: 0, z: 0 }, () => 0), false);
+});
+
+test('wildlife calls follow behaviour: alarm and onStart edges, cadence, day, rain and budget', () => {
+  const { WILDLIFE_VOICE_PROFILES, MAX_WILDLIFE_VOICES, chooseCall, createWildlifeVoiceDirector, stepWildlifeVoices } = loadModule('three-game/audio/wildlifeVoices.js');
+  const tortoise = WILDLIFE_VOICE_PROFILES.floreanagianttortoise;
+  const state = { activity: 'default', alarmed: false, calmNextAt: Infinity, activityNextAt: 0 };
+  assert.equal(chooseCall(tortoise, state, { activity: 'withdraw', alarmed: false, now: 0, hour: 12, random: () => 0 })?.kind, 'activity', 'a tortoise hisses as it withdraws');
+  assert.equal(chooseCall(tortoise, state, { activity: 'withdraw', alarmed: false, now: 100, hour: 12, random: () => 0 }), null, 'once, not every tick');
+  const mocker = WILDLIFE_VOICE_PROFILES.floreanamockingbird;
+  const bird = { activity: 'default', alarmed: false, calmNextAt: 0, activityNextAt: 0 };
+  assert.equal(chooseCall(mocker, bird, { activity: 'default', alarmed: true, now: 0, hour: 12, random: () => 0 })?.kind, 'alarm');
+  const calm = { activity: 'default', alarmed: false, calmNextAt: 0, activityNextAt: 0 };
+  assert.equal(chooseCall(mocker, calm, { activity: 'default', alarmed: false, now: 0, hour: 2, random: () => 0 }), null, 'silent at night');
+  calm.calmNextAt = 0;
+  assert.equal(chooseCall(mocker, calm, { activity: 'default', alarmed: false, now: 0, hour: 12, rain: 0.05, random: () => 0 }), null, 'hushed by rain');
+  calm.calmNextAt = 0;
+  assert.equal(chooseCall(mocker, calm, { activity: 'default', alarmed: false, now: 0, hour: 12, random: () => 0 })?.kind, 'calm');
+
+  const director = createWildlifeVoiceDirector();
+  const animals = Array.from({ length: 8 }, (_, index) => ({
+    actorId: `gull-${index}`, speciesId: 'lavagull', position: { x: index * 2, y: 0, z: 5 }, activity: 'default', alarmed: false,
+  }));
+  const context = { zoneId: 'Z', listener: { x: 0, y: 0, z: 0 }, hour: 12, resolve: () => ({ slotDuration: 1 }), random: () => 0 };
+  stepWildlifeVoices(director, { ...context, animals, now: 0 });
+  const raised = animals.map(animal => ({ ...animal, alarmed: true }));
+  const started = stepWildlifeVoices(director, { ...context, animals: raised, now: 100 });
+  assert.equal(started.length, MAX_WILDLIFE_VOICES, 'a flock alarm is capped');
+  assert.deepEqual(started.map(request => request.actorId), ['gull-0', 'gull-1', 'gull-2', 'gull-3'], 'nearest speak first');
+  assert.ok(new Set(started.map(request => request.playbackRate)).size > 1, 'individuals differ in pitch');
+});
+
+test('the water probe finds spring water and rocky sea edges, not sandy ones', () => {
+  const { placeLoopGains, probeWaterAround } = loadModule('three-game/audio/placeSounds.js');
+  const listener = { x: 0, y: 1, z: 0 };
+  const brookProbe = probeWaterAround(listener, {
+    heightAt: () => 0.5,
+    biomeAt: x => (x > 5 ? 'spring-brook' : 'damp-spring-meadow'),
+    waterLevel: 0,
+  });
+  assert.ok(brookProbe.brook && brookProbe.brook.distance >= 5 && brookProbe.brook.distance <= 7);
+  assert.equal(brookProbe.rockSea, null);
+  const rocky = probeWaterAround(listener, {
+    heightAt: x => (x > 8 ? -1 : 0.5),
+    biomeAt: () => 'black-lava-shelf',
+    waterLevel: 0,
+  });
+  assert.ok(rocky.rockSea && rocky.rockSea.distance < 12);
+  const sandy = probeWaterAround(listener, {
+    heightAt: x => (x > 8 ? -1 : 0.5),
+    biomeAt: () => 'pale-sand-beach',
+    waterLevel: 0,
+  });
+  assert.equal(sandy.rockSea, null);
+  const gains = placeLoopGains(rocky);
+  assert.ok(gains.rockLap > 0 && gains.brook === 0);
+});
+
+function wavSeconds(filePath) {
+  const bytes = fs.readFileSync(filePath);
+  let offset = 12;
+  let format = null;
+  while (offset + 8 <= bytes.length) {
+    const id = bytes.subarray(offset, offset + 4).toString('ascii');
+    const size = bytes.readUInt32LE(offset + 4);
+    if (id === 'fmt ') format = { sampleRate: bytes.readUInt32LE(offset + 12), blockAlign: bytes.readUInt16LE(offset + 20) };
+    if (id === 'data' && format) return size / format.blockAlign / format.sampleRate;
+    offset += 8 + size + (size % 2);
+  }
+  return null;
+}
+
+test('fauna sprites and loops match their metadata, and every call names a real sprite', () => {
+  for (const [key, asset] of Object.entries(FAUNA_AUDIO)) {
+    const url = asset?.url || asset;
+    const filePath = path.join(process.cwd(), 'public', url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `${key} runtime asset exists`);
+    const seconds = wavSeconds(filePath);
+    assert.ok(seconds > 0, `${key} is PCM WAV`);
+    if (asset?.url) {
+      assert.ok(Math.abs(seconds - asset.variants * asset.slotDuration) < 0.01, `${key} is ${asset.variants} x ${asset.slotDuration}s`);
+    } else {
+      assert.ok(seconds >= 8, `${key} loop is long enough not to be heard repeating`);
+    }
+  }
+  const { WILDLIFE_VOICE_PROFILES } = loadModule('three-game/audio/wildlifeVoices.js');
+  const known = new Set(['gull', 'finch', 'dove', 'mockingbird', 'hawk', 'owl', 'goatBleat',
+    ...Object.keys(FAUNA_AUDIO).filter(key => FAUNA_AUDIO[key]?.url)]);
+  for (const [speciesId, profile] of Object.entries(WILDLIFE_VOICE_PROFILES)) {
+    const sounds = [
+      profile.sound,
+      profile.alarm?.sound,
+      ...(profile.calmSounds || []).map(([sound]) => sound),
+      ...Object.values(profile.activities || {}).map(activity => activity.sound),
+    ].filter(Boolean);
+    for (const sound of sounds) assert.ok(known.has(sound), `${speciesId} calls ${sound}, which has a sprite`);
+  }
+  const { SOUND_PLACES, pickPlaceSound } = loadModule('three-game/audio/placeSounds.js');
+  for (const place of SOUND_PLACES) {
+    for (const entry of place.sounds) assert.ok(known.has(entry.sound), `${place.id} plays ${entry.sound}`);
+    assert.equal(pickPlaceSound(place, () => 0).sound, place.sounds[0].sound);
+    assert.equal(pickPlaceSound(place, () => 0.999).sound, place.sounds.at(-1).sound);
+  }
+});
+
+test('jumps sound as a standing hop, a running leap or a drop', () => {
+  const { jumpSoundShape } = loadModule('three-game/audio/jumpSounds.js');
+  assert.equal(jumpSoundShape({ runningJump: false }, 'takeoff').body, 'jumpTakeoffStand');
+  const runOff = jumpSoundShape({ runningJump: true }, 'takeoff');
+  assert.equal(runOff.body, 'jumpTakeoffRun');
+  assert.ok(runOff.skid > 0, 'a running push-off skids');
+  // A flat jump lands at ~7 m/s: still a hop, not a drop.
+  const hop = jumpSoundShape({ fallSpeed: 7.3, dropHeight: 0.05 }, 'landing-jump');
+  assert.equal(hop.body, 'jumpLandStand');
+  assert.ok(!hop.bodyImpact && !hop.gear);
+  const leap = jumpSoundShape({ runningJump: true, fallSpeed: 7.3, dropHeight: 0 }, 'landing-jump');
+  assert.equal(leap.body, 'jumpLandRun');
+  assert.ok(leap.skid > 0);
+  const small = jumpSoundShape({ runningJump: false, fallSpeed: 10, dropHeight: 1.6 }, 'landing-jump');
+  assert.equal(jumpSoundShape({ runningJump: true, fallSpeed: 9, dropHeight: 1 }, 'landing-jump').body, 'jumpLandRun', 'a leap down a dune is still a leap');
+  const big = jumpSoundShape({ runningJump: false, fallSpeed: 14, dropHeight: 3.5 }, 'landing-jump');
+  assert.equal(small.body, 'jumpLandDrop');
+  assert.ok(big.bodyGain > small.bodyGain && big.bodyImpact && !small.bodyImpact, 'heavier with the drop');
+  assert.equal(jumpSoundShape({ fallSpeed: 4, dropHeight: 0.8 }, 'landing').body, 'jumpLandDrop', 'walking off an edge');
+  assert.deepEqual(jumpSoundShape({ fallSpeed: 1.5, dropHeight: 0.1 }, 'landing'), {}, 'a step down is just a footfall');
+});
+
+test('the place probe finds canopy, scrub, tide pools, drops and the shore', () => {
+  const { placeAmbienceGains, probeWaterAround } = loadModule('three-game/audio/placeSounds.js');
+  const listener = { x: 0, y: 1, z: 0 };
+  const probe = probeWaterAround(listener, {
+    heightAt: (x, z) => (z < -7 ? 1 : x > 15 ? -1 : 9),
+    biomeAt: (x, z) => (x < -3 ? 'palo-santo' : z > 3 ? 'dry-scrub' : x > 10 ? 'tidepool' : 'basalt'),
+    waterLevel: 0,
+  });
+  assert.ok(probe.canopy.x < 0 && probe.canopy.density > 0.1, 'canopy to the west');
+  assert.ok(probe.scrub.z > 0, 'scrub to the south');
+  assert.ok(probe.tidePool && probe.tidePool.x > 10);
+  assert.ok(probe.edge && probe.edge.z < 0 && probe.edge.drop >= 5, 'the drop to the north');
+  assert.ok(probe.seaEdge && probe.seaEdge.distance <= 18);
+  const gentle = probeWaterAround(listener, { heightAt: x => 1 - x * 0.4, biomeAt: () => 'dry-grass', waterLevel: -50 });
+  assert.equal(gentle.edge, null, 'a hillside is not a rim');
+  const noon = placeAmbienceGains(probe, { windStrength: 0.6, hour: 12 });
+  const night = placeAmbienceGains(probe, { windStrength: 0.6, hour: 22 });
+  assert.ok(noon.scrubInsects > 0 && noon.crickets === 0);
+  assert.ok(night.crickets > 0 && night.scrubInsects === 0);
+  assert.ok(noon.leaves > placeAmbienceGains(probe, { windStrength: 0, hour: 12 }).leaves, 'leaves follow the wind');
+  assert.ok(noon.edgeWind > 0 && noon.tidePool > 0);
+  assert.equal(placeAmbienceGains(probe, { hour: 12, rain: 0.5 }).scrubInsects, 0, 'insects stop in rain');
+});
+
+test('motion and place sprites match their metadata', () => {
+  const entries = [...Object.entries(MOTION_AUDIO), ...Object.entries(PLACE_AMBIENCE_AUDIO)];
+  for (const [key, asset] of entries) {
+    const url = asset?.url || asset;
+    const filePath = path.join(process.cwd(), 'public', url.replace(/^\//, ''));
+    const seconds = wavSeconds(filePath);
+    assert.ok(seconds > 0, `${key} is PCM WAV`);
+    if (asset?.url) assert.ok(Math.abs(seconds - asset.variants * asset.slotDuration) < 0.01, `${key} slots`);
+    else assert.ok(seconds >= 10, `${key} loop is long enough`);
+  }
+});
+
+test('the seabird colony bed comes from the nesting birds and thins with distance, night and rain', () => {
+  const { seabirdColonyBed } = loadModule('three-game/audio/wildlifeVoices.js');
+  const bird = (index, x, speciesId = 'booby') => ({ actorId: `b${index}`, speciesId, position: { x, y: 0, z: 0 } });
+  const listener = { x: 0, y: 0, z: 0 };
+  assert.equal(seabirdColonyBed([bird(0, 10)], listener), null, 'one bird is not a colony');
+  assert.equal(seabirdColonyBed([bird(0, 10, 'lavagull'), bird(1, 12, 'lavagull')], listener), null, 'gulls are not the colony');
+  const colony = [bird(0, 20), bird(1, 22), bird(2, 25, 'frigatebird'), bird(3, 26)];
+  const near = seabirdColonyBed(colony, listener, { hour: 10 });
+  assert.ok(near.gain > 0 && near.position.x > 20 && near.count === 4, 'heard from where the birds are');
+  const far = seabirdColonyBed(colony.map(entry => ({ ...entry, position: { x: entry.position.x + 30, y: 0, z: 0 } })), listener, { hour: 10 });
+  assert.ok(far.gain < near.gain && far.filterHz < near.filterHz, 'quieter and duller further off');
+  assert.ok(seabirdColonyBed(colony, listener, { hour: 23 }).gain < near.gain * 0.5, 'quiet at night');
+  assert.ok(seabirdColonyBed(colony, listener, { hour: 10, rain: 0.5 }).gain < near.gain * 0.5, 'thinned by rain');
+  assert.equal(seabirdColonyBed(colony.map(entry => ({ ...entry, position: { x: entry.position.x + 80, y: 0, z: 0 } })), listener), null);
 });
 
 test('wildlife, weather, fieldwork, and shoreline sprites are committed PCM assets', () => {

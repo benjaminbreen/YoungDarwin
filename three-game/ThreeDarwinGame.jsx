@@ -3418,6 +3418,8 @@ function TerrainLookSection() {
       <div className="grid grid-cols-1 gap-1.5">
         <DevSlider label="Under canopy" value={terrainLookTuning.footprintCanopy} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintCanopy: value })} />
         <DevSlider label="Rock collars" value={terrainLookTuning.footprintRock} min={0} max={2} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ footprintRock: value })} />
+        <DevSlider label="Swash gloss" value={terrainLookTuning.shoreGloss} min={0} max={3} step={0.05} format={v => (v === 0 ? 'off' : `${v.toFixed(2)}×`)} onChange={value => set({ shoreGloss: value })} />
+        <DevSlider label="Swash line" value={terrainLookTuning.swashOffset} min={-0.2} max={0.8} step={0.01} format={v => `${v >= 0 ? '+' : ''}${v.toFixed(2)} m`} onChange={value => set({ swashOffset: value })} />
       </div>
     </div>
   );

@@ -251,6 +251,69 @@ const SPRITES = {
     },
     highpassHz: 500,
   },
+  // Button-level cues, kept far quieter and shorter than the objects above.
+  // New sprites go at the end of this table so earlier seeds never move.
+  //
+  // A journal tab: one quick flick of a page edge under the thumb.
+  'tab-flick.wav': {
+    slot: 0.25,
+    variants: 6,
+    peakDb: -12,
+    render(buffer, random) {
+      crackle(buffer, 0.004, random, { amp: 0.16, duration: 0.025, count: 4, low: 3200, high: 7500 });
+      air(buffer, 0.008, random, { amp: 0.28, duration: 0.05, from: 1800, to: 4200, q: 1.3 });
+    },
+    highpassHz: 600,
+  },
+  // Committing to a choice: a seal pressed into soft wax, then lifted with
+  // a faint sticky tick.
+  'seal-press.wav': {
+    slot: 0.5,
+    variants: 4,
+    peakDb: -10,
+    render(buffer, random) {
+      mode(buffer, 0.01, { freq: random.jitter(170, 0.06), amp: 0.5, tau: 0.035, attack: 0.006 });
+      mode(buffer, 0.01, { freq: random.jitter(410, 0.08), amp: 0.16, tau: 0.02, attack: 0.004 });
+      noiseBurst(buffer, 0.012, random, {
+        amp: 0.28, attack: 0.008, tau: 0.04, length: 0.18, grit: 0.4, gritRate: 600,
+        filters: [biquad('lowpass', 1300, 0.7)],
+      });
+      const lift = random.range(0.16, 0.2);
+      noiseBurst(buffer, lift, random, {
+        amp: 0.12, attack: 0.001, tau: 0.006, length: 0.03,
+        filters: [biquad('bandpass', random.range(2400, 3200), 1.4)],
+      });
+      crackle(buffer, lift, random, { amp: 0.04, duration: 0.03, count: 3, low: 2000, high: 4000 });
+    },
+    highpassHz: 70,
+  },
+  // A toggle: a small brass detent, like the compass lid's catch.
+  'detent.wav': {
+    slot: 0.18,
+    variants: 6,
+    peakDb: -14,
+    render(buffer, random) {
+      contact(buffer, 0.004, { width: 0.00009, amp: 0.3, brightHz: 5200 });
+      mode(buffer, 0.004, { freq: random.jitter(2900, 0.05), amp: 0.32, tau: 0.008 });
+      mode(buffer, 0.004, { freq: random.jitter(4650, 0.05), amp: 0.18, tau: 0.005 });
+      mode(buffer, 0.005, { freq: random.jitter(880, 0.06), amp: 0.12, tau: 0.01 });
+    },
+    highpassHz: 400,
+  },
+  // Pressing something that cannot be done yet: a dull knock through felt.
+  'felt-thud.wav': {
+    slot: 0.25,
+    variants: 4,
+    peakDb: -12,
+    render(buffer, random) {
+      mode(buffer, 0.004, { freq: random.jitter(205, 0.06), amp: 0.5, tau: 0.022, attack: 0.002 });
+      noiseBurst(buffer, 0.004, random, {
+        amp: 0.3, attack: 0.001, tau: 0.012, length: 0.06,
+        filters: [biquad('lowpass', 650, 0.7)],
+      });
+    },
+    highpassHz: 80,
+  },
 };
 
 // The Beagle's bell striking the end of the first dog watch, carried across

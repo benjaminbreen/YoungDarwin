@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useThreeGameStore } from '../../store';
@@ -20,10 +20,29 @@ import { CarriedPropAttachment } from './CarriedPropAttachment';
 import { getZoneProps } from '../../physics/props/propRegistry';
 import { carryGripForProp } from './carryProfiles';
 import { WetBoots } from './WetBoots';
+import {
+  SHOTGUN_MODEL_PATH,
+  SLING,
+  bodyFrame,
+  createSlingSwing,
+  createStrapMesh,
+  createSwivels,
+  drawCurve,
+  findSlingBones,
+  createStrapState,
+  poseSlingStrap,
+  slungTransform,
+  updateSlingSwing,
+} from './shotgunSling';
 import { NET_SWEEP, netSweepState, netSweepTime } from './netSweep';
+import { longGunQuaternion, solveTwoBoneIK } from './armIK';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
+const LEFT_UPPER_ARM = /leftarm$/i;
+const LEFT_FOREARM = /leftforearm$/i;
+const RIGHT_UPPER_ARM = /rightarm$/i;
+const RIGHT_FOREARM = /rightforearm$/i;
 
 const LAMP_MODEL_PATH = '/assets/models/oil-lamp.glb';
 // Tunables — the lamp mesh's grip pose may need adjusting in-game.
@@ -473,12 +492,12 @@ function updateButterflyNetVisual(visual, { time, walking, running, action }) {
   visual.bag.geometry.computeVertexNormals();
 }
 
-// Held-tool props. Placeholder GLBs live under /assets/models/tools/ — swap in
-// finished models by replacing the file at the same path.
+// Held-tool props under /assets/models/tools/. Bump a path's ?v= when its GLB
+// is rebuilt: assets are cached for up to an hour.
 const HAND_TOOLS = [
   {
     toolId: 'shotgun',
-    path: '/assets/models/tools/shotgun.glb',
+    path: SHOTGUN_MODEL_PATH,
     scale: 1,
     position: [0, 0, 0],
     euler: [0, 0, 0],
@@ -493,6 +512,21 @@ const HAND_TOOLS = [
         // hand-tuned euler. The euler is a post-alignment trim (roll etc.).
         euler: [0, 0, 0],
         orient: 'twoHand',
+        // While aiming, IK puts the left wrist here (gun space, metres:
+        // left of and below the bore, under the fore-end) so the off hand
+        // supports the gun instead of floating where the clip left it.
+        supportHand: [-0.03, -0.012, -0.24],
+        // While aiming, the gun is mounted from the shoulder rather than hung
+        // off the hand: the butt sits in the right shoulder pocket (offset
+        // from the upper-arm joint in gun space: left toward the chest, down,
+        // forward), the barrel follows the aim, and IK brings the right
+        // wrist to the grip (`gripWrist`, gun space). `buttLength` is grip
+        // to butt plate along the barrel axis (build-shotgun.mjs BUTT_Z).
+        shoulderMount: { pocket: [-0.05, -0.035, 0.0], buttLength: 0.335, gripWrist: [0.0, -0.03, 0.06] },
+        // Slung muzzle-up behind the right shoulder on a leather strap while
+        // another tool is out; drawn from and returned to the shoulder when
+        // selected (shotgunSling.js).
+        sling: true,
       },
     },
   },
@@ -915,7 +949,7 @@ function applyNetSweepPose(group, bone, scratch) {
 // Attaches a held-tool GLB to Darwin's right hand and shows it only while that
 // tool is the active one. Hand-oriented props inherit the animated grip pose;
 // body-oriented props remain supported for future coarse world-facing tools.
-function HandProp({ scene, config, modelAssetId, motionRef }) {
+function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
   const resolvedConfig = useMemo(() => {
     const override = config.modelOverrides?.[modelAssetId];
     return override ? { ...config, ...override } : config;
@@ -943,6 +977,29 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     return new THREE.Quaternion().setFromEuler(new THREE.Euler(e[0], e[1], e[2]));
   }, [resolvedConfig.swingEuler]);
   const sweepScratch = useMemo(() => createNetSweepScratch(), []);
+  const supportArmRef = useRef(null);
+  const supportWeightRef = useRef(0);
+  const supportTarget = useMemo(() => new THREE.Vector3(), []);
+  const mountArmRef = useRef(null);
+  const { scene: worldScene } = useThree();
+  const slingRef = useRef(null);
+  const restPositionRef = useRef(null);
+  const mountScratch = useMemo(() => ({
+    butt: new THREE.Vector3(),
+    grip: new THREE.Vector3(),
+    wrist: new THREE.Vector3(),
+    offset: new THREE.Vector3(),
+    local: new THREE.Vector3(),
+  }), []);
+  // Posed after the animation (ModelAsset afterPose), so the gun and the
+  // support-hand IK use this frame's hand pose and the mixer cannot undo them.
+  const poseRef = useRef(null);
+  useEffect(() => {
+    if (!postPose) return undefined;
+    const run = (frameState, delta) => poseRef.current?.(frameState, delta);
+    postPose.add(run);
+    return () => { postPose.delete(run); };
+  }, [postPose]);
 
   useEffect(() => {
     if (!scene || !source) return undefined;
@@ -988,6 +1045,47 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       });
       offHandBoneRef.current = offBone;
     }
+    if (resolvedConfig.supportHand) {
+      const find = regex => {
+        let found = null;
+        scene.traverse(node => { if (!found && node.isBone && regex.test(node.name)) found = node; });
+        return found;
+      };
+      const upper = find(LEFT_UPPER_ARM);
+      const lower = find(LEFT_FOREARM);
+      const end = find(LEFT_HAND);
+      supportArmRef.current = upper && lower && end ? { upper, lower, end } : null;
+      const rightUpper = find(RIGHT_UPPER_ARM);
+      const rightLower = find(RIGHT_FOREARM);
+      mountArmRef.current = rightUpper && rightLower ? { upper: rightUpper, lower: rightLower } : null;
+    }
+    restPositionRef.current = handle.group.position.clone();
+    let strap = null;
+    if (resolvedConfig.sling) {
+      const bones = findSlingBones(scene);
+      if (bones) {
+        createSwivels().forEach(ring => object.add(ring));
+        strap = createStrapMesh();
+        worldScene.add(strap);
+        strap.visible = false;
+        slingRef.current = {
+          bones,
+          strap,
+          swing: createSlingSwing(),
+          t: 0,
+          pos: new THREE.Vector3(),
+          quat: new THREE.Quaternion(),
+          heldPos: new THREE.Vector3(),
+          heldQuat: new THREE.Quaternion(),
+          slotPos: new THREE.Vector3(),
+          slotQuat: new THREE.Quaternion(),
+          wrist: new THREE.Vector3(),
+          hang: new THREE.Vector3(),
+          offset: new THREE.Vector3(),
+          strapState: createStrapState(),
+        };
+      }
+    }
     handle.group.name = `darwinTool:${resolvedConfig.toolId}`;
     handle.group.visible = false;
     tweakEuler.set(resolvedConfig.euler[0], resolvedConfig.euler[1], resolvedConfig.euler[2]);
@@ -997,20 +1095,144 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
     return () => {
       handle.dispose();
       customVisual?.dispose?.();
+      if (strap) {
+        worldScene.remove(strap);
+        strap.geometry.dispose();
+        strap.material.dispose();
+      }
+      slingRef.current = null;
       groupRef.current = null;
       visualRef.current = null;
     };
-  }, [scene, source, resolvedConfig, tweakEuler, tweakQuat]);
+  }, [scene, source, resolvedConfig, tweakEuler, tweakQuat, worldScene]);
 
-  useFrame(({ clock }) => {
+  // Aiming: butt in the right shoulder, barrel along `aimQuat`, right wrist
+  // brought to the grip by IK, then the gun placed exactly (it hangs off the
+  // hand bone, so its local transform is solved after the IK moved the hand).
+  const mountWeightRef = useRef(0);
+  const mountFromShoulder = (bone, delta) => {
+    const mount = resolvedConfig.shoulderMount;
+    const arm = mountArmRef.current;
+    const group = groupRef.current;
+    if (!mount || !arm || !group) return false;
+    const m = mountScratch;
+    mountWeightRef.current = THREE.MathUtils.damp(mountWeightRef.current, 1, 14, delta || 0.016);
+    const w = mountWeightRef.current;
+    arm.upper.getWorldPosition(m.butt);
+    m.butt.add(m.offset.fromArray(mount.pocket).applyQuaternion(aimQuat));
+    m.grip.copy(m.butt).addScaledVector(aimDir, mount.buttLength);
+    m.wrist.fromArray(mount.gripWrist).applyQuaternion(aimQuat).add(m.grip);
+    solveTwoBoneIK(arm.upper, arm.lower, bone, m.wrist, w);
+    bone.getWorldQuaternion(boneQuat);
+    group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+    m.local.copy(m.grip);
+    bone.worldToLocal(m.local);
+    if (restPositionRef.current) group.position.copy(restPositionRef.current).lerp(m.local, w);
+    else group.position.copy(m.local);
+    return true;
+  };
+
+  // Blend the left wrist onto the fore-end while aiming, and back off after.
+  const poseSupportHand = (active, delta) => {
+    const arm = supportArmRef.current;
+    const group = groupRef.current;
+    if (!arm || !group || !resolvedConfig.supportHand) return;
+    supportWeightRef.current = THREE.MathUtils.damp(supportWeightRef.current, active ? 1 : 0, 14, delta || 0.016);
+    if (supportWeightRef.current < 0.01) return;
+    group.updateWorldMatrix(true, false);
+    supportTarget.fromArray(resolvedConfig.supportHand).applyMatrix4(group.matrixWorld);
+    solveTwoBoneIK(arm.upper, arm.lower, arm.end, supportTarget, supportWeightRef.current);
+  };
+
+  poseRef.current = (frameState, delta) => {
     const group = groupRef.current;
     if (!group) return;
     const storeState = useThreeGameStore.getState();
-    const visible = storeState.activeToolId === resolvedConfig.toolId
+    const wantHeld = storeState.activeToolId === resolvedConfig.toolId
       && !storeState.carriedObjectId
       && motionRef?.current?.action !== 'pickUp';
-    if (group.visible !== visible) group.visible = visible;
-    if (!visible) return;
+    if (slingRef.current) {
+      // Covington carries the gun until he hands it over; once Darwin has it,
+      // it rides on his back and comes off only to be shouldered and fired.
+      const sling = slingRef.current;
+      const onDarwin = storeState.shotgunHolder === 'darwin';
+      if (!onDarwin) {
+        if (group.visible) group.visible = false;
+        if (sling.strap.visible) sling.strap.visible = false;
+        sling.t = 0;
+        return;
+      }
+      if (!sling.strap.visible) sling.strap.visible = true;
+      const shouldered = wantHeld && Boolean(motionRef?.current?.aiming || motionRef?.current?.action === 'fireRifle');
+      poseSlung(frameState, delta, shouldered);
+      return;
+    }
+    if (group.visible !== wantHeld) group.visible = wantHeld;
+    if (!wantHeld) return;
+    poseHeld(frameState, delta);
+  };
+
+  // Slung on the back, drawn, held, or stowed again. The held pose comes from
+  // poseHeld (so carry and aim stay as they are); the back slot from
+  // shotgunSling.js; in between the gun travels from one to the other while
+  // IK brings the right hand back to fetch it.
+  const poseSlung = (frameState, delta, wantHeld) => {
+    const group = groupRef.current;
+    const sling = slingRef.current;
+    const bone = group.parent;
+    if (!bone) return;
+    if (!group.visible) group.visible = true;
+    const dt = Math.min(Math.max(delta || 0, 0), 0.1);
+    sling.t = THREE.MathUtils.clamp(sling.t + (wantHeld ? 1 : -1) * dt / SLING.drawSeconds, 0, 1);
+    const { gun, reach } = drawCurve(sling.t);
+    const frame = bodyFrame(sling.bones);
+    sling.bones.rightShoulder.getWorldPosition(sling.offset);
+    updateSlingSwing(sling.swing, sling.offset, frame, dt);
+    if (sling.t > 0) {
+      poseHeld(frameState, delta);
+      group.updateWorldMatrix(true, false);
+      group.getWorldPosition(sling.heldPos);
+      group.getWorldQuaternion(sling.heldQuat);
+    } else {
+      mountWeightRef.current = 0;
+      supportWeightRef.current = 0;
+    }
+    slungTransform(sling.bones, frame, sling.swing, sling.slotPos, sling.slotQuat);
+    sling.pos.copy(sling.slotPos).lerp(sling.heldPos, gun);
+    // Over the shoulder, not through it: arc up and out to the right.
+    const arc = Math.sin(Math.PI * gun);
+    sling.pos.addScaledVector(frame.up, SLING.drawArc[1] * arc).addScaledVector(frame.right, SLING.drawArc[0] * arc);
+    sling.quat.copy(sling.slotQuat).slerp(sling.heldQuat, gun);
+    if (sling.t < 1) {
+      const arm = mountArmRef.current;
+      if (arm && reach > 0) {
+        // Take the gun high, by the fore-end at the shoulder, and slide down
+        // to the grip as it comes into the hands.
+        sling.offset.fromArray(SLING.grabWrist).lerp(
+          sling.hang.fromArray(resolvedConfig.shoulderMount?.gripWrist || [0, -0.03, 0.06]),
+          THREE.MathUtils.smoothstep(sling.t, 0.55, 0.95),
+        );
+        sling.wrist.copy(sling.offset).applyQuaternion(sling.quat).add(sling.pos);
+        solveTwoBoneIK(arm.upper, arm.lower, bone, sling.wrist, reach);
+      }
+      bone.getWorldQuaternion(boneQuat);
+      group.quaternion.copy(boneQuat).invert().multiply(sling.quat);
+      sling.offset.copy(sling.pos);
+      bone.worldToLocal(sling.offset);
+      group.position.copy(sling.offset);
+    }
+    poseStrap(frame, gun);
+  };
+
+  // Strap control points: over the shoulder when slung, hanging under the
+  // gun between the swivels when held; blended while the gun travels.
+  const poseStrap = (frame, held) => {
+    const sling = slingRef.current;
+    poseSlingStrap(sling.strap, sling.strapState, sling.bones, frame, groupRef.current, held);
+  };
+
+  const poseHeld = ({ clock }, delta) => {
+    const group = groupRef.current;
     const bone = group.parent;
     if (!bone) return;
     // While aiming, the shotgun ignores the hand pose and points along the
@@ -1022,10 +1244,14 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
       aimDir.set(shotgunAimState.dirX, shotgunAimState.dirY, shotgunAimState.dirZ);
       if (aimDir.lengthSq() < 1e-4) aimDir.set(0, 0, -1);
       aimDir.normalize();
-      aimQuat.setFromUnitVectors(localShaftAxis, aimDir);
-      group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+      longGunQuaternion(aimQuat, aimDir);
+      if (!mountFromShoulder(bone, delta)) group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+      poseSupportHand(true, delta);
       return;
     }
+    mountWeightRef.current = 0;
+    if (restPositionRef.current) group.position.copy(restPositionRef.current);
+    poseSupportHand(false, delta);
     // Two-handed swing clips (hammer): while the swing plays, lay the haft
     // from the gripping hand toward the off hand so the tool tracks the
     // animated swing arc instead of freezing in the carry pose.
@@ -1059,7 +1285,9 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
         aimDir.copy(offHandPos).sub(gripPos);
         if (aimDir.lengthSq() > 1e-6) {
           aimDir.normalize();
-          aimQuat.setFromUnitVectors(localShaftAxis, aimDir).multiply(tweakQuat);
+          if (resolvedConfig.shaftAxis) aimQuat.setFromUnitVectors(localShaftAxis, aimDir);
+          else longGunQuaternion(aimQuat, aimDir);
+          aimQuat.multiply(tweakQuat);
           group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
           return;
         }
@@ -1111,7 +1339,7 @@ function HandProp({ scene, config, modelAssetId, motionRef }) {
         updateSnareCoilVisual(visualRef.current, visualState);
       }
     }
-  });
+  };
 
   return null;
 }
@@ -1193,6 +1421,12 @@ export function NaturalistModel({
   const previousHealth = useRef(health);
   const damageFlashRef = useRef({ startedAt: -10, duration: 0.58 });
   const statusRef = useRef({ health, fatigue, inventoryCount });
+  // Held tools pose themselves after the animation each frame.
+  const postPoseHandlers = useMemo(() => new Set(), []);
+  const afterPose = useCallback((frameState, delta) => {
+    postPoseHandlers.forEach(handler => handler(frameState, delta));
+  }, [postPoseHandlers]);
+
   const handleSceneReady = useCallback(scene => {
     setModelScene(scene);
     if (scene) onVisualReady?.();
@@ -1314,15 +1548,20 @@ export function NaturalistModel({
       || toolId === 'pocket_knife'
     );
     const hasRifle = !carryingObject && toolId === 'shotgun';
+    // The gun rides slung until it is shouldered: only then do the rifle
+    // stances take over the arms.
+    const rifleInHands = hasRifle && Boolean(
+      motionRef.current.aiming || motionRef.current.action === 'fireRifle',
+    );
     const lampMode = modelAssetId === 'darwin5'
       && !carryingObject
-      && !hasRifle
+      && !rifleInHands
       && lampNightFactor(gameState.timeOfDay ?? 12) > 0.02;
     const heldToolMode = modelAssetId === 'darwin5' && holdingTool;
-    const torchMode = modelAssetId === 'darwin5' && !hasRifle && !heldToolMode && lampMode;
+    const torchMode = modelAssetId === 'darwin5' && !rifleInHands && !heldToolMode && lampMode;
     // Read by the procedural arm pose: a hand holding something must stay
     // where the hold clip and the attachment put it.
-    motionRef.current.handsBusy = carryingObject || holdingTool || hasRifle || torchMode;
+    motionRef.current.handsBusy = carryingObject || holdingTool || rifleInHands || torchMode;
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
     if (motionRef.current.action) {
@@ -1340,7 +1579,7 @@ export function NaturalistModel({
         // arrive naturally at the existing carry pose without a new animation.
         return { clip: 'pickUp', timeScale: 2.15, fade: 0.08, maxTime: 2.95 };
       }
-      if (modelAssetId === 'darwin5' && hasRifle) {
+      if (modelAssetId === 'darwin5' && rifleInHands) {
         const rifleAction = darwin5RifleActionClip(motionRef.current.action, motionRef.current.crouching);
         if (rifleAction) return rifleAction;
       }
@@ -1517,8 +1756,8 @@ export function NaturalistModel({
       }
       return { clip: 'injuredWalk', timeScale: stride('tiredWalk', Math.max(0.62, walkScale * 0.88)) };
     }
-    // Rifle equipped but not aiming: carried low, normal locomotion with rifle.
-    if (hasRifle) {
+    // Rifle shouldered: locomotion with the gun up.
+    if (rifleInHands) {
       if (motionRef.current.running) return { clip: 'runRifle', timeScale: stride('run', runScale) };
       if (motionRef.current.walking) return { clip: 'walkRifle', timeScale: stride('walkRifle', walkScale) };
     }
@@ -1576,7 +1815,7 @@ export function NaturalistModel({
     }
     if (badlyInjured) return status.fatigue >= 82 ? 'injuredStumbleIdle' : 'injuredHurtingIdle';
     if (injured) return 'injuredIdle';
-    if (hasRifle) return 'rifleIdle';
+    if (rifleInHands) return 'rifleIdle';
     if (carryingObject && !freeHandCarry) return 'holdIdle';
     if (torchMode) return 'torchIdle';
     if (heldToolMode) return 'holdToolIdle';
@@ -1601,6 +1840,7 @@ export function NaturalistModel({
         id={selectedModelAssetId}
         animationSelector={selectAnimation}
         overlaySelector={selectUpperBodyOverlay}
+        afterPose={afterPose}
         damageFlash={damageFlash}
         reflect
         onSceneReady={handleSceneReady}
@@ -1612,7 +1852,7 @@ export function NaturalistModel({
       />
       {modelScene && <HandLamp scene={modelScene} modelAssetId={modelAssetId} />}
       {modelScene && HAND_TOOLS.map(tool => (
-        <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} motionRef={motionRef} />
+        <HandProp key={tool.toolId} scene={modelScene} config={tool} modelAssetId={modelAssetId} motionRef={motionRef} postPose={postPoseHandlers} />
       ))}
       {modelScene && <CarriedPropAttachment scene={modelScene} />}
       {modelScene && <WetBoots scene={modelScene} motionRef={motionRef} />}

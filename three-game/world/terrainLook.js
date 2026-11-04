@@ -84,6 +84,12 @@ export const TERRAIN_LOOK_DEFAULTS = Object.freeze({
   // banked against each rock (world/groundFootprints.js). 0 turns either off.
   footprintCanopy: 0.7,
   footprintRock: 1.05,
+
+  // --- shore ------------------------------------------------------------------
+  // Gloss of the draining swash film on every coast (0 turns it off), and how
+  // far above still water the visible waterline sits, which the film follows.
+  shoreGloss: 1,
+  swashOffset: 0.12,
 });
 
 export const terrainLookTuning = { ...TERRAIN_LOOK_DEFAULTS, ...readStored(), ...readUrlOverrides() };

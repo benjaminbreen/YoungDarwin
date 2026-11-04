@@ -289,6 +289,10 @@ export function createDesolateOutcropTerrainMaterial() {
       );
   };
 
+  // Authors its own damp shore band; the shared one in Terrain.jsx stands down.
+
+  material.userData.ownsShoreDamp = true;
+
   material.customProgramCacheKey = () => 'desolate-outcrop-basalt-v2';
   material.needsUpdate = true;
   return material;

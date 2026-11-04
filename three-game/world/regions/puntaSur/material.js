@@ -99,6 +99,7 @@ export const PUNTA_SUR_SPLAT_BOUNDS = { originX: -48, originZ: -45, width: 96, d
 
 export function createPuntaSurTerrainMaterial() {
   return createLayeredDryPbrTerrainMaterial({
+    ownsShoreDamp: true,
     pathPoints: PUNTA_SUR_PATH_POINTS,
     pathSplatBake: 'punta-sur',
     pathSplatBounds: PUNTA_SUR_SPLAT_BOUNDS,
