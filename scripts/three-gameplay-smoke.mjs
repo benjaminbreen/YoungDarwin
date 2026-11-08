@@ -1033,10 +1033,24 @@ async function runCabinScenario(browser, baseUrl) {
     quality: 'performance',
   });
   try {
-    console.log('[three:e2e] Beagle cabin: launch, read, take notes, rest');
+    console.log('[three:e2e] Beagle cabin: meet FitzRoy, read, rest, and recover');
     await launchMode(page, errors, 'Darwin');
     const initial = await page.evaluate(() => window.__darwinE2E.getState());
     assertCondition(initial.currentZoneId === 'BEAGLE_CABIN', 'Cabin scenario launched in the wrong zone.', initial);
+
+    const fitzroy = page.getByRole('dialog', { name: 'Conversation with Captain Robert FitzRoy' });
+    await withFailureArtifacts(page, 'speak with FitzRoy by the chart table', errors, async () => {
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 30, kinds: 'npc' }).items.some(item => item.id === 'fitzroy'));
+      await page.evaluate(() => window.__darwinE2E.teleportNear('fitzroy'));
+      await page.waitForFunction(() => window.__darwinE2E.store('nearbyNpcEncounter').nearbyNpcEncounter?.npcId === 'fitzroy');
+      await page.keyboard.down('e');
+      await page.waitForTimeout(120);
+      await page.keyboard.up('e');
+      await fitzroy.waitFor({ timeout: UI_STEP_TIMEOUT_MS });
+      await fitzroy.getByRole('button', { name: /What are you marking on the chart/ }).click();
+      await fitzroy.getByText(/A smooth patch of water can hide a shelf of lava/).waitFor();
+      await fitzroy.getByRole('button', { name: 'Close conversation' }).click();
+    });
 
     const firstOpen = await page.evaluate(() => window.__darwinE2E.openBook('lyell-principles-vol1'));
     const initialConsultations = initial.consultedBookIds.filter(bookId => bookId === 'lyell-principles-vol1').length;
@@ -1077,6 +1091,37 @@ async function runCabinScenario(browser, baseUrl) {
     assertCondition(rested.fatigue <= initial.fatigue, 'Cabin rest did not recover fatigue.', { initial, rested });
     assertCondition(/Two hours pass/.test(rested.message || ''), 'Cabin rest did not report elapsed time.', rested);
 
+    await withFailureArtifacts(page, 'wake with FitzRoy after a collapse ashore', errors, async () => {
+      await scheduleHarnessAction(page, 'travel ashore before collapse', 'travelTo', 'POST_OFFICE_BAY');
+      await waitForHarnessReadiness(page, {
+        zoneId: 'POST_OFFICE_BAY',
+        transitionPhase: null,
+        gameplayReady: true,
+      }, GAMEPLAY_TIMEOUT_MS, 'ready ashore before collapse');
+      await page.evaluate(() => window.__darwinE2E.triggerIncrementalCollapse());
+      await page.getByRole('button', { name: 'Rest and recover' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await fitzroy.getByText(/Lie still a moment, Mr Darwin/).waitFor({ timeout: GAMEPLAY_TIMEOUT_MS });
+      const wake = await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        const { narratorLog, ...state } = api.store('currentZoneId', 'playerSpawnId', 'activeNpcEncounter', 'health', 'fatigue', 'narratorLog');
+        return {
+          ...state,
+          captain: api.nearby({ radius: 3, kinds: 'npc' }).items.find(item => item.id === 'fitzroy'),
+          speaker: narratorLog.find(entry => entry.source === 'recovery' && entry.kind === 'npcActivity')?.speaker,
+        };
+      });
+      assertCondition(wake.currentZoneId === 'BEAGLE_CABIN' && wake.playerSpawnId === 'recovery-hammock'
+        && wake.health === 60 && wake.fatigue === 12 && wake.activeNpcEncounter?.recovery
+        && wake.captain && wake.speaker === 'Captain Robert FitzRoy', 'Recovery did not place FitzRoy beside Darwin with the correct line and vitals.', wake);
+      await page.screenshot({ path: path.join(outDir, 'beagle-fitzroy-recovery.png'), fullPage: false });
+      await fitzroy.getByRole('button', { name: /Who brought me aboard/ }).click();
+      await fitzroy.getByText(/The boat crew got you across the surf/).waitFor();
+      await fitzroy.getByRole('button', { name: 'Sit up' }).click();
+      await fitzroy.waitFor({ state: 'hidden' });
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 30, kinds: 'npc' })
+        .items.some(item => item.id === 'fitzroy' && item.z < 0));
+    });
+
     await page.close();
     return {
       name: 'beagle-cabin',
@@ -1090,6 +1135,250 @@ async function runCabinScenario(browser, baseUrl) {
   } catch (error) {
     await page.close().catch(() => {});
     throw error;
+  }
+}
+
+async function runHermitCrabScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'POST_OFFICE_BAY',
+    quality: 'performance',
+    faunaDebug: 1,
+  });
+  try {
+    await launchMode(page, errors, 'Darwin', { waitForSettledContent: true });
+    await withFailureArtifacts(page, 'watch a hermit crab emerge', errors, async () => {
+      const crabs = await page.evaluate(() => window.__darwinE2E
+        .nearby({ radius: 90, kinds: 'specimen', limit: 100 }).items.filter(item => item.kind === 'hermitcrab'));
+      assertCondition(crabs.length >= 8, 'Expected several groups of hermit crabs at the bay.', { crabs });
+      const actorId = crabs[0].id;
+      await page.evaluate(id => window.__darwinE2E.teleportNear(id, { distance: 0.2 }), actorId);
+      await page.waitForFunction(id => window.__faunaMotionDebug?.[id]?.tuck >= 0.99, actorId);
+      await page.evaluate(id => window.__darwinE2E.teleportNear(id, { distance: 0.65 }), actorId);
+      await page.waitForFunction(id => {
+        const { fieldAction } = window.__darwinE2E.store('fieldAction');
+        return fieldAction?.kind === 'observe' && fieldAction.target?.actorId === id;
+      }, actorId);
+      await page.keyboard.press('e', { delay: 120 });
+      await page.getByRole('heading', { name: 'Pacific Land Hermit Crab' }).waitFor();
+      await page.screenshot({ path: path.join(outDir, 'hermit-crab-tucked.png') });
+      await page.waitForFunction(id => window.__faunaMotionDebug?.[id]?.mode === 'hermit:peek', actorId);
+      await page.waitForFunction(id => {
+        const pose = window.__faunaMotionDebug?.[id];
+        return pose?.mode === 'hermit:rest' && pose.tuck === 0;
+      }, actorId);
+      await page.screenshot({ path: path.join(outDir, 'hermit-crab-emerged.png') });
+      await page.waitForFunction(id => window.__darwinE2E.store('fieldObservations')
+        .fieldObservations.some(record => record.actorId === id && record.behaviorId === 'emergeFromShell'), actorId);
+    });
+    return { name: 'hermit-crab-strandline', errors };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function runGardenScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, {
+    zone: 'PENAL_COLONY',
+    quality: 'performance',
+  });
+  try {
+    console.log('[three:e2e] Penal Colony garden: speak with María');
+    await launchMode(page, errors, 'Darwin');
+    await withFailureArtifacts(page, 'ask María about the garden', errors, async () => {
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' }).items.some(item => item.id === 'maria'));
+      await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        api.setTimeOfDay(9);
+        api.storeAction('setWeatherOverride', { state: 'sunny', untilMinutes: 99999 });
+        api.storeAction('setWeather', 'sunny');
+      });
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' })
+        .items.some(item => item.id === 'maria' && item.activity === 'Checking the sweet potato vines'));
+      await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        api.teleportNear('maria', { angle: Math.PI / 2 });
+      });
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with María de la Concepción');
+      const heightDifference = await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        const npcY = api.store('nearbyNpcEncounter').nearbyNpcEncounter?.pose.y;
+        return Math.abs(npcY - api.getState().playerPose.position.y);
+      });
+      assertCondition(heightDifference < 0.35, 'María stands above or below the garden path.', { heightDifference });
+      await page.screenshot({ path: path.join(outDir, 'maria-in-the-garden.png'), fullPage: false });
+      await page.keyboard.down('e');
+      await page.waitForTimeout(120);
+      await page.keyboard.up('e');
+      const maria = page.getByRole('dialog', { name: 'Conversation with María de la Concepción' });
+      await maria.getByRole('button', { name: /What do you grow here/ }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await maria.getByText(/Across the path I have maize/).waitFor();
+      await maria.getByRole('button', { name: /May I pick an ear of maize/ }).click();
+      await maria.getByText(/Leave the plant standing for me/).waitFor();
+      await maria.getByRole('button', { name: 'Close conversation' }).click();
+      await maria.waitFor({ state: 'hidden' });
+      await page.evaluate(() => window.__darwinE2E.teleportNear('maria', { distance: 3.5, angle: Math.PI / 2 }));
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 8, kinds: 'npc' })
+        .items.some(item => item.id === 'maria' && item.activity === 'Coming over'));
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with María de la Concepción');
+      await page.keyboard.press('e', { delay: 120 });
+      await maria.getByRole('button', { name: 'Can you show me the maize plot?' }).click();
+      await maria.getByRole('button', { name: 'Follow along' }).click();
+      await page.waitForFunction(() => {
+        const api = window.__darwinE2E;
+        const actor = api.nearby({ radius: 150, kinds: 'npc' }).items.find(item => item.id === 'maria');
+        if (!actor) return false;
+        if (actor.activity === 'Showing Darwin the maize') return true;
+        if (actor.distance > 4.4) api.teleportNear('maria', { distance: 2, angle: Math.PI / 2 });
+        return false;
+      });
+      await page.evaluate(() => window.__darwinE2E.setTimeOfDay(12));
+      await page.waitForFunction(() => !window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' })
+        .items.some(item => item.id === 'maria'));
+    });
+    return { name: 'penal-colony-garden', errors };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function runGabrielScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, { zone: 'POST_OFFICE_BAY', quality: 'performance' });
+  try {
+    console.log('[three:e2e] Post Office Bay: give Gabriel room and meet him again');
+    await launchMode(page, errors, 'Darwin');
+    await withFailureArtifacts(page, 'let Gabriel decide to approach', errors, async () => {
+      await page.evaluate(() => window.__darwinE2E.setTimeOfDay(20.5));
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' })
+        .items.some(item => item.id === 'gabriel_puig' && item.activity === 'Watching the anchorage'));
+      await page.evaluate(() => window.__darwinE2E.teleportNear('gabriel_puig', { distance: 4.5, angle: Math.PI / 2 }));
+      await page.waitForFunction(() => {
+        const api = window.__darwinE2E;
+        return api.store('npcEncounterState').npcEncounterState.gabriel_puig?.flags.includes('gabriel_first_sighting')
+          && api.nearby({ radius: 20, kinds: 'npc' }).items.some(item => item.id === 'gabriel_puig'
+            && item.activity === 'Getting out of sight' && !item.encounterEnabled);
+      });
+      await page.evaluate(() => window.__darwinE2E.teleport(6, 3));
+      await page.waitForFunction(() => window.__darwinE2E.store('npcEncounterState').npcEncounterState
+        .gabriel_puig?.flags.includes('gabriel_gave_space'));
+      await page.evaluate(() => window.__darwinE2E.setTimeOfDay(21));
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' })
+        .items.some(item => item.id === 'gabriel_puig' && item.activity === 'Watching the anchorage'));
+      await page.evaluate(() => window.__darwinE2E.teleportNear('gabriel_puig', { distance: 3.3, angle: Math.PI / 2 }));
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 8, kinds: 'npc' })
+        .items.some(item => item.id === 'gabriel_puig' && item.activity === 'Coming over'));
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with Gabriel Puig i Ferrer');
+      await page.screenshot({ path: path.join(outDir, 'gabriel-at-the-anchorage.png'), fullPage: false });
+      await page.keyboard.press('e', { delay: 120 });
+      const gabriel = page.getByRole('dialog', { name: 'Conversation with Gabriel Puig i Ferrer' });
+      await gabriel.getByRole('button', { name: 'No. I came to look at the island.' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await gabriel.getByText(/you’ve seen nobody here/).waitFor();
+    });
+    return { name: 'gabriel-at-the-anchorage', errors };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function runWellScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, { zone: 'ASILO_SPRING', quality: 'performance', faunaDebug: '1' });
+  try {
+    await launchMode(page, errors, 'Darwin');
+    await withFailureArtifacts(page, 'rush the spring and speak to the boy', errors, async () => {
+      await page.evaluate(() => window.__darwinE2E.setTimeOfDay(9));
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 150, kinds: 'npc' })
+        .items.some(item => item.id === 'well_boy' && item.activity === 'Waiting for doves by the water'));
+      await page.evaluate(async () => {
+        const api = window.__darwinE2E;
+        api.teleportNear('well_boy', { distance: 6.6, angle: 0 });
+        await api.walk(1, 0, 1000, { run: true });
+      });
+      await page.waitForFunction(() => {
+        const api = window.__darwinE2E;
+        return api.store('npcEncounterState').npcEncounterState.well_boy?.flags.includes('rushed_the_well')
+          && api.nearby({ radius: 12, kinds: 'npc' }).items.some(item => item.id === 'well_boy'
+            && item.activity === 'Waving Darwin back' && !item.encounterEnabled);
+      });
+      await page.waitForFunction(() => Object.values(window.__faunaStimulusDebug || {}).some(event =>
+        event.last?.sourceActorId === 'well_boy'), null, { timeout: UI_STEP_TIMEOUT_MS }).catch(async error => {
+        const context = await page.evaluate(() => ({
+          stimuli: window.__faunaStimulusDebug,
+          nearby: window.__darwinE2E.nearby({ radius: 35, limit: 20, kinds: ['specimen', 'npc'] }).items,
+        }));
+        throw new Error(`The spring doves did not receive the rush stimulus. ${JSON.stringify(context)}`, { cause: error });
+      });
+      await page.evaluate(() => window.__darwinE2E.teleportNear('well_boy', { distance: 1.48, angle: 1.2 }));
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with Boy at the Well');
+      await page.screenshot({ path: path.join(outDir, 'boy-at-the-well.png'), fullPage: false });
+      await page.keyboard.press('e', { delay: 120 });
+      const boy = page.getByRole('dialog', { name: 'Conversation with Boy at the Well' });
+      await boy.getByText(/Wait here with me this time/).waitFor();
+      await boy.getByRole('button', { name: 'What are you waiting for?' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await boy.getByText(/I take what I catch home for supper/).waitFor();
+      await boy.getByRole('button', { name: 'Close conversation' }).click();
+      await page.evaluate(() => window.__darwinE2E.teleportNear('well_boy', { distance: 3.15, angle: 0 }));
+      await page.waitForFunction(() => window.__darwinE2E.store('npcEncounterState').npcEncounterState
+        .well_boy?.flags.includes('waited_quietly_at_the_well'));
+      await page.evaluate(() => window.__darwinE2E.teleportNear('well_boy', { distance: 1.45, angle: 1.2 }));
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with Boy at the Well');
+      await page.keyboard.press('e', { delay: 120 });
+      await boy.getByText(/From here you can see where they drink/).waitFor();
+    });
+    return { name: 'boy-at-the-well', errors };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function runStokesScenario(browser, baseUrl) {
+  const { page, errors } = await openE2EPage(browser, baseUrl, { zone: 'S_VOLCANIC', quality: 'performance' });
+  try {
+    await launchMode(page, errors, 'Darwin');
+    await withFailureArtifacts(page, 'compare lava observations with Stokes', errors, async () => {
+      await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        api.setTimeOfDay(11);
+        api.storeAction('setWeatherOverride', { state: 'rain', untilMinutes: 99999 });
+        api.storeAction('setWeather', 'rain');
+      });
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 180, kinds: 'npc' })
+        .items.some(item => item.id === 'john_lort_stokes' && item.activity === 'Pausing the survey in the rain'));
+      await page.evaluate(() => {
+        const api = window.__darwinE2E;
+        api.storeAction('setWeatherOverride', { state: 'sunny', untilMinutes: 99999 });
+        api.storeAction('setWeather', 'sunny');
+      });
+      await page.waitForFunction(() => window.__darwinE2E.nearby({ radius: 180, kinds: 'npc' })
+        .items.some(item => item.id === 'john_lort_stokes' && item.activity === 'Sketching the lava folds'));
+      await page.evaluate(() => window.__darwinE2E.teleportNear('john_lort_stokes', { distance: 1.25, angle: Math.PI / 2 }));
+      await page.waitForFunction(() => window.__darwinE2E.getPrompt().contextPrompt?.label === 'Speak with John Lort Stokes');
+      await page.screenshot({ path: path.join(outDir, 'stokes-on-the-basalt-plains.png'), fullPage: false });
+      await page.keyboard.press('e', { delay: 120 });
+      const stokes = page.getByRole('dialog', { name: 'Conversation with John Lort Stokes' });
+      await stokes.getByRole('button', { name: 'What have you noticed about the lava?' }).click({ timeout: UI_STEP_TIMEOUT_MS });
+      await stokes.getByText(/a rough sea that has gone solid/).waitFor();
+      await stokes.getByRole('button', { name: 'Can you show me the lava ridge?' }).click();
+      await stokes.getByText(/Follow me to the rise/).waitFor();
+      await stokes.getByRole('button', { name: 'Follow along' }).click();
+      const findStokes = activity => page.waitForFunction(label => window.__darwinE2E.nearby({ radius: 180, kinds: 'npc' })
+        .items.some(item => item.id === 'john_lort_stokes' && item.activity === label), activity);
+      await findStokes('Leading the way to the lava ridge');
+      await findStokes('Waiting for Darwin');
+      // Catch up once, then stay in following distance while his path plays
+      // out. The test only moves Darwin; Stokes must walk the route himself.
+      await page.evaluate(() => window.__darwinE2E.teleportNear('john_lort_stokes', { distance: 2, angle: -Math.PI / 2 }));
+      await findStokes('Leading the way to the lava ridge');
+      await page.waitForFunction(() => {
+        const api = window.__darwinE2E;
+        const actor = api.nearby({ radius: 180, kinds: 'npc' }).items.find(item => item.id === 'john_lort_stokes');
+        if (!actor) return false;
+        if (actor.activity === 'Showing Darwin the lava ridges') return actor.x > 14.5 && actor.z > 11.5;
+        if (actor.distance > 4.4) api.teleportNear('john_lort_stokes', { distance: 2, angle: -Math.PI / 2 });
+        return false;
+      }, null, { timeout: 45000 });
+    });
+    return { name: 'stokes-on-the-basalt-plains', errors };
+  } finally {
+    await page.close().catch(() => {});
   }
 }
 
@@ -1144,6 +1433,11 @@ async function run() {
     const scenarios = {
       transition: runTransitionScenario,
       cabin: runCabinScenario,
+      garden: runGardenScenario,
+      gabriel: runGabrielScenario,
+      well: runWellScenario,
+      stokes: runStokesScenario,
+      hermit: runHermitCrabScenario,
       assessment: runAssessmentScenario,
       finch: runFinchScenario,
     };

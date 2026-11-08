@@ -4,6 +4,9 @@ import { getThreeSpecimens } from '../data';
 import { getZoneProps } from '../physics/props/propRegistry';
 import { getWildlifeAssetId } from '../wildlife/wildlifeCatalog';
 import { getBeagleSightline } from './beagleSightlines';
+import { getNpcEncounter } from '../encounters/npcEncounters';
+import { getStationaryNpcsForZone } from '../npcs/npcPlacements';
+import { getIslandNpcIdsForZone } from '../npcs/islandNpcSchedule';
 import {
   preloadGLBPath,
   preloadModelAsset,
@@ -39,5 +42,12 @@ export function prefetchStartupContentAssets(zoneId, { includeBeagle = true, inc
   });
 
   if (includeBeagle && getBeagleSightline(zoneId)) preloadGLBPath(BEAGLE_HULL_PATH);
-  if (includeSyms) preloadModelAsset('syms');
+  if (includeSyms) {
+    preloadModelAsset('syms');
+    for (const { npcId } of getStationaryNpcsForZone(zoneId)) {
+      const assetId = getNpcEncounter(npcId)?.modelAssetId;
+      if (assetId) preloadModelAsset(assetId);
+    }
+    for (const npcId of getIslandNpcIdsForZone(zoneId)) preloadModelAsset(getNpcEncounter(npcId).modelAssetId);
+  }
 }

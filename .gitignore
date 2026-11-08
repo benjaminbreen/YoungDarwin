@@ -63,6 +63,8 @@ desktop.ini
 !/assets-src/botanical-materials/guides/
 !/assets-src/botanical-materials/guides/*.png
 !/assets-src/.gitkeep
+!/assets-src/characters/
+!/assets-src/characters/*.md
 !/assets-src/raw/
 !/assets-src/raw/.gitkeep
 !/assets-src/processed/

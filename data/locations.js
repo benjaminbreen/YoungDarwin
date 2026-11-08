@@ -1519,7 +1519,7 @@ export const locations = [
       },
     },
     specimens: ['medium_ground_finch','floreana_mockingbird','galapagos_dove','cat','feralgoat','feralhorse'],
-    npcs: [],
+    npcs: ['maria'],
     boundaries: {},
     specimenPlacements: [
       {
@@ -2862,7 +2862,7 @@ export const locations = [
   validMoves: [],
   playerStart: null,
   specimens: [],
-  npcs: [],
+  npcs: ['fitzroy'],
   boundaries: {},
   discoveries: [
     "FitzRoy's charts and chronometer cases occupy the captain's working cabin.",

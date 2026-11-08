@@ -59,11 +59,9 @@ function noteRigor(entry) {
     /\b(?:habitat|shore|beach|scrub|forest|rock|lava|sand|soil|water|flower|cactus|slope|shade|sun|wind|tide|substrate|locality)\w*\b/i,
     /\b(?:fresh|worn|damaged|healthy|dry|wet|hard|soft|rough|smooth|dark|pale|yellow|orange|black|brown|green|red|white|metallic)\w*\b/i,
     /\b(?:compare|comparison|unlike|similar|differ|larger|smaller|more|less|second|another|whereas)\w*\b/i,
-    /\b(?:perhaps|possibly|uncertain|unclear|appears|seems|may|might|question|suppose|infer|cannot determine)\w*\b/i,
   ];
   score += signals.filter(pattern => pattern.test(text)).length * 0.8;
   if (/\b\d+(?:\.\d+)?\s*(?:mm|cm|m|inch|inches|ft|feet|ounces?|oz|lb|pounds?)\b/i.test(text)) score += 0.8;
-  if (/[?;]/.test(text)) score += 0.3;
   return {
     score: roundedScore(score),
     words: words.length,
@@ -408,8 +406,8 @@ export function buildLocalHenslowAssessment(profile) {
       ? `Your field note upon ${worstNote.specimenName}—“${worstNote.text.slice(0, 110)}${worstNote.text.length > 110 ? '…' : ''}”—is more redolent of a small child's first encounter with a curiosity cabinet than of a trained naturalist.${ordinaryEvidence ? ' The subject is common and unremarkable, which makes precision more necessary, not less.' : ''}`
       : 'You have submitted no field note of your own at all. The handsome marine-iguana entry already present in the book is reference material, not your labour, and I shall not pretend otherwise.';
     const methodRebuke = worstNote
-      ? 'Mere recognition is not observation; a child may name a butterfly, while a naturalist must describe the characters, behavior, locality, comparison, and uncertainty by which the statement acquires value.'
-      : 'A blank field record is not caution, modesty, or restraint; it is simply the absence of scientific work. A naturalist must leave characters, behavior, locality, comparison, and uncertainty by which an observation acquires value.';
+      ? 'Mere recognition is not observation; a child may name a butterfly, while a naturalist must describe the characters, behavior, locality, and comparison by which the statement acquires value.'
+      : 'A blank field record is not caution, modesty, or restraint; it is simply the absence of scientific work. A naturalist must leave characters, behavior, locality, and comparison by which an observation acquires value.';
     return [
       'My dear Darwin,—',
       `I must confess my utter perplexity and profound disappointment. After such uncommon opportunity and expense, you return with ${profile.stats.evidence} assessable line${profile.stats.evidence === 1 ? '' : 's'} of evidence and ${profile.stats.notes} note${profile.stats.notes === 1 ? '' : 's'} of your own composition. This is not a field packet so much as an accusation against the use you made of your time.`,
@@ -432,9 +430,9 @@ export function buildLocalHenslowAssessment(profile) {
 
   return [
     'My dear Darwin,—',
-    `I have examined the packet you have placed before me: ${profile.stats.evidence} distinct line${profile.stats.evidence === 1 ? '' : 's'} of natural-history evidence, ${profile.stats.notes} field entr${profile.stats.notes === 1 ? 'y' : 'ies'}, and observations from ${profile.stats.locations} station${profile.stats.locations === 1 ? '' : 's'}. Quantity alone is no proof of merit; a locality faithfully preserved and an uncertainty honestly stated are often worth more than a crowded case.`,
+    `I have examined the packet you have placed before me: ${profile.stats.evidence} distinct line${profile.stats.evidence === 1 ? '' : 's'} of natural-history evidence, ${profile.stats.notes} field entr${profile.stats.notes === 1 ? 'y' : 'ies'}, and observations from ${profile.stats.locations} station${profile.stats.locations === 1 ? '' : 's'}. Quantity alone is no proof of merit.`,
     `${strength || 'There is at least enough here to identify where the work failed.'} Your strongest department is ${strongest.label.toLowerCase()}. ${gap} The weakest is ${weakest.label.toLowerCase()}, and it is there that another naturalist would have the greatest difficulty testing what you report.`,
-    `My judgment is therefore: ${profile.verdict.toLowerCase()}. ${profile.recommendation} Continue to separate what you saw from what you suppose, and let every label preserve the place, circumstance, and method by which the fact was obtained.`,
+    `My judgment is therefore: ${profile.verdict.toLowerCase()}. ${profile.recommendation} Let every label preserve the place, circumstance, and method by which the fact was obtained.`,
     'J. S. Henslow',
   ].join('\n\n');
 }

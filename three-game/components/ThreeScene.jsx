@@ -25,6 +25,7 @@ import { AudioListenerSync } from '../audio/AudioListenerSync';
 import { ObservationWatcher } from '../fauna/behavior/ObservationWatcher';
 import { TargetBracketProjector } from './player/TargetBracketProjector';
 import { RemotePlayerActors } from '../multiplayer/RemotePlayerActors';
+import { LabelCard } from './world/LabelCard';
 
 export function ThreeScene({
   perfSettings,
@@ -138,6 +139,7 @@ export function ThreeScene({
           <RemotePlayerActors />
         </Suspense>
       </PhysicsProvider>
+      <LabelCard />
       {outdoors && <GroundedWorldFX
         shoreGlintBrightness={settings.shoreGlintBrightness ?? 1}
         shoreGlintSize={settings.shoreGlintSize ?? 1}

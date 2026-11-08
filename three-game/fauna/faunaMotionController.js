@@ -3,6 +3,7 @@ import { createBaskerMotion } from './motion/basker';
 import { createDeckMonkeyMotion } from './motion/deckMonkey';
 import { createGrazerMotion } from './motion/grazer';
 import { createGroundMotion } from './motion/ground';
+import { createHermitMotion } from './motion/hermit';
 import { createHopperMotion } from './motion/hopper';
 import { createOwlMotion } from './motion/owl';
 import { createRacerMotion } from './motion/racer';
@@ -23,6 +24,7 @@ const ARCHETYPES = {
   basker: createBaskerMotion,
   deckMonkey: createDeckMonkeyMotion,
   grazer: createGrazerMotion,
+  hermit: createHermitMotion,
   hopper: createHopperMotion,
   owl: createOwlMotion,
   racer: createRacerMotion,
@@ -131,7 +133,10 @@ export function createFaunaMotionController({
     addHammerThreat: threats.addHammerThreat,
     addContactThreat: threats.addContactThreat,
     brain,
-    dispose: () => brain?.dispose(ctx.clock),
+    dispose: () => {
+      brain?.dispose(ctx.clock);
+      motion?.dispose?.();
+    },
     update({
       basePosition: base,
       zoneId: currentZoneId,
@@ -230,6 +235,11 @@ export function createFaunaMotionController({
         contactPanic: threat.contactPanic,
         hammerPanic: threat.hammerPanic,
         distanceToPlayer: threat.distanceToPlayer,
+        playerSpeed,
+        observed,
+        playerIsKin,
+        radiusScale,
+        playerNearGround: Boolean(playerPosition && Math.abs((player.y ?? base.y) - state.position.y) < 1.6),
       });
     },
   };

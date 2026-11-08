@@ -105,6 +105,7 @@ import {
 import { getSpecimenPreloadAssetId } from './components/world/SpecimenActor';
 import { getThreeSpecimens } from './data';
 import { getInteriorDefinition } from './interiors/interiorRegistry';
+import { BEAGLE_RECOVERY_VIEW } from './npcs/npcPlacements';
 import { getRegionMap } from '../game-core/regionMaps';
 import {
   getSpecimenRuntimeBounds,
@@ -115,6 +116,7 @@ import {
   examinationDepthOfFieldActive,
   postprocessingComposerActive,
 } from './examine/examinationPostFx';
+import { labelRig, labelWritingOpen } from './examine/labelWriting';
 import { terrainHeight } from './world/terrain';
 import {
   prefetchEcologyAssets,
@@ -2365,6 +2367,11 @@ function TravelCameraRig() {
   useFrame(() => {
     const state = useThreeGameStore.getState();
     const active = state.transition;
+    if (state.activeNpcEncounter?.recovery) {
+      camera.position.fromArray(BEAGLE_RECOVERY_VIEW.eye);
+      camera.lookAt(lookTarget.current.fromArray(BEAGLE_RECOVERY_VIEW.target));
+      return;
+    }
     if (!active || active.mode === 'threshold') {
       sequenceRef.current = null;
       arrivalIdRef.current = null;
@@ -2625,6 +2632,12 @@ function recordLaunchHandoffEvent(label, detail = null) {
 // near surface at their radius, so a large bias parks the sharp plane in the
 // air in front of them and the subject itself renders soft.
 const NEAR_SURFACE_FOCUS_BIAS = 0.3;
+// Sharp band while writing a label: the card and the pencil, nothing past them.
+const LABEL_FOCUS_RANGE = 0.22;
+// The subject and the place are well past the card; a wider bokeh keeps them
+// to soft shapes and colour rather than a slightly smeared scene.
+const LABEL_BOKEH_SCALE = 5.5;
+const EXAMINE_BOKEH_SCALE = 2.7;
 
 // The sharp band has to be at least as deep as the subject, or its own far
 // side falls out of focus. Shared by the initial prop and the frame loop so a
@@ -2667,6 +2680,16 @@ function ExaminationDepthOfField() {
 
   useFrame(state => {
     if (!active) return;
+    // Writing a label, the card in his hand is what is sharp; the subject
+    // and the place go soft behind it.
+    const labelFrame = labelWritingOpen(session) ? labelRig.frame : null;
+    if (labelFrame) {
+      effectRef.current?.target?.copy(labelFrame.center);
+      if (effectRef.current?.cocMaterial) effectRef.current.cocMaterial.focusRange = LABEL_FOCUS_RANGE;
+      if (effectRef.current && effectRef.current.bokehScale !== LABEL_BOKEH_SCALE) effectRef.current.bokehScale = LABEL_BOKEH_SCALE;
+      return;
+    }
+    if (effectRef.current && effectRef.current.bokehScale !== EXAMINE_BOKEH_SCALE) effectRef.current.bokehScale = EXAMINE_BOKEH_SCALE;
     const liveFocus = getSpecimenRuntimePoses(currentZoneId)?.get(session.actorId);
     const focus = liveFocus || session.focus;
     if (!focus) return;
@@ -2698,7 +2721,7 @@ function ExaminationDepthOfField() {
       ref={effectRef}
       target={target}
       focusRange={initialFocusRange}
-      bokehScale={2.7}
+      bokehScale={EXAMINE_BOKEH_SCALE}
       resolutionScale={0.5}
     />
   );

@@ -3,6 +3,7 @@ import { getInitialNarration, getIslandLocation, getZoneSpecimens } from '../gam
 import { expeditionTools } from '../game-core/tools';
 import { isRecordedFieldEntry } from './directives';
 import { buildFaunaPopulationSpecimens } from './world/ecology/faunaPopulations';
+import { buildHermitCrabPopulation } from './world/ecology/hermitCrabPopulations';
 
 const zoneSpecimenCache = new Map();
 const zoneSpecimenTypeCache = new Map();
@@ -10,7 +11,11 @@ const zoneSpecimenTypeCache = new Map();
 export function getThreeSpecimens(zoneId = currentZoneId) {
   if (!zoneSpecimenCache.has(zoneId)) {
     // Authored spawns, then the resident populations around them.
-    zoneSpecimenCache.set(zoneId, [...getZoneSpecimens(zoneId), ...buildFaunaPopulationSpecimens(zoneId)]);
+    zoneSpecimenCache.set(zoneId, [
+      ...getZoneSpecimens(zoneId),
+      ...buildFaunaPopulationSpecimens(zoneId),
+      ...buildHermitCrabPopulation(zoneId),
+    ]);
   }
   return zoneSpecimenCache.get(zoneId);
 }

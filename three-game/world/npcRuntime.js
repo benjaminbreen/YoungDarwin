@@ -1,4 +1,4 @@
-// Live positions of walking NPCs (currently just Syms Covington), published
+// Live positions of NPCs, published
 // per-frame by their components so line-of-fire, encounter, and character
 // collision systems can test where each actor actually is. Module-level like
 // propRuntime — no React and no per-frame store updates.
@@ -26,6 +26,8 @@ export function publishNpcPose(zoneId, npcId, pose) {
     ? Math.max(0, pose.collisionHeight)
     : DEFAULT_NPC_COLLISION_HEIGHT;
   current.collisionEnabled = pose.collisionEnabled !== false;
+  current.encounterEnabled = pose.encounterEnabled !== false;
+  current.activity = pose.activity ?? null;
   poses.set(npcId, current);
 }
 

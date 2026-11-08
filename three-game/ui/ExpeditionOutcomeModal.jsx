@@ -200,7 +200,7 @@ function RecoveryModal({ outcome, onOpenJournal, onReturnToMainMenu, onRecover, 
           <section className="rounded-[3px] border border-expedition-brass/45 bg-[#e8d8b7] px-5 py-5 text-[#332b20] shadow-[inset_0_0_35px_rgba(93,65,31,0.14)] sm:px-8 sm:py-7">
             <div className="text-center text-[9px] font-semibold uppercase tracking-[0.3em] text-[#6c5538] sm:text-[10px]">From the ship’s log</div>
             <p className="mt-3 text-[17px] leading-relaxed sm:text-[21px]">
-              You pressed on after your strength was spent. You wake in your berth, <em>weak but alive</em>, with the island expedition cut short for the day.
+              You pressed on after your strength was spent. The crew carry you back to your hammock aboard the <em>Beagle</em>.
             </p>
             <p className="mt-3 text-[13px] italic text-[#6b5134] sm:text-[15px]">{outcome.cause}</p>
           </section>

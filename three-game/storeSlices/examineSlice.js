@@ -69,6 +69,51 @@ export const createExamineActions = (set, get) => ({
   }),
   closeExamine: () => set({ examineSession: null }),
 
+  // The label-writing view (examine/labelWriting.js): the same session, with
+  // the camera at Darwin's eyes and the note written on a card in his hand.
+  // Putting down a label that was opened for a catch ends the whole session
+  // and hands the catch back to the HUD's success card (`labelled`, so it is
+  // not sent round to the label again).
+  setExamineLabelOpen: labelOpen => set(state => {
+    const session = state.examineSession;
+    if (!session || Boolean(session.labelOpen) === Boolean(labelOpen)) return {};
+    if (!labelOpen && session.captureOutcome) {
+      return { examineSession: null, lastOutcome: { ...session.captureOutcome, labelled: true } };
+    }
+    return { examineSession: { ...session, labelOpen: Boolean(labelOpen) } };
+  }),
+
+  // Every specimen caught goes to a label first. The animal is in the case,
+  // so the session is only the label: the card in front of Darwin, the place
+  // he caught it soft behind, and the success card once he puts it down.
+  openCaptureLabel: outcome => set(state => {
+    if (state.examineSession || !outcome?.specimen) return {};
+    const examinable = examinableFromSpecimen(outcome.specimen);
+    if (!examinable) return {};
+    const position = state.playerPose?.position;
+    const facing = state.playerPose?.facing;
+    const fx = Number(facing?.x);
+    const fz = Number(facing?.z);
+    const length = Math.hypot(fx, fz) || 1;
+    const focus = position && Number.isFinite(Number(position.x))
+      ? {
+        x: Number(position.x) + (Number.isFinite(fx) ? fx / length : 0) * 1.4,
+        y: Number(position.y) || 0,
+        z: Number(position.z) + (Number.isFinite(fz) ? fz / length : -1) * 1.4,
+      }
+      : null;
+    return {
+      observationMode: false,
+      examineSession: {
+        ...createExamineSession(examinable, { focus, day: state.day, timeOfDay: state.timeOfDay }),
+        actorId: outcome.collectedActorId || examinable.actorId,
+        subjectGone: 'collected',
+        labelOpen: true,
+        captureOutcome: outcome,
+      },
+    };
+  }),
+
   // The animal under a close look has gone off: flown, fled, or simply
   // wandered out of it. The notes stay open; there is nothing left to take.
   examineSubjectLeft: (actorId, reason = 'wandered') => set(state => {
@@ -174,7 +219,7 @@ export const createExamineActions = (set, get) => ({
   // Saving a written field note is what completes an examination: the note
   // becomes the player's own journal entry (with any saved facts appended)
   // and the type unlocks for collection everywhere.
-  saveExamineNote: content => {
+  saveExamineNote: (content, { sketch = null } = {}) => {
     const trimmed = String(content || '').trim();
     const session = get().examineSession;
     if (!trimmed || !session) return false;
@@ -185,6 +230,9 @@ export const createExamineActions = (set, get) => ({
         ? `\n\nRecorded facts:\n${savedFacts.map(fact => `${fact.label}: ${fact.value}`).join('\n')}`
         : '';
       const firstExamination = !state.examinedTypeIds.includes(session.typeId);
+      // A label written for a catch is the specimen's label, not notes from
+      // a close look.
+      const caught = Boolean(session.captureOutcome);
       const entry = {
         id: `${Date.now()}-examination-${session.typeId}`,
         day: state.day,
@@ -193,15 +241,20 @@ export const createExamineActions = (set, get) => ({
         specimenName: session.name,
         latin: session.latin,
         location: location.name,
-        method: 'field examination',
-        condition: 'examined in field',
+        method: caught ? 'specimen label' : 'field examination',
+        condition: caught ? 'collected' : 'examined in field',
         kind: 'examination',
         authorship: 'player',
-        title: `Examination: ${session.name}`,
+        title: `${caught ? 'Label' : 'Examination'}: ${session.name}`,
         content: `${trimmed}${factLines}`,
+        // A drawing made on the label card, as compact strokes
+        // (examine/labelWriting.js compactSketch).
+        ...(sketch?.length ? { sketch } : {}),
         createdAt: new Date().toISOString(),
       };
-      const message = firstExamination
+      const message = caught
+        ? `You label the ${casualName(session)}.`
+        : firstExamination
         ? `Your notes on the ${session.name.toLowerCase()} enter the field book. Henslow will weigh such observations when the packet reaches him.`
         : `You add a further note on the ${session.name.toLowerCase()} to the field book.`;
       return {

@@ -48,8 +48,10 @@ function ProceduralOfficialFigure({ palette }) {
       <mesh castShadow position={[0.245, 0.5, -0.06]} rotation={[0.12, 0, -0.1]} material={coat}>
         <capsuleGeometry args={[0.068, 0.6, 4, 8]} />
       </mesh>
-      <mesh castShadow position={[0, 0.3, 0]} material={coat}>
-        <capsuleGeometry args={[0.155, 0.34, 4, 10]} />
+      <mesh castShadow position={[0, palette.skirt ? 0.43 : 0.3, 0]} material={coat}>
+        {palette.skirt
+          ? <cylinderGeometry args={[0.18, 0.26, 0.72, 12]} />
+          : <capsuleGeometry args={[0.155, 0.34, 4, 10]} />}
       </mesh>
     </group>
   );
@@ -62,7 +64,19 @@ const LAWSON_PALETTE = {
   linen: '#d8cdb4',
 };
 
-const PALETTES = { nicolas_lawson: LAWSON_PALETTE };
+const PALETTES = {
+  nicolas_lawson: LAWSON_PALETTE,
+  fitzroy: { coat: '#24344b', skin: '#be8c67', hair: '#382b22', linen: '#e5d6ba' },
+  maria: { coat: '#675745', skin: '#ae7b59', hair: '#332721', linen: '#d8c9ad', skirt: true },
+  gabriel_puig: { coat: '#48392b', skin: '#bd9276', hair: '#342a24', linen: '#b4a28b' },
+  well_boy: { coat: '#816a4c', skin: '#d2a37e', hair: '#68523a', linen: '#ac997b', scale: 0.66 },
+  john_lort_stokes: { coat: '#465e70', skin: '#b99478', hair: '#514334', linen: '#b2a387' },
+};
+
+export function NpcFallback({ npcId }) {
+  const palette = PALETTES[npcId] || LAWSON_PALETTE;
+  return <group scale={palette.scale ?? 1}><ProceduralOfficialFigure palette={palette} /></group>;
+}
 
 // Module constant: a fresh arrow function each render makes ModelAsset think the
 // selector changed and restart the clip.
@@ -71,13 +85,15 @@ const IDLE_SELECTOR = () => 'idle';
 function StationaryNpcActor({ npcId, zoneId }) {
   const encounter = getNpcEncounter(npcId);
   const conversationOpen = useThreeGameStore(state => state.activeNpcEncounter?.npcId === npcId);
+  const recoveryOpen = useThreeGameStore(state => state.activeNpcEncounter?.npcId === npcId
+    && state.activeNpcEncounter.recovery === true);
   const relation = useThreeGameStore(state => state.npcEncounterState?.[npcId]);
   const group = useRef(null);
 
-  const placement = useMemo(() => getNpcPlacement(npcId, zoneId), [npcId, zoneId]);
+  const placement = useMemo(() => getNpcPlacement(npcId, zoneId, { recovery: recoveryOpen }), [npcId, zoneId, recoveryOpen]);
   const ground = useMemo(() => (
-    placement ? movementTerrainHeight(placement.x, placement.z) + GROUND_CLEARANCE : 0
-  ), [placement]);
+    placement?.y ?? (placement ? movementTerrainHeight(placement.x, placement.z, zoneId) + GROUND_CLEARANCE : 0)
+  ), [placement, zoneId]);
   const yaw = useMemo(() => (
     placement ? Math.atan2(placement.facing.x, placement.facing.z) : 0
   ), [placement]);
@@ -129,10 +145,10 @@ function StationaryNpcActor({ npcId, zoneId }) {
           id={encounter.modelAssetId}
           animationSelector={IDLE_SELECTOR}
           reflect
-          fallback={<ProceduralOfficialFigure palette={PALETTES[npcId] || LAWSON_PALETTE} />}
+          fallback={<NpcFallback npcId={npcId} />}
         />
       ) : (
-        <ProceduralOfficialFigure palette={PALETTES[npcId] || LAWSON_PALETTE} />
+        <NpcFallback npcId={npcId} />
       )}
       <TerrainRingMarker
         radius={0.82}
@@ -140,13 +156,14 @@ function StationaryNpcActor({ npcId, zoneId }) {
         color={npcStatusStyle(status).ring}
         opacity={0.42}
         zoneId={zoneId}
+        visible={!recoveryOpen}
       />
-      <NpcStatusOrb
+      {!recoveryOpen && <NpcStatusOrb
         status={status}
-        activity={offended ? 'Displeased' : 'Vice-Governor'}
+        activity={offended ? 'Displeased' : encounter.activity}
         name={encounter.name}
-        height={2.32}
-      />
+        height={encounter.markerHeight ?? 2.32}
+      />}
     </group>
   );
 }

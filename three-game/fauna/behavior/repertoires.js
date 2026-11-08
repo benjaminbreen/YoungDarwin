@@ -634,6 +634,25 @@ export const REPERTOIRES = {
   },
 };
 
+// These episodes are started by the locomotion controller, which owns the
+// timing of the shell pose and feeding bouts.
+const MOTION_OBSERVATIONS = {
+  hermitcrab: [
+    {
+      id: 'emergeFromShell',
+      label: 'peering out of its shell',
+      note: 'The {name} put its antennae out first. After a pause it brought out its legs.',
+      watch: 1.4,
+    },
+    {
+      id: 'scavengeWrack',
+      label: 'picking through the wrack',
+      note: 'The {name} stopped and picked at scraps left by the tide.',
+      watch: 2.5,
+    },
+  ],
+};
+
 // Behaviour and reaction definitions by species and id.
 export function getRepertoire(speciesId) {
   return REPERTOIRES[speciesId] || null;
@@ -641,17 +660,17 @@ export function getRepertoire(speciesId) {
 
 export function findBehavior(speciesId, behaviorId) {
   const repertoire = REPERTOIRES[speciesId];
-  if (!repertoire) return null;
-  return repertoire.behaviors.find(item => item.id === behaviorId)
-    || repertoire.reactions.find(item => item.id === behaviorId)
+  return repertoire?.behaviors.find(item => item.id === behaviorId)
+    || repertoire?.reactions.find(item => item.id === behaviorId)
+    || MOTION_OBSERVATIONS[speciesId]?.find(item => item.id === behaviorId)
     || null;
 }
 
 // Every recordable behaviour of a species, for the notebook's "seen n of m".
 export function recordableBehaviors(speciesId) {
   const repertoire = REPERTOIRES[speciesId];
-  if (!repertoire) return [];
-  return [...repertoire.behaviors, ...repertoire.reactions].filter(item => item.record !== false && item.note);
+  const behaviors = repertoire ? [...repertoire.behaviors, ...repertoire.reactions] : MOTION_OBSERVATIONS[speciesId] || [];
+  return behaviors.filter(item => item.record !== false && item.note);
 }
 
 export function hourInWindow(hour, window) {

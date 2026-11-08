@@ -84,6 +84,90 @@ function test(name, fn) {
   tests.push({ name, fn });
 }
 
+const { getIslandNpcDay, getIslandNpcSchedule, getIslandNpcGuide, getIslandNpcWeatherLeg, ISLAND_NPC_IDS } = loadModule('three-game/npcs/islandNpcSchedule.js');
+const { createIslandNpcNavigation } = loadModule('three-game/npcs/islandNpcNavigation.js');
+const { getIslandNpcReaction } = loadModule('three-game/npcs/islandNpcReactions.js');
+const { startIslandNpcGuide, updateIslandNpcGuide } = loadModule('three-game/npcs/islandNpcGuidance.js');
+
+test('island NPC routines cover both days and connect along walkable paths', () => {
+  const zones = new Map();
+  for (const id of ISLAND_NPC_IDS) {
+    for (const day of [1, 2]) {
+      let cursor = 0;
+      for (const leg of getIslandNpcDay(id, day)) {
+        assert.equal(leg.start, cursor, `${id}, day ${day}: gap or overlap`);
+        assert.ok(leg.end > leg.start);
+        cursor = leg.end;
+        if (!leg.zoneId) continue;
+        if (!zones.has(leg.zoneId)) zones.set(leg.zoneId, createIslandNpcNavigation(leg.zoneId));
+        const nav = zones.get(leg.zoneId);
+        const route = nav.path(leg.from, leg.to);
+        assert.ok(route.length, `${id}, day ${day}: ${leg.zoneId} at minute ${leg.start}`);
+        assert.ok(route.slice(1).every((point, index) => nav.line(route[index], point)));
+      }
+      assert.equal(cursor, 1440);
+    }
+  }
+  assert.equal(getIslandNpcSchedule('maria', 1, 12).zoneId, 'ASILO_SPRING');
+  assert.equal(getIslandNpcSchedule('maria', 2, 12).zoneId, 'WATKINS_CREEK');
+  assert.equal(getIslandNpcSchedule('gabriel_puig', 1, 21).zoneId, 'POST_OFFICE_BAY');
+  assert.equal(getIslandNpcSchedule('gabriel_puig', 2, 21).zoneId, 'GABRIEL_SEA_GALLERY');
+  assert.equal(getIslandNpcSchedule('well_boy', 1, 9).clip, 'wait');
+  assert.equal(getIslandNpcSchedule('well_boy', 1, 12).hidden, true);
+  assert.equal(getIslandNpcSchedule('john_lort_stokes', 1, 11).clip, 'sketch');
+  const garden = getIslandNpcSchedule('maria', 1, 9);
+  const wetTask = getIslandNpcWeatherLeg('maria', garden, true);
+  assert.equal(wetTask.activity, 'Sorting greens beside the cookhouse');
+  assert.ok(zones.get(garden.zoneId).path(garden.from, wetTask.to).length);
+  assert.ok(zones.get(garden.zoneId).path(wetTask.from, garden.to).length);
+  assert.equal(getIslandNpcWeatherLeg('maria', garden, false), garden);
+});
+
+test('island NPCs distinguish a stranger, a familiar face, and an armed threat', () => {
+  const gabriel = { leg: { privateSite: false }, distance: 4, hour: 20 };
+  const cautious = { trust: 45, flags: ['gabriel_first_sighting', 'gabriel_pursued'] };
+  const reassured = { trust: 54, flags: ['gabriel_first_sighting', 'gabriel_gave_space'] };
+  assert.equal(getIslandNpcReaction('gabriel_puig', gabriel), 'flee');
+  assert.equal(getIslandNpcReaction('gabriel_puig', { ...gabriel, hour: 15, relation: cautious }), 'ignore');
+  assert.equal(getIslandNpcReaction('gabriel_puig', { ...gabriel, relation: reassured }), 'approach');
+  assert.equal(getIslandNpcReaction('gabriel_puig', { ...gabriel, relation: reassured, witnessed: true }), 'ignore');
+  assert.equal(getIslandNpcReaction('gabriel_puig', { ...gabriel, relation: reassured, witnessed: true, leg: { privateSite: true } }), 'ignore');
+  assert.equal(getIslandNpcReaction('gabriel_puig', { ...gabriel, relation: reassured, armed: true }), 'flee');
+
+  const maria = { leg: { busy: true }, distance: 4, hour: 6 };
+  const acquainted = { trust: 51, flags: ['discussed_garden_crops'] };
+  assert.equal(getIslandNpcReaction('maria', maria), 'ignore');
+  assert.equal(getIslandNpcReaction('maria', { ...maria, hour: 9, leg: {}, relation: acquainted }), 'approach');
+  assert.equal(getIslandNpcReaction('maria', { ...maria, relation: acquainted, armed: true }), 'flee');
+  assert.equal(getIslandNpcReaction('well_boy', { leg: { clip: 'wait' }, distance: 4, playerSpeed: 5, closingSpeed: 0 }), 'available');
+  assert.equal(getIslandNpcReaction('well_boy', { leg: { clip: 'wait' }, distance: 4, playerSpeed: 5, closingSpeed: 5 }), 'wave');
+});
+
+test('guided walks use local paths and wait for Darwin or end if he leaves', () => {
+  for (const [id, npcId, zone, hour] of [
+    ['maize', 'maria', 'PENAL_COLONY', 9],
+    ['lavaRidge', 'john_lort_stokes', 'S_VOLCANIC', 11],
+  ]) {
+    const plan = getIslandNpcGuide(id, npcId, zone);
+    const start = getIslandNpcSchedule(npcId, 1, hour).from;
+    const guide = startIslandNpcGuide(plan, createIslandNpcNavigation(zone), start, 0);
+    assert.ok(guide?.path.length, `No guiding path for ${npcId}`);
+    assert.equal(updateIslandNpcGuide(guide, { clock: 1, distance: 3 }), 'leading');
+    guide.phase = updateIslandNpcGuide(guide, { clock: 2, distance: 7 });
+    assert.equal(guide.phase, 'waiting');
+    assert.equal(updateIslandNpcGuide(guide, { clock: 4, distance: 5 }), 'waiting');
+    assert.equal(updateIslandNpcGuide(guide, { clock: 5, distance: 3 }), 'leading');
+    assert.equal(updateIslandNpcGuide(guide, { clock: 6, distance: 1, armed: true }), 'done');
+    guide.path = [];
+    assert.equal(updateIslandNpcGuide(guide, { clock: 8, distance: 3 }), 'showing');
+    assert.equal(updateIslandNpcGuide(guide, { clock: 17, distance: 3 }), 'done');
+    guide.phase = 'waiting';
+    assert.equal(updateIslandNpcGuide(guide, { clock: 18, distance: 20 }), 'waiting');
+    assert.equal(updateIslandNpcGuide(guide, { clock: 33, distance: 20 }), 'done');
+  }
+  assert.equal(getIslandNpcGuide('maize', 'maria', 'ASILO_SPRING'), null);
+});
+
 const {
   examinationDepthOfFieldActive,
   postprocessingComposerActive,
@@ -1140,7 +1224,7 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
   assert.equal(inland.length, 5);
   edgeSpecimens.push(...inland.filter(specimen => specimen.id !== 'scalesiavillosa'));
   // The resident lizards around them keep to the edges as well.
-  const residents = everyone.filter(specimen => specimen.population);
+  const residents = everyone.filter(specimen => specimen.localInstanceId?.startsWith('population-'));
   assert.ok(residents.length > 0);
   for (const specimen of [...edgeSpecimens, ...residents]) {
     const [x, , z] = specimen.spawnPoint;
@@ -1149,6 +1233,11 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
       Math.hypot(x - darwinStart.x, z - darwinStart.z) > 40,
       `${specimen.instanceId} should stay far from the opening`,
     );
+  }
+  for (const crab of everyone.filter(specimen => specimen.id === 'hermitcrab')) {
+    const [x, , z] = crab.spawnPoint;
+    assert.ok(Math.hypot(x - darwinStart.x, z - darwinStart.z) > 14, crab.instanceId);
+    assert.equal(crab.worldMarker, false);
   }
 });
 
@@ -1512,15 +1601,6 @@ test('objectives advance in order from real gameplay state', () => {
     journal: [landingRecord('Post Office Bay'), landingRecord('Northern Shore', 'failed')],
   };
   assert.equal(twoLandingsDirective.isDone(failedSecond), false);
-
-  // Recorded uncertainty is satisfied by the same hedging the final
-  // assessment scores as rigor.
-  const uncertain = DIRECTIVES.find(entry => entry.id === 'uncertain');
-  assert.equal(uncertain.isDone({ journal: [{ authorship: 'player', content: 'A finch.' }] }), false);
-  assert.equal(
-    uncertain.isDone({ journal: [{ authorship: 'player', content: 'Perhaps a distinct variety; I cannot determine.' }] }),
-    true,
-  );
 });
 
 test('landing the collection at the Beagle keeps specimens on the expedition record', () => {
@@ -1766,7 +1846,7 @@ test('Lawson stands on authored colony geometry, in a zone his encounter lists',
   assert.ok(Number.isFinite(placement.x) && Number.isFinite(placement.z));
   // Inside the settlement's walkable ground rather than out on the terrain edge.
   assert.ok(Math.hypot(placement.x, placement.z) < 39, 'placement must sit inside the region bounds');
-  assert.deepEqual(getStationaryNpcsForZone('PENAL_COLONY').map(n => n.npcId), ['nicolas_lawson']);
+  assert.ok(getStationaryNpcsForZone('PENAL_COLONY').some(npc => npc.npcId === 'nicolas_lawson'));
   assert.deepEqual(getStationaryNpcsForZone('POST_OFFICE_BAY'), []);
   // A zone listed on the encounter with no placement is an NPC nobody can find.
   for (const zoneId of NPC_ENCOUNTERS.nicolas_lawson.zones) {
@@ -2871,6 +2951,117 @@ test('fauna sprites and loops match their metadata, and every call names a real 
   }
 });
 
+test('walking hops stay distinct from running leaps', () => {
+  const { jumpStyleForLaunch } = loadModule('three-game/components/player/playerJumpAnimation.js');
+  const input = { moving: false, running: false, speed: 0, walkSpeed: 4.45 };
+  assert.equal(jumpStyleForLaunch(input), 'standing');
+  assert.equal(jumpStyleForLaunch({ ...input, moving: true, speed: 3 }), 'moving');
+  assert.equal(jumpStyleForLaunch({ ...input, moving: true, running: true, speed: 3 }), 'running');
+  assert.equal(jumpStyleForLaunch({ ...input, speed: 7 }), 'running', 'released sprint momentum still earns a leap');
+});
+
+test('jump preparation tracks time to contact across different drop speeds', () => {
+  const { jumpTimeToContact, darwinJumpAnimation } = loadModule('three-game/components/player/playerJumpAnimation.js');
+  const gravity = 21.12;
+  for (const speed of [2, 8, 16]) {
+    const distance = speed * 0.14 + 0.5 * gravity * 0.14 ** 2;
+    assert.ok(Math.abs(jumpTimeToContact(distance, -speed, gravity) - 0.14) < 1e-6);
+  }
+  assert.equal(jumpTimeToContact(0.1, 2, gravity), Infinity, 'no landing preparation on ascent');
+  for (const jumpWasRunning of [false, true]) {
+    const motion = { jumpWasRunning, jumpLaunchVelocity: 7, verticalSpeed: 7 };
+    const launch = darwinJumpAnimation(motion);
+    const apex = darwinJumpAnimation({ ...motion, verticalSpeed: 0 });
+    const contact = darwinJumpAnimation({ ...motion, verticalSpeed: -7, jumpTimeToContact: 0 });
+    assert.ok(launch.sampleTime < apex.sampleTime && apex.sampleTime < contact.sampleTime);
+    assert.equal(launch.clip, contact.clip, 'the airborne phases cannot restart the source clip');
+  }
+});
+
+test('ordinary jump recovery yields to movement, another jump, and swimming', () => {
+  const { darwinJumpRecoveryAnimation } = loadModule('three-game/components/player/playerJumpAnimation.js');
+  const motion = { jumpRecovery: { startedAt: 10, running: false }, speed: 0 };
+  assert.ok(darwinJumpRecoveryAnimation(motion, 10.25), 'standing hop still absorbs impact');
+  assert.equal(darwinJumpRecoveryAnimation({ ...motion, speed: 4 }, 10.25), null, 'walking resumes sooner');
+  assert.equal(darwinJumpRecoveryAnimation({ ...motion, airborne: true }, 10.1), null);
+  assert.equal(darwinJumpRecoveryAnimation({ ...motion, swimming: true }, 10.1), null);
+  assert.equal(darwinJumpRecoveryAnimation(motion, 10.4), null, 'recovery always expires');
+  const step = { jumpRecovery: { startedAt: 10, running: false }, speed: 4 };
+  const advancing = darwinJumpRecoveryAnimation(step, 10.1);
+  const stopping = darwinJumpRecoveryAnimation({ ...step, speed: 0 }, 10.12);
+  assert.ok(stopping.sampleTime >= advancing.sampleTime, 'releasing movement cannot rewind the landing pose');
+});
+
+test('field reaches commit only at contact, once, and cancel across action, tool, and zone changes', () => {
+  const { beginFieldReach, takeFieldReachContact } = loadModule('three-game/components/player/fieldReach.js');
+  const make = () => beginFieldReach({ clip: 'gatherGround', target: { x: 1, y: 0.2, z: 2 }, now: 10, zoneId: 'A', toolId: 'hands', actorId: 'plant-1' });
+  const context = { now: 10.8, action: 'gatherGround', zoneId: 'A', toolId: 'hands' };
+  const reach = make();
+  assert.equal(takeFieldReachContact(reach, { ...context, now: 10.3 }), null, 'objects remain in the world throughout the wind-up');
+  assert.equal(takeFieldReachContact(reach, { ...context, action: 'walk' }), null);
+  assert.equal(takeFieldReachContact(reach, { ...context, zoneId: 'B' }), null);
+  assert.equal(takeFieldReachContact(reach, { ...context, toolId: 'hammer' }), null);
+  assert.equal(takeFieldReachContact(reach, context), reach);
+  assert.equal(takeFieldReachContact(reach, { ...context, now: 11 }), null, 'a held action key cannot collect twice');
+  const blocked = make(); blocked.witness = { at: 10.78, error: 0.7 };
+  assert.equal(takeFieldReachContact(blocked, context).failed, true, 'a hand stopped short by geometry cannot collect through it');
+  assert.equal(beginFieldReach({ clip: 'gatherGround', target: { x: NaN, y: 0, z: 0 } }), null);
+});
+
+test('reach poses advance through contact and finish recovery before movement resumes', () => {
+  const { beginFieldReach, fieldReachAnimation, fieldReachWeight, FIELD_REACH_PROFILES } = loadModule('three-game/components/player/fieldReach.js');
+  for (const clip of ['gatherGround', 'gatherChestHeight', 'pickUp']) {
+    const reach = beginFieldReach({ clip, target: { x: 1, y: 0.2, z: 0 }, now: 10, zoneId: 'A' });
+    const profile = FIELD_REACH_PROFILES[clip];
+    const before = fieldReachAnimation(reach, clip, reach.contactAt - 0.1);
+    const contact = fieldReachAnimation(reach, clip, reach.contactAt);
+    const recovering = fieldReachAnimation(reach, clip, reach.releaseAt);
+    assert.ok(before.sampleTime < contact.sampleTime && contact.sampleTime < recovering.sampleTime);
+    assert.ok(fieldReachWeight(reach, reach.contactAt) > 0.99);
+    assert.equal(fieldReachWeight(reach, reach.releaseAt), 0, 'the reaching hand releases before locomotion takes over');
+    assert.ok(profile.release < profile.duration);
+    assert.equal(fieldReachAnimation(reach, 'walk', reach.contactAt), null);
+  }
+});
+
+test('rock contact follows the facing surface of rotated compound collision shapes', () => {
+  const { rockStrikeContact, rockSurfaceRadius } = loadModule('three-game/physics/props/rockContact.js');
+  const rock = { x: 3, z: 2, yaw: Math.PI / 2, height: 2, shapes: [{ type: 'convex', points: [[-2,-0.5],[2,-0.5],[2,0.5],[-2,0.5]] }] };
+  assert.ok(Math.abs(rockSurfaceRadius(rock, {x:1,z:0}) - 0.5) < 1e-6);
+  const right = rockStrikeContact(rock, {x:5,z:2}, () => 4);
+  const left = rockStrikeContact(rock, {x:1,z:2}, () => 4);
+  assert.ok(right.position.x > rock.x && left.position.x < rock.x);
+  assert.equal(right.position.y, left.position.y);
+  assert.equal(right.position.z, 2);
+  assert.ok(Math.abs(right.position.y - 5.04) < 1e-6);
+  const centred = rockStrikeContact(rock, {x:3,z:2}, () => 4, false, {x:1,z:0});
+  assert.ok(centred.position.x < rock.x, 'a coincident strike uses the original opposite-facing fallback');
+});
+
+test('a blocked reach preserves arm lengths and wrist orientation and restores its pose', () => {
+  const THREE = projectRequire('three');
+  const { createFieldReachRig } = loadModule('three-game/components/player/fieldReachRig.js');
+  const { beginFieldReach } = loadModule('three-game/components/player/fieldReach.js');
+  const scene = new THREE.Group();
+  const [upper, lower, hand] = ['RightArm', 'RightForeArm', 'RightHand'].map(name => { const bone = new THREE.Bone(); bone.name = name; return bone; });
+  scene.add(upper); upper.add(lower); lower.add(hand);
+  upper.position.set(0.2, 1.3, 0); lower.position.set(0, -0.3, 0.1); hand.position.set(0, -0.3, -0.1);
+  const translations = [upper, lower, hand].map(bone => bone.position.clone());
+  const rotations = [upper, lower, hand].map(bone => bone.quaternion.clone());
+  const wristRotation = hand.getWorldQuaternion(new THREE.Quaternion());
+  const reach = beginFieldReach({ clip: 'gatherGround', target: { x: 3, y: 0, z: 3 }, now: 10, zoneId: 'A' });
+  const rig = createFieldReachRig(scene, { current: { action: 'gatherGround', fieldReach: reach } });
+  rig.update(reach.contactAt);
+  assert.ok(Number.isFinite(reach.witness.error) && reach.witness.error > 1, 'unreachable targets remain misses');
+  [upper, lower, hand].forEach((bone, i) => {
+    assert.ok(bone.position.distanceTo(translations[i]) < 1e-8);
+    assert.deepEqual(bone.scale.toArray(), [1, 1, 1]);
+  });
+  assert.ok(hand.getWorldQuaternion(new THREE.Quaternion()).angleTo(wristRotation) < 1e-6);
+  rig.restorePose();
+  [upper, lower, hand].forEach((bone, i) => assert.ok(bone.quaternion.angleTo(rotations[i]) < 1e-6));
+});
+
 test('jumps sound as a standing hop, a running leap or a drop', () => {
   const { jumpSoundShape } = loadModule('three-game/audio/jumpSounds.js');
   assert.equal(jumpSoundShape({ runningJump: false }, 'takeoff').body, 'jumpTakeoffStand');
@@ -3084,6 +3275,90 @@ test('soft ground keeps stronger, longer tracks than grit', () => {
   assert.equal(water.visible, false);
 });
 
+test('Darwin contact phases follow the two-cycle sprint and preserve the planted side across gaits', () => {
+  const { getFootContactProfile, footPhasePulse, alignedGaitPhase } = loadModule('three-game/components/player/gaitProfiles.js');
+  const jog = getFootContactProfile('darwin5', 'jog');
+  const sprint = getFootContactProfile('darwin5', 'sprint');
+  assert.equal(sprint.cycles, 2);
+  for (const phase of [0.25, 0.75]) {
+    assert.ok(footPhasePulse(phase, sprint.left, sprint.width, sprint.cycles) > 0.99);
+    assert.equal(footPhasePulse(phase, sprint.right, sprint.width, sprint.cycles), 0);
+  }
+  for (const offset of [-0.05, 0, 0.05]) {
+    const intoSprint = alignedGaitPhase(jog.left + offset, jog, sprint);
+    const back = alignedGaitPhase(intoSprint, sprint, jog);
+    assert.ok(Math.abs(back - jog.left - offset) < 1e-6);
+  }
+  assert.ok(footPhasePulse(-0.03, jog.right, jog.width) > 0.99, 'phase wraps across the clip seam');
+});
+
+test('leg plants reach their targets without stretching bones or rolling boots', () => {
+  const THREE = projectRequire('three');
+  const { solveLegPlant } = loadModule('three-game/components/player/legPlanting.js');
+  for (const scale of [1, 1.3]) {
+    const root = new THREE.Group();
+    root.position.set(5, 2, -3); root.rotation.set(0.1, 0.7, 0); root.scale.setScalar(scale);
+    const upper = new THREE.Bone(), lower = new THREE.Bone(), foot = new THREE.Bone();
+    root.add(upper); upper.add(lower); lower.add(foot);
+    upper.position.set(0, 1, 0); lower.position.set(0, -0.5, 0.05); foot.position.set(0, -0.5, -0.05);
+    const bones = [upper, lower, foot];
+    const positions = bones.map(bone => bone.position.toArray());
+    const originalBoot = foot.getWorldQuaternion(new THREE.Quaternion());
+    const a = upper.getWorldPosition(new THREE.Vector3()), b = lower.getWorldPosition(new THREE.Vector3());
+    const c = foot.getWorldPosition(new THREE.Vector3());
+    const lengths = [a.distanceTo(b), b.distanceTo(c)];
+    const target = c.clone().add(new THREE.Vector3(0.06, 0.1, 0.08));
+    solveLegPlant(upper, lower, foot, target, new THREE.Vector3(0, 0, 1));
+    assert.ok(foot.getWorldPosition(c).distanceTo(target) < 1e-5);
+    assert.ok(originalBoot.angleTo(foot.getWorldQuaternion(new THREE.Quaternion())) < 1e-6);
+    upper.getWorldPosition(a); lower.getWorldPosition(b);
+    assert.ok(Math.abs(a.distanceTo(b) - lengths[0]) < 1e-6);
+    assert.ok(Math.abs(b.distanceTo(c) - lengths[1]) < 1e-6);
+    assert.deepEqual(bones.map(bone => bone.position.toArray()), positions);
+    assert.ok(bones.every(bone => bone.scale.equals(new THREE.Vector3(1, 1, 1))));
+  }
+});
+
+test('turns cross the angle seam smoothly and respond to a new heading without movement locks', () => {
+  const { advancePlayerHeading, turnTravelScale } = loadModule('three-game/components/player/playerTurnMotion.js');
+  let yaw = Math.PI - 0.02;
+  const wrapped = advancePlayerHeading(yaw, -Math.PI + 0.08, 7.45, 1 / 60);
+  assert.ok(wrapped > yaw && wrapped - yaw < 0.1);
+  yaw = 0;
+  for (let i = 0; i < 30; i += 1) {
+    const next = advancePlayerHeading(yaw, Math.PI, 7.45, 1 / 60);
+    assert.ok(Math.abs(next - yaw) <= 9.5 / 60 + 1e-6);
+    yaw = next;
+  }
+  assert.ok(Math.abs(yaw - Math.PI) < 0.03);
+  assert.ok(advancePlayerHeading(yaw, 0, 7.45, 1 / 60) < yaw, 'steering can interrupt a pivot');
+  assert.ok(turnTravelScale('runningTurn180', 10, 10) > 0, 'a pivot never locks travel');
+  assert.equal(turnTravelScale('runningTurn180', 10, 10.4), 1);
+});
+
+test('turn correction handles the Mixamo armature basis and restores the authored pose', () => {
+  const THREE = projectRequire('three');
+  const { createPlayerTurnRig } = loadModule('three-game/components/player/playerTurnMotion.js');
+  const group = new THREE.Group(), armature = new THREE.Group(), hips = new THREE.Bone();
+  hips.name = 'mixamorig:Hips';
+  group.add(armature); armature.add(hips);
+  group.rotation.y = 0.7; armature.rotation.x = Math.PI / 2;
+  const worldPose = group.getWorldQuaternion(new THREE.Quaternion())
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 1.1))
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.12));
+  hips.quaternion.copy(armature.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(worldPose));
+  const authored = hips.quaternion.clone();
+  const rig = createPlayerTurnRig(group, { current: group }, { current: { action: 'runningTurnLeft' } });
+  rig.update(1 / 60, 'runningTurnLeft');
+  const corrected = group.getWorldQuaternion(new THREE.Quaternion()).invert()
+    .multiply(hips.getWorldQuaternion(new THREE.Quaternion()));
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(corrected);
+  assert.ok(Math.abs(Math.atan2(forward.x, forward.z)) < 1e-6, 'the controller supplies the only heading change');
+  assert.ok(Math.abs(forward.y + Math.sin(0.12)) < 1e-6, 'authored pitch survives');
+  rig.restorePose();
+  assert.ok(hips.quaternion.angleTo(authored) < 1e-6);
+});
+
 test('foot-contact probes never translate skeleton bones', () => {
   const source = fs.readFileSync(
     path.resolve('three-game/components/player/footContactRig.js'),
@@ -3094,6 +3369,151 @@ test('foot-contact probes never translate skeleton bones', () => {
   assert.doesNotMatch(source, /bone\.position\.(?:add|sub)\s*\(/);
   assert.doesNotMatch(source, /applyFootPlanting/);
   assert.doesNotMatch(source, /VISUAL_GROUNDING_MIN\s*=\s*-/);
+});
+
+test('boot floor sampling follows the drawn triangles rather than an averaged height', () => {
+  const THREE = projectRequire('three');
+  const { sampleHeightfieldSurface } = loadModule('three-game/components/player/bootGroundConstraint.js');
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([-1,0,-1, 1,0,-1, -1,0,1, 1,1,1], 3));
+  geometry.userData.terrainSegments = 1;
+  assert.equal(sampleHeightfieldSurface(geometry,0,0),0,'the diagonal is a real triangle edge, not a bilinear surface');
+  assert.equal(sampleHeightfieldSurface(geometry,0.5,0.5),0.5);
+  assert.equal(sampleHeightfieldSurface(geometry,2,0),null);
+});
+
+test('boot support batches agree with the movement adapter on a real small rock', () => {
+  const { createCollisionAdapter } = loadModule('three-game/physics/collisionAdapter.js');
+  const adapter=createCollisionAdapter('POST_OFFICE_BAY');
+  const support=adapter.createFootSurfaceSampler({minX:-17,minZ:12,maxX:-15,maxZ:15});
+  let onRock=0;
+  for(let x=-16.5;x<-15.7;x+=0.1) for(let z=12.9;z<13.8;z+=0.1) {
+    const p={x,y:adapter.spawnY(x,z)+0.15,z};
+    const ground=adapter.groundInfo(p,{supportRadius:0});
+    if(ground.source==='authored-obstacle') {
+      assert.ok(Math.abs(support(p)-(ground.y-0.015))<1e-8);onRock++;
+    } else assert.equal(support(p),null);
+  }
+  assert.ok(onRock>0,'the comparison must include the actual basalt surface');
+});
+
+test('visible boot soles cannot cross the floor during recovery or a stop blend', () => {
+  const THREE = projectRequire('three');
+  const { createBootGroundConstraint } = loadModule('three-game/components/player/bootGroundConstraint.js');
+  const scene = new THREE.Group(), upper = new THREE.Bone(), lower = new THREE.Bone(), foot = new THREE.Bone();
+  upper.name='LeftUpLeg';lower.name='LeftLeg';foot.name='LeftFoot';
+  scene.add(upper);upper.add(lower);lower.add(foot);
+  upper.position.set(0,1,0);lower.position.set(0,-0.5,0.05);foot.position.set(0,-0.5,-0.05);
+  const vertices=[], indices=[], weights=[];
+  for (let z=0;z<5;z++) for(let x=0;x<3;x++) {
+    vertices.push((x-1)*0.06,-0.07,(z-2)*0.07);indices.push(2,0,0,0);weights.push(1,0,0,0);
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+  geometry.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(indices,4));
+  geometry.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weights,4));
+  const mesh=new THREE.SkinnedMesh(geometry,new THREE.MeshBasicMaterial());scene.add(mesh);
+  scene.updateMatrixWorld(true);mesh.bind(new THREE.Skeleton([upper,lower,foot]));
+  foot.rotation.x=0.35; scene.position.y=-0.08;scene.updateMatrixWorld(true);
+  const positions=[upper,lower,foot].map(b=>b.position.toArray()), rotations=[upper,lower,foot].map(b=>b.quaternion.clone());
+  const rootY=scene.position.y;
+  const rig=createBootGroundConstraint(scene,{current:scene});
+  rig.update({enabled:true,motion:{action:'stopWalking',stepSmoothOffset:-0.3},floorAt:(x,z)=>z*0.2});
+  const sole=rig.debug()[0];
+  assert.ok(sole.probes>=12,'the entire heel-to-toe footprint must be sampled');
+  assert.ok(sole.clearance>=0.005,'a missing stance phase or a large step offset cannot disable the floor');
+  assert.ok(sole.correction>0.1);
+  assert.equal(scene.position.y,rootY,'the correction belongs to the leg, not a teleport of Darwin');
+  assert.deepEqual([upper,lower,foot].map(b=>b.position.toArray()),positions);
+  assert.ok([upper,lower,foot].every(b=>b.scale.equals(new THREE.Vector3(1,1,1))));
+  rig.restorePose();
+  [upper,lower,foot].forEach((b,i)=>assert.ok(b.quaternion.angleTo(rotations[i])<1e-6));
+  for(let i=0;i<120;i++) {
+    rig.restorePose();scene.position.y=0.15;
+    rig.update({enabled:true,motion:{speed:0},floorAt:()=>0,delta:1/60,now:i/60});
+  }
+  assert.ok(rig.debug()[0].clearance<0.012,'a stopped hovering sole must also settle down onto the floor');
+  assert.ok(Math.abs(foot.getWorldPosition(new THREE.Vector3()).x-0.13)<0.015,'the planned standing anchor must actually move the boot under the hips');
+  assert.ok(scene.position.y<0.15 && scene.position.y>=0.01,'the visual pelvis settles within the bounded reach allowance');
+  assert.deepEqual([upper,lower,foot].map(b=>b.position.toArray()),positions,'settling cannot stretch or translate leg bones');
+  rig.restorePose();
+  assert.ok(Math.abs(scene.position.y-0.15)<1e-8,'restore the visual pelvis before whole-body grounding samples the next frame, or the two solvers fight');
+  const {registerRockFootSurfaces}=loadModule('three-game/world/visualFootSurfaces.js');
+  const rock=new THREE.Mesh(new THREE.BoxGeometry(2,0.02,2),new THREE.MeshBasicMaterial());rock.position.y=0.4;
+  const removeRock=registerRockFootSurfaces('boot-test',rock,[{id:'ledge'}]);
+  scene.position.y=-0.6;
+  const scramble={end:{y:0.41}};
+  rig.update({enabled:true,motion:{action:'climbWaistHeight',rockScramble:scramble,climbMotion:scramble},zoneId:'boot-test',floorAt:()=>0,now:3});
+  const vertex=new THREE.Vector3();let lowest=Infinity;
+  for(let i=0;i<geometry.attributes.position.count;i++){mesh.getVertexPosition(i,vertex).applyMatrix4(mesh.matrixWorld);lowest=Math.min(lowest,vertex.y);}
+  assert.ok(lowest>=0.415,'a deep visual crouch cannot hide the destination rock from the floor barrier');
+  const hip=upper.getWorldPosition(new THREE.Vector3()), knee=lower.getWorldPosition(new THREE.Vector3()), ankle=foot.getWorldPosition(new THREE.Vector3());
+  const thigh=hip.distanceTo(knee), shin=knee.distanceTo(ankle), reach=hip.distanceTo(ankle);
+  const flexion=Math.acos(THREE.MathUtils.clamp((reach*reach-thigh*thigh-shin*shin)/(2*thigh*shin),-1,1));
+  assert.ok(hip.y-ankle.y>=0.19,'the floor correction must keep the boot below the hip');
+  assert.ok(flexion<=2.22,'the sole barrier must not fold the knee back onto itself');
+  removeRock();rig.restorePose();
+  rig.update({enabled:true,motion:{airborne:true},floorAt:()=>0});
+  assert.equal(rig.debug()[0].clearance,null,'airborne poses retain their authored motion');
+});
+
+test('uneven-ground balance distinguishes a smooth slope from a small rock', () => {
+  const { createTerrainBalanceState, updateTerrainBalance } = loadModule('three-game/components/player/terrainBalance.js');
+  const state = createTerrainBalanceState();
+  const position = {x:0,y:4,z:0};
+  const slope = {dx:0.2,dz:0.3,grade:Math.hypot(0.2,0.3)};
+  const samples = [{x:0,z:0,y:4}, {x:0,z:0.34,y:4.102,rightOffset:0}, {x:0.28,z:0,y:4.056,rightOffset:0.28}];
+  const context = {now:10,delta:1/60,position,previous:{...position},facing:{x:0,z:1},slope,stance:{center:samples[0],samples},speed:2,enabled:true};
+  for (let i=0;i<60;i++) updateTerrainBalance(state,{...context,now:10+i/60});
+  assert.equal(state.count,0,'ordinary uphill travel cannot become a stumble');
+  assert.ok(Math.abs(state.forwardGrade-0.3)<0.001 && Math.abs(state.crossGrade-0.2)<0.001);
+  samples[1] = {...samples[1],y:samples[1].y+0.2,source:'authored-obstacle',obstacle:{kind:'rock',id:'stone-1'}};
+  updateTerrainBalance(state,{...context,now:12});
+  updateTerrainBalance(state,{...context,now:12.16});
+  assert.equal(state.count,1);
+  assert.ok(state.pulse>0.4 && state.pulse<0.8);
+  updateTerrainBalance(state,{...context,now:13.2});
+  assert.equal(state.count,1,'holding against one stone cannot repeatedly stagger Darwin');
+  assert.equal(state.pulse,0);
+  updateTerrainBalance(state,{...context,now:14,position:{x:1.1,y:4,z:0},previous:{x:1.09,y:4,z:0}});
+  assert.equal(state.count,1,'the rear foot leaving the same stone cannot trigger a second recovery');
+});
+
+test('footing recovery settles after stopping and cancels for jumps, actions, and teleports', () => {
+  const { createTerrainBalanceState, beginFootingRecovery, updateTerrainBalance, balanceAllowsAction } = loadModule('three-game/components/player/terrainBalance.js');
+  const state = createTerrainBalanceState(), position={x:0,y:0,z:0};
+  const context={now:10.3,delta:1/60,position,previous:position,facing:{x:0,z:1},slope:{dx:0,dz:0,grade:0},speed:0,enabled:true};
+  beginFootingRecovery(state,{now:10,position,rise:0.2});
+  updateTerrainBalance(state,context);
+  assert.ok(state.pulse>0,'letting go of movement preserves the short recovery');
+  updateTerrainBalance(state,{...context,enabled:false});
+  assert.equal(state.pulse,0);
+  assert.equal(balanceAllowsAction('pickUp'),false);
+  assert.equal(balanceAllowsAction('jumpDown'),false);
+  assert.equal(balanceAllowsAction('startWalking'),true);
+  beginFootingRecovery(state,{now:12,position:{x:2,z:0},rise:0.2});
+  updateTerrainBalance(state,{...context,now:12.2,speed:2,previous:{x:-5,y:0,z:0}});
+  assert.equal(state.pulse,0,'a teleport is not a terrain step');
+});
+
+test('terrain balance rotates the torso without stretching bones or disturbing held tools', () => {
+  const THREE=projectRequire('three');
+  const { createTerrainBalanceRig }=loadModule('three-game/components/player/terrainBalance.js');
+  const scene=new THREE.Group(), chest=new THREE.Bone(), neck=new THREE.Bone(), arm=new THREE.Bone();
+  chest.name='Spine1'; neck.name='Neck'; arm.name='RightArm';
+  scene.add(chest); chest.add(neck,arm); chest.position.y=1; neck.position.y=0.4; arm.position.x=0.2;
+  scene.rotation.y=0.7;
+  const positions=[chest,neck,arm].map(b=>b.position.clone());
+  const rig=createTerrainBalanceRig(scene,{current:scene});
+  const motion={terrainBalance:{forwardGrade:0.4,crossGrade:0.2,pulse:0.6,side:1},handsBusy:true};
+  rig.update(motion,true);
+  assert.ok(chest.quaternion.angleTo(new THREE.Quaternion())>0.05);
+  assert.ok(arm.quaternion.angleTo(new THREE.Quaternion())<1e-6,'a held tool keeps its authored arm pose');
+  [chest,neck,arm].forEach((b,i)=>{assert.ok(b.position.distanceTo(positions[i])<1e-8);assert.deepEqual(b.scale.toArray(),[1,1,1]);});
+  rig.restorePose();
+  [chest,neck,arm].forEach(b=>assert.ok(b.quaternion.angleTo(new THREE.Quaternion())<1e-6));
+  rig.update({...motion,action:'pickUp'},true);
+  assert.ok(chest.quaternion.angleTo(new THREE.Quaternion())<1e-6);
 });
 
 test('Darwin5 locomotion-preview build is the default while extended waits retain the varied idle pool', () => {
@@ -8967,7 +9387,7 @@ test('resident populations are examinable specimens of species already authored 
   for (const zoneId of Object.keys(populationsModule.FAUNA_POPULATIONS)) {
     const authoredTypes = new Set(getZoneSpecimens(zoneId).map(specimen => specimen.id));
     const all = getThreeSpecimens(zoneId);
-    const population = all.filter(specimen => specimen.population);
+    const population = all.filter(specimen => specimen.localInstanceId?.startsWith('population-'));
     assert.ok(population.length > 0, `${zoneId} populations`);
     for (const specimen of population) {
       assert.ok(authoredTypes.has(specimen.id), `${zoneId}: ${specimen.id} is not authored there, so it would change the region's species count`);
@@ -8976,6 +9396,64 @@ test('resident populations are examinable specimens of species already authored 
     }
     assert.equal(new Set(all.map(specimen => specimen.instanceId)).size, all.length, `${zoneId} actor ids are unique`);
   }
+});
+
+test('land hermit crabs occupy reproducible dry coastal patches', () => {
+  const { buildHermitCrabPopulation, HERMIT_CRAB_MIN_GROUND } = loadModule('three-game/world/ecology/hermitCrabPopulations.js');
+  const { movementTerrainHeight } = loadModule('three-game/world/terrain.js');
+  for (const zone of ['POST_OFFICE_BAY', 'PUNTA_CORMORANT', 'MANGROVES', 'S_INTERTIDAL']) {
+    const crabs = getThreeSpecimens(zone).filter(specimen => specimen.id === 'hermitcrab');
+    assert.ok(crabs.length >= 8, zone);
+    assert.deepEqual(crabs, buildHermitCrabPopulation(zone), zone);
+    assert.equal(new Set(crabs.map(crab => crab.instanceId)).size, crabs.length, zone);
+    for (const crab of crabs) {
+      const [x, y, z] = crab.spawnPoint;
+      assert.ok(y >= HERMIT_CRAB_MIN_GROUND && movementTerrainHeight(x, z, zone) >= HERMIT_CRAB_MIN_GROUND);
+    }
+  }
+  for (const zone of ['BEAGLE', 'NORTHERN_HIGHLANDS', 'NW_REEF']) {
+    assert.ok(getThreeSpecimens(zone).every(specimen => specimen.id !== 'hermitcrab'), zone);
+  }
+});
+
+test('a hermit crab holds its shell shut until a nearby threat quiets, then peeks', () => {
+  const zoneId = 'POST_OFFICE_BAY';
+  const crab = getThreeSpecimens(zoneId).find(specimen => specimen.id === 'hermitcrab');
+  const base = new Vector3(...crab.spawnPoint);
+  const { createFaunaMotionController, habitatFor } = loadModule('three-game/fauna/faunaMotionController.js');
+  const { getWildlifeBehaviorProfile } = loadModule('three-game/wildlife/wildlifeCatalog.js');
+  const { activeBehaviorEpisodes } = loadModule('three-game/fauna/behavior/behaviorEpisodes.js');
+  const profile = getWildlifeBehaviorProfile(crab);
+  const actor = createFaunaMotionController({
+    profile, habitat: habitatFor(crab, profile), seed: 0.2, zoneId, basePosition: base,
+    actorId: crab.instanceId, speciesId: crab.id,
+  });
+  const player = base.clone().add(new Vector3(1.5, 0, 0));
+  let t = 0;
+  const tick = (speed, observed = false) => actor.update({
+    basePosition: base, zoneId, playerPosition: player,
+    elapsedTime: (t += 0.1), delta: 0.1, playerSpeed: speed, timeOfDay: 18, observed,
+  });
+  try {
+    for (let i = 0; i < 25; i += 1) tick(3);
+    assert.equal(actor.state.debug.mode, 'hermit:tuck');
+    assert.equal(actor.state.animation.hermitTuck, 1);
+    assert.deepEqual([actor.state.position.x, actor.state.position.z], [base.x, base.z]);
+    for (let i = 0; i < 23; i += 1) tick(0, true);
+    assert.equal(actor.state.debug.mode, 'hermit:peek');
+    assert.ok([...activeBehaviorEpisodes(zoneId).values()].some(episode => episode.behaviorId === 'emergeFromShell'));
+    tick(3);
+    assert.equal(actor.state.debug.mode, 'hermit:tuck', 'rushing during the peek interrupts it');
+    const modes = new Set();
+    for (let i = 0; i < 220; i += 1) {
+      tick(0);
+      modes.add(actor.state.debug.mode);
+    }
+    assert.ok(modes.has('hermit:walk') && modes.has('hermit:feed'));
+  } finally {
+    actor.dispose();
+  }
+  assert.equal(activeBehaviorEpisodes(zoneId).size, 0);
 });
 
 test('what Darwin watches during a close look goes into that examination as well', () => {
@@ -9134,6 +9612,197 @@ test('Darwin only ends up holding the shotgun once Covington has handed it over'
   assert.equal(settleDarwinTool('shotgun', ['shotgun'], GUN_HOLDERS.SYMS), 'hands');
 });
 
+test('a specimen label lays out handwriting and shrinks as it fills', () => {
+  const {
+    LABEL, LABEL_LAYOUT, layoutLabelText, labelHeader, labelDate, canvasToCardUV,
+  } = loadModule('three-game/examine/labelWriting.js');
+  const measure = (text, size) => text.length * size * 0.45;
+  const short = layoutLabelText('Bill short and deep, perhaps for seeds.', measure);
+  assert.equal(short.size, LABEL_LAYOUT.baseSize);
+  const words = short.lines.flatMap(line => line.words);
+  assert.equal(words.length, 7);
+  assert.ok(short.caret.x > LABEL_LAYOUT.marginX);
+  for (const word of words) assert.ok(word.x + word.width <= LABEL.canvasWidth - LABEL_LAYOUT.marginX + 0.001);
+
+  // A full label gets smaller rather than running off the card.
+  const long = layoutLabelText('Feathers dull brown above, paler below; '.repeat(8).trim(), measure);
+  assert.ok(long.size < LABEL_LAYOUT.baseSize);
+  assert.ok(long.size >= LABEL_LAYOUT.minSize);
+  // Line breaks the writer typed are kept.
+  assert.equal(layoutLabelText('first\nsecond', measure).lines.length, 2);
+
+  const header = labelHeader({
+    session: { name: 'Large ground finch', day: 2, facts: [
+      { id: 'category', label: 'Kind', value: 'Animal', saved: true },
+      { id: 'bill', label: 'Bill depth', value: '14 mm', saved: true },
+      { id: 'mass', label: 'Mass', value: '30 g', saved: false },
+    ] },
+    zoneName: 'Post Office Bay',
+    day: 2,
+    journal: [{ authorship: 'player' }, { authorship: 'record' }],
+  });
+  assert.equal(header.number, 'No. 2');
+  assert.equal(header.place, 'Charles Isd. — Post Office Bay');
+  assert.equal(header.date, 'Sept. 25, 1835');
+  assert.deepEqual(header.facts, ['Bill depth: 14 mm']);
+  assert.equal(labelDate(1), 'Sept. 24, 1835');
+  const uv = canvasToCardUV(LABEL.canvasWidth / 2, LABEL.canvasHeight / 4);
+  assert.ok(Math.abs(uv.u - 0.5) < 1e-9 && Math.abs(uv.v - 0.75) < 1e-9);
+});
+
+test('the label frame holds the card below the eye, facing it, text upright', () => {
+  const { computeLabelFrame, cardPoint, LABEL } = loadModule('three-game/examine/labelWriting.js');
+  for (const facing of [{ x: 0, z: -1 }, { x: 1, z: 0 }, { x: -0.6, z: 0.8 }]) {
+    const frame = computeLabelFrame(new Vector3(3, 10, -2), facing);
+    const toEye = frame.eye.clone().sub(frame.center).normalize();
+    assert.ok(frame.cardZ.dot(toEye) > 0.999, 'card faces the eye');
+    assert.ok(frame.center.y < frame.eye.y - 0.1, 'card is below the eye');
+    assert.ok(frame.cardY.y > 0.3, 'text runs upright');
+    const ahead = frame.center.clone().sub(frame.eye);
+    ahead.y = 0;
+    assert.ok(ahead.dot(frame.forward) > 0.25, 'card is ahead of him');
+    // Writing runs left to right as he sees it.
+    const viewRight = frame.forward.clone().cross(new Vector3(0, 1, 0));
+    assert.ok(frame.cardX.dot(viewRight) > 0.9);
+    const corner = cardPoint(frame, 1, 1);
+    assert.ok(Math.abs(corner.distanceTo(frame.center) - Math.hypot(LABEL.width, LABEL.height) / 2) < 1e-6);
+    // The view is aimed above the card, so it sits low and clear of the controls.
+    assert.ok(frame.look.y > frame.center.y);
+  }
+});
+
+test('a label sketch keeps strokes, drops jitter, rubs out, and saves compactly', () => {
+  const { labelSketch, compactSketch, SKETCH_SAVE_SCALE } = loadModule('three-game/examine/labelWriting.js');
+  labelSketch.clear();
+  let notified = 0;
+  const unsubscribe = labelSketch.subscribe(() => { notified += 1; });
+  const before = labelSketch.version();
+  assert.ok(labelSketch.begin(100, 300));
+  assert.equal(labelSketch.extend(101, 300), 0, 'a hand tremor is not a new point');
+  assert.ok(labelSketch.extend(140, 330) > 0);
+  labelSketch.begin(600, 400);
+  assert.equal(labelSketch.strokes().length, 2);
+  assert.ok(labelSketch.version() > before && notified === 3);
+  const saved = compactSketch();
+  assert.deepEqual(saved[0], [100 / SKETCH_SAVE_SCALE, 300 / SKETCH_SAVE_SCALE, 35, 83]);
+  assert.deepEqual(saved[1], [150, 100], 'a single press is kept as a dot');
+  labelSketch.undo();
+  assert.equal(labelSketch.strokes().length, 1);
+  labelSketch.clear();
+  assert.ok(labelSketch.empty());
+  unsubscribe();
+});
+
+test('a caught specimen opens its label first and hands the catch back when it is put down', () => {
+  // The slice imports the store through ./shared, and examinables reach the
+  // player components; stub the store and scene side, keep the rest real.
+  const loadWithStubs = (file, stubs) => {
+    const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText;
+    const module = { exports: {} };
+    new Function('exports', 'require', 'module', compiled)(module.exports, specifier => (
+      specifier in stubs ? stubs[specifier] : loadModule(resolveLocalModule(specifier, path.resolve(file)))
+    ), module);
+    return module.exports;
+  };
+  const examinables = loadWithStubs('three-game/examine/examinables.js', {
+    '../components/player/playerInteractions': { specimenInteractionHeight: () => 0.3 },
+  });
+  const sliceModule = { exports: loadWithStubs('three-game/storeSlices/examineSlice.js', {
+    './shared': {},
+    '../narrator/narratorEvents': { appendNarratorEvents: log => log, narrationPayloadToEvents: () => [] },
+    '../ai/generativePolicy': { generativeRequestsAllowed: () => false },
+    '../data': { getThreeIslandLocation: () => ({ name: 'Post Office Bay' }) },
+    '../world/floreanaZones': { getZone: () => null },
+    '../examine/populationTraits': {},
+    '../examine/examinables': examinables,
+  }) };
+  const { createExamineActions } = sliceModule.exports;
+  let state = {
+    examineSession: null,
+    day: 2,
+    timeOfDay: 9,
+    playerPose: { position: { x: 4, y: 1, z: -3 }, facing: { x: 0, z: -1 } },
+  };
+  const set = update => { state = { ...state, ...(typeof update === 'function' ? update(state) : update) }; };
+  const actions = createExamineActions(set, () => state);
+  const outcome = {
+    specimen: { id: 'galapagoscarpenterbee', name: 'Galápagos Carpenter Bee', ontology: 'animal' },
+    tool: { id: 'insect_net' },
+    result: { success: true },
+    collectedActorId: 'bee-1',
+  };
+  actions.openCaptureLabel(outcome);
+  assert.equal(state.examineSession.labelOpen, true);
+  assert.equal(state.examineSession.actorId, 'bee-1');
+  assert.equal(state.examineSession.subjectGone, 'collected');
+  // Held toward where he faces, so the place he caught it is behind the card.
+  assert.deepEqual(state.examineSession.focus, { x: 4, y: 1, z: -4.4 });
+  // A second catch report while one label is open does not replace it.
+  actions.openCaptureLabel({ ...outcome, collectedActorId: 'bee-2' });
+  assert.equal(state.examineSession.actorId, 'bee-1');
+
+  actions.setExamineLabelOpen(false);
+  assert.equal(state.examineSession, null);
+  assert.equal(state.lastOutcome.labelled, true);
+  assert.equal(state.lastOutcome.collectedActorId, 'bee-1');
+
+  // A label opened from an ordinary examination goes back to it instead.
+  state.examineSession = { name: 'Finch', facts: [], labelOpen: true };
+  state.lastOutcome = null;
+  actions.setExamineLabelOpen(false);
+  assert.equal(state.examineSession.labelOpen, false);
+  assert.equal(state.lastOutcome, null);
+});
+
+test('label pencil sounds are short strokes, paced by typing and by drawing speed', () => {
+  const source = fs.readFileSync('three-game/audio/interfaceFoley.js', 'utf8');
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const cues = [];
+  let now = 1000;
+  const clock = { now: () => now };
+  const module = { exports: {} };
+  const fn = new Function('exports', 'require', 'module', 'performance', compiled);
+  fn(module.exports, specifier => (specifier === './audioRuntime'
+    ? { playInterfaceCue: (key, options) => { cues.push({ key, ...options }); return true; } }
+    : projectRequire(specifier)), module, clock);
+  const { playPencilStroke, playPencilDraw, playRubOut } = module.exports;
+
+  // A keystroke is a brief piece of a scribble, not the whole 0.6 s of it.
+  playPencilStroke();
+  now += 20;
+  playPencilStroke();
+  assert.equal(cues.length, 1, 'a key repeat inside the pacing window is not a second stroke');
+  assert.equal(cues[0].key, 'pencil');
+  assert.ok(cues[0].duration > 0 && cues[0].duration < 0.15);
+  assert.ok(cues[0].offset >= 0 && cues[0].offset + cues[0].duration < 0.9);
+
+  // Drawing: nothing for a tremor, then pieces paced so they do not stack,
+  // louder for a quick stroke than a slow one.
+  cues.length = 0;
+  now += 500;
+  playPencilDraw(3);
+  assert.equal(cues.length, 0);
+  now += 150;
+  playPencilDraw(20);
+  const slow = cues[0];
+  now += 40;
+  playPencilDraw(60);
+  assert.equal(cues.length, 1, 'draw pieces wait for the last one');
+  now += 120;
+  playPencilDraw(200);
+  const quick = cues[1];
+  assert.ok(slow && quick && quick.gain > slow.gain);
+
+  cues.length = 0;
+  playRubOut();
+  assert.equal(cues[0].key, 'paperOpen');
+  assert.ok(cues[0].duration < 0.3);
+});
+
 test('a hip shot with the gun slung waits for the draw, then fires once', () => {
   const source = fs.readFileSync('three-game/components/player/playerEquipmentState.js', 'utf8');
   const compiled = ts.transpileModule(source, {
@@ -9249,6 +9918,78 @@ test('held shotgun aim survives the firing lock and releases normally', () => {
     update();
     assert.equal(context.aimActiveRef.current, false, `${input}: locked entry`);
   }
+});
+
+test('foot surfaces follow actual rock triangles, transformed instances, zones and replacements', () => {
+  const THREE = projectRequire('three');
+  const { meshTopHeight, registerRockFootSurfaces, createVisualFootSurfaceSampler } = loadModule('three-game/world/visualFootSurfaces.js');
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 1,1,0, 0,0,1],3));
+  assert.equal(meshTopHeight(geometry,0.25,0.25),0.25);
+  assert.equal(meshTopHeight(geometry,0.8,0.8),null,'a bounding box is not a contact surface');
+  const mesh = new THREE.InstancedMesh(geometry,new THREE.MeshBasicMaterial(),1);
+  mesh.setMatrixAt(0,new THREE.Matrix4().compose(new THREE.Vector3(3,5,4),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI/2),new THREE.Vector3(2,3,2)));
+  const bounds={minX:2,maxX:6,minZ:1,maxZ:6};
+  const removeOld=registerRockFootSurfaces('contact-test',mesh,[{id:'basalt'}]);
+  let sample=createVisualFootSurfaceSampler('contact-test',bounds);
+  assert.ok(Math.abs(sample.heightAt(3.5,3.5)-5.75)<1e-8);
+  assert.ok(sample.ids.has('basalt'));
+  assert.equal(createVisualFootSurfaceSampler('other-zone',bounds).heightAt(3.5,3.5),null);
+  assert.equal(createVisualFootSurfaceSampler('contact-test',bounds,5).heightAt(3.5,3.5),null,'overhead geometry cannot pull the boots up');
+  const removeNew=registerRockFootSurfaces('contact-test',mesh,[{id:'replacement'}]);removeOld();
+  assert.ok(createVisualFootSurfaceSampler('contact-test',bounds).ids.has('replacement'),'stale cleanup cannot unregister a newer geometry batch');
+  removeNew();
+  assert.equal(createVisualFootSurfaceSampler('contact-test',bounds).heightAt(3.5,3.5),null);
+});
+
+test('a loose stone between planted boots preserves the fixed support underneath', () => {
+  const {resolvePlayerRockSupport}=loadModule('three-game/components/player/playerRockTraversal.js');
+  const loose={source:'loose-rock',y:1,obstacle:{id:'loose'}};
+  const fixed={source:'authored-obstacle',y:0.6,obstacle:{id:'base',kind:'rock'}};
+  const adapter={groundInfo:(p,options={})=>options.ignoreLooseRocks||Math.abs(p.x)>0.1?fixed:loose,
+    stanceGroundInfo:()=>({left:loose,right:loose})};
+  const p={x:0,y:1,z:0},facing={x:0,z:1};
+  const contacts={left:{x:-0.2,z:0,active:true},right:{x:0.2,z:0,active:true}};
+  assert.equal(resolvePlayerRockSupport(p,facing,adapter,contacts).ground,fixed,'the center and synthetic stance samples cannot override the actual boots');
+  contacts.left.x=-0.05;contacts.right.x=0.05;
+  assert.equal(resolvePlayerRockSupport(p,facing,adapter,contacts).ground,loose,'a real two-foot loose-rock stance remains physical');
+  loose.obstacle.radii=[0.3,0.18,0.26];
+  assert.equal(resolvePlayerRockSupport(p,facing,adapter,contacts).ground,fixed,'a small perched stone cannot repeatedly promote itself above the broad fixed support');
+});
+
+test('standing feet prefer a balanced patch beside a perched stone', () => {
+  const {planStandingFeet}=loadModule('three-game/components/player/bootGroundConstraint.js');
+  const plan=planStandingFeet({x:0,y:0,z:0},{x:0,z:1},{x:1,z:0},(x,z)=>({y:Math.abs(x)<0.2&&z<0.12?0.35:0,loose:Math.abs(x)<0.2&&z<0.12}));
+  assert.ok([plan.left,plan.right].every(foot=>Math.abs(foot.x)>=0.26||foot.z>=0.18),'both soles adjust onto the stable surrounding patch');
+  assert.ok(Math.abs(plan.left.high-plan.right.high)<0.01);
+  assert.ok(plan.left.x>0&&plan.right.x<0,'the legs cannot cross during settling');
+});
+
+test('rock scrambling selects stable knee-high supports once and never teleports at early-exit time', () => {
+  const THREE = projectRequire('three');
+  const {findRockScrambleTarget,sampleRockScramble,isRockSupport}=loadModule('three-game/components/player/playerRockTraversal.js');
+  const position=new THREE.Vector3(0,0,0),direction=new THREE.Vector3(0,0,1);
+  const obstacle={id:'rock',kind:'rock',x:0,z:0.8,radius:0.5};
+  const adapter={groundInfo:p=>({y:p.z>=0.4&&p.z<=1.2?0.5:0,source:p.z>=0.4&&p.z<=1.2?'authored-obstacle':'terrain',obstacle})};
+  const target=findRockScrambleTarget(position,direction,adapter);
+  assert.ok(target && target.heightDelta===0.5);
+  assert.equal(findRockScrambleTarget(position,direction,adapter,{id:'rock',x:0,z:0.8,radius:0.5}),null,'holding forward cannot restart the same climb');
+  assert.equal(findRockScrambleTarget(new THREE.Vector3(0,0.5,0.8),direction,adapter),null,'standing on the stone is not a new uphill face');
+  const tiny={groundInfo:p=>({...adapter.groundInfo(p),y:0.18})};
+  assert.equal(findRockScrambleTarget(position,direction,tiny),null,'small stones stay in the walk cycle');
+  assert.ok(isRockSupport({source:'loose-rock'}),'a valid loose-rock center support cannot be discarded by the stance-count heuristic');
+  const motion={start:position,end:target.end};let last=position.clone();
+  for(let p=0;p<=1.001;p+=0.01){const next=sampleRockScramble(motion,p,new THREE.Vector3());assert.ok(next.distanceTo(last)<0.04);assert.ok(next.y>=last.y);last=next;}
+  assert.ok(sampleRockScramble(motion,0.58,new THREE.Vector3()).distanceTo(target.end)>0.1,'the old early-exit point must still be partway through the ascent');
+  assert.ok(sampleRockScramble(motion,1,new THREE.Vector3()).equals(target.end));
+});
+
+test('scrambling chooses a reachable handhold on the rock rather than straining toward a low edge', () => {
+  const THREE=projectRequire('three');
+  const {chooseRockHandhold}=loadModule('three-game/components/player/playerRockTraversal.js');
+  const low=new THREE.Vector3(0,0,0),top=new THREE.Vector3(0,0.7,0.1),far=new THREE.Vector3(1,1,0);
+  const chosen=chooseRockHandhold([low,top,far],low,new THREE.Vector3(0,1.2,0),new THREE.Vector3(0,-0.05,0.05),0.6);
+  assert.equal(chosen,top,'the higher nearby facet is within the authored arm length');
 });
 
 let failed = false;

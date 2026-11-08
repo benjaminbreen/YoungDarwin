@@ -9,7 +9,7 @@ const SPECIMEN_LINES = {
   ],
   marineiguana: [
     'The marine iguana lies black against black rock, lifting its head only enough to make you feel that the interruption has been noticed.',
-    'Salt crusts the iguana\'s snout as it warms itself on the basalt, an unhandsome animal made perfectly legible by its shore.',
+    'Salt crusts the iguana\'s snout as it warms itself on the basalt. Now and then it sneezes out a little spray of brine.',
   ],
   lavalizard: [
     'The lava lizard darts two steps, stops, and performs a small territorial bob, as if the volcanic shelf required ceremony.',
@@ -20,7 +20,7 @@ const SPECIMEN_LINES = {
     'A bright crab slips across the intertidal rock, vanishing into a crack before you can take two careful steps.',
   ],
   flightlesscormorant: [
-    'The cormorant waddles along the shelf with reduced wings held close, a coastal bird whose body seems to have made its bargain with the sea.',
+    'The cormorant waddles along the shelf with reduced wings held close, its wings far too small to fly with.',
   ],
   mediumgroundfinch: [
     'A ground finch hops near the scrub, testing seeds with quick turns of the head and showing no proper respect for human classification.',
@@ -35,10 +35,10 @@ const SPECIMEN_LINES = {
     'The cactus keeps its water behind a persuasive arrangement of spines; you would do well to admire it from a modest distance.',
   ],
   basalt: [
-    'The basalt breaks the light into hard planes, a black record of fire now serving as shore, path, and obstacle.',
+    'The basalt is broken into hard black slabs, sharp-edged and hot underfoot.',
   ],
   flamingo: [
-    'The flamingo feeds in the brackish shallows, turning the mud with a delicacy that makes the whole lagoon seem deliberate.',
+    'The flamingo feeds in the brackish shallows, head upside down, sweeping its bill through the mud.',
   ],
   booby: [
     'The booby watches you with frank island curiosity, not yet convinced that a naturalist is a dangerous thing.',
@@ -47,16 +47,16 @@ const SPECIMEN_LINES = {
     'The lava gull works the swash line alone, lifting its wings the moment your boots become too interesting.',
   ],
   frigatebird: [
-    'A frigatebird rides the wind overhead, making the air itself look like a usable road.',
+    'A frigatebird rides the wind overhead, hardly moving its wings.',
   ],
   sealion: [
     'The sea lion keeps its place with the lazy authority of an animal that has already won the beach.',
   ],
   greenturtle: [
-    'The turtle moves through the shallows with a composure the shore party cannot hope to imitate.',
+    'The turtle moves slowly through the shallows, surfacing now and then to breathe.',
   ],
   parrotfish: [
-    'The parrotfish flashes below the surface, scraping at the reef and turning stone into sand by slow appetite.',
+    'The parrotfish flashes below the surface, scraping at the coral with its beak.',
   ],
 };
 
@@ -76,41 +76,41 @@ const SPECIMEN_NOTES = {
 
 const ZONE_LINES = {
   POST_OFFICE_BAY: [
-    'Post Office Bay opens as a practical sort of wilderness: black shelf, blue water, dry scrub, and the Beagle riding just far enough away to make every label matter.',
+    'Post Office Bay: black rock, blue water, dry scrub, and the Beagle at anchor offshore.',
   ],
   N_SHORE: [
-    'The Northern Shore spreads into black sand and pale drift, a quieter coast where tracks and wind marks do much of the speaking.',
+    'The Northern Shore is black sand and pale driftwood, with tracks running along the tideline.',
   ],
   NW_REEF: [
-    'The reef lies under clear water like a second map, all pale shelves, moving shadows, and creatures visible before they are reachable.',
+    'The reef lies under clear water: pale shelves of coral, and fish moving in the shadows.',
   ],
   W_HIGH: [
-    'The highlands gather mist and green shade, a different Charles Island from the dry volcanic shore below.',
+    'The highlands are misty and green, much wetter than the shore below.',
   ],
   EL_MIRADOR: [
-    'El Mirador lifts the expedition into red dirt and long views, where the island begins arranging itself into routes rather than scenery.',
+    'El Mirador is red dirt and long views over the island.',
   ],
   MANGROVES: [
-    'The mangroves darken the edge of land and water, turning every root into shelter and every pool into a small uncertainty.',
+    'The mangroves grow thick along the shore, their roots standing in shallow pools.',
   ],
   PENAL_COLONY: [
-    'The settlement interrupts natural history with human history: rows, tools, exile, and imported plants struggling into order.',
+    'The settlement: rows of crops, tools left out, and imported plants struggling in the dry soil.',
   ],
 };
 
 const DARWIN_THOUGHTS = {
   POST_OFFICE_BAY: [
-    'The ship offshore feels nearer when not looked at directly.',
-    'The mail barrel makes the beach feel briefly inhabited, then empty again.',
+    'The Beagle rides at anchor offshore.',
+    'The mail barrel stands on its post above the beach.',
   ],
   floreanagianttortoise: [
-    'The tortoise\'s stillness makes haste feel faintly indecent.',
+    'The tortoise has not moved for some time.',
   ],
   marineiguana: [
-    'The black skin takes the sun and gives almost nothing back.',
+    'The iguana lies flat on the rock, soaking up the sun.',
   ],
   penal: [
-    'The garden rows make the island feel less wild, not less strange.',
+    'The garden rows are dry and badly weeded.',
   ],
   mist: [
     'The fog is making it harder to see the shore.',

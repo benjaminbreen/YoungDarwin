@@ -15,6 +15,7 @@ const WATCH_RANGE = {
   floreanagianttortoise: 20,
   marineiguana: 15,
   cat: 15,
+  hermitcrab: 4.5,
 };
 const DEFAULT_WATCH_RANGE = 12;
 // Half-angle of the view cone, wider for animals close by.

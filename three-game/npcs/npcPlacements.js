@@ -9,8 +9,30 @@
 // pinned to authored geometry (a door, a fence gate) instead of a magic number
 // that silently drifts when the layout moves.
 import { getGovernorHouseFrontEntry } from '../world/penalColonyLayout';
+import { BEAGLE_CABIN_ZONE_ID, getInteriorBlueprint } from '../interiors/interiorRegistry';
+
+const beagleCabin = getInteriorBlueprint(BEAGLE_CABIN_ZONE_ID);
+const [hammockX, hammockY, hammockZ] = beagleCabin.rests.find(rest => rest.id === 'darwin-hammock-rest').restPose;
+const fitzroyAtHammock = {
+  x: hammockX - 2.2,
+  y: beagleCabin.dimensions.floorY,
+  z: hammockZ,
+  facing: { x: 1, z: 0 },
+};
+export const BEAGLE_RECOVERY_VIEW = {
+  eye: [hammockX - 0.94, hammockY - 0.17, hammockZ + 0.14],
+  target: [fitzroyAtHammock.x, fitzroyAtHammock.y + 1.52, fitzroyAtHammock.z],
+};
 
 const PLACEMENTS = {
+  fitzroy: {
+    runtimeNpcId: 'fitzroy',
+    zones: {
+      [BEAGLE_CABIN_ZONE_ID]: ({ recovery }) => recovery
+        ? fitzroyAtHammock
+        : { x: 1.65, y: beagleCabin.dimensions.floorY, z: -1.25, facing: { x: 0, z: 1 } },
+    },
+  },
   nicolas_lawson: {
     runtimeNpcId: 'lawson',
     zones: {
@@ -32,16 +54,16 @@ const PLACEMENTS = {
   },
 };
 
-export function getNpcPlacement(npcId, zoneId) {
+export function getNpcPlacement(npcId, zoneId, context = {}) {
   const entry = PLACEMENTS[npcId];
   const resolve = entry?.zones?.[zoneId];
   if (!resolve) return null;
-  const spot = resolve();
+  const spot = resolve(context);
   if (!spot || !Number.isFinite(spot.x) || !Number.isFinite(spot.z)) return null;
   const facing = spot.facing && Number.isFinite(spot.facing.x) && Number.isFinite(spot.facing.z)
     ? spot.facing
     : { x: 0, z: 1 };
-  return { runtimeNpcId: entry.runtimeNpcId, x: spot.x, z: spot.z, facing };
+  return { ...spot, runtimeNpcId: entry.runtimeNpcId, facing };
 }
 
 // Every stationary NPC that could appear in this zone. Returns [] for most

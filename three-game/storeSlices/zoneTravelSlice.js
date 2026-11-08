@@ -1,7 +1,12 @@
 // Region-to-region travel and its fade phases.
 // Spread into useThreeGameStore in three-game/store.js.
 
-import { INCAPACITATION_RECOVERY_FATIGUE, INCAPACITATION_RECOVERY_HEALTH } from '../expeditionOutcomes';
+import {
+  INCAPACITATION_RECOVERY_FATIGUE,
+  INCAPACITATION_RECOVERY_HEALTH,
+  INCAPACITATION_RECOVERY_SPAWN_ID,
+} from '../expeditionOutcomes';
+import { createNpcEncounterSession, FITZROY_NPC_ID, getNpcEncounter } from '../encounters/npcEncounters';
 import {
   MAX_FATIGUE,
   advanceTimeState,
@@ -11,6 +16,7 @@ import {
 import {
   SCRIPTED_NARRATION_COOLDOWN_MINUTES,
   appendNarratorEvents,
+  createNarratorEvent,
   gameClockMinutes,
   narrationPayloadToEvents,
 } from '../narrator/narratorEvents';
@@ -119,8 +125,25 @@ export const createZoneTravelActions = (set, get) => ({
       : null;
     const zoneKey = `zone:${zone.id}`;
     const recovering = state.transition.source === 'incapacitation-recovery';
-    const recoveryMessage = 'You wake in your berth aboard HMS Beagle, weak but alive. The expedition has been cut short for the day.';
-    const recoveryLine = '"Easy now, sir. The island will still be there when you are fit to meet it."';
+    const recoveryMessage = 'You wake in your hammock aboard HMS Beagle. FitzRoy is standing beside you.';
+    const recoveryEncounter = recovering
+      ? createNpcEncounterSession(FITZROY_NPC_ID, state.npcEncounterState?.[FITZROY_NPC_ID], { recovery: true })
+      : null;
+    const arrivalEvents = narrationPayloadToEvents({
+      narration: recovering ? recoveryMessage : (scripted?.narration || zone.loadingNote),
+      darwinThought: recovering ? null : thought,
+    }, arrivalState, recovering ? 'recovery' : 'scripted-zone', { allowThought: !recovering && Boolean(thought) });
+    if (recoveryEncounter) {
+      arrivalEvents.push(createNarratorEvent({
+        kind: 'npcActivity',
+        speaker: getNpcEncounter(FITZROY_NPC_ID).name,
+        text: recoveryEncounter.turns[0].text,
+        day: arrivalState.day,
+        timeOfDay: arrivalState.timeOfDay,
+        source: 'recovery',
+        meta: { npcId: FITZROY_NPC_ID, event: 'recovery' },
+      }));
+    }
     return {
       currentZoneId: zone.id,
       symsZoneId: symsZoneAfterTransition({
@@ -164,39 +187,40 @@ export const createZoneTravelActions = (set, get) => ({
       selectedSpecimenId: null,
       nearbySpecimenId: null,
       nearbyNpcEncounter: null,
-      activeNpcEncounter: null,
+      activeNpcEncounter: recoveryEncounter,
+      npcEncounterPending: false,
+      npcGuideRequest: null,
+      npcEncounterError: null,
       nearbyItem: null,
       examineSession: null,
       readableBookSession: null,
       interiorPrompt: null,
-      message: recovering ? recoveryMessage : (scripted?.narration || zone.loadingNote || state.message),
+      message: scripted?.narration || zone.loadingNote || state.message,
       educationalNote: recovering
         ? 'Darwin\'s shore work depended on companions, boats, and shipboard routines that made recovery possible.'
         : (scripted?.educationalNote || zone.educationalNote || state.educationalNote),
       weather: arrivalWeather,
       weatherOverride: null,
       sounds: Array.isArray(zone.sounds) ? zone.sounds : state.sounds,
-      narratorLog: appendNarratorEvents(state.narratorLog, narrationPayloadToEvents({
-        narration: recovering ? recoveryMessage : (scripted?.narration || zone.loadingNote),
-        symsLine: recovering ? recoveryLine : null,
-        darwinThought: recovering ? null : thought,
-      }, arrivalState, recovering ? 'recovery' : 'scripted-zone', { allowThought: !recovering && Boolean(thought) })),
+      narratorLog: appendNarratorEvents(state.narratorLog, arrivalEvents),
       narratorScriptedKeys: {
         ...state.narratorScriptedKeys,
         [zoneKey]: nowMinutes,
         ...(thought ? { [thoughtKey]: nowMinutes } : {}),
       },
-      playerSpawnId: state.transition.entryEdge || 'default',
+      playerSpawnId: recovering ? INCAPACITATION_RECOVERY_SPAWN_ID : (state.transition.entryEdge || 'default'),
       fatigue: clamp(state.fatigue + (state.transition.fatigue || 0), 0, MAX_FATIGUE),
       ...arrival,
       ...(recovering ? {
+        message: recoveryMessage,
+        // A second collapse aboard still has to place Darwin beside the hammock.
+        playerSpawnRevision: state.playerSpawnRevision + 1,
         health: INCAPACITATION_RECOVERY_HEALTH,
         fatigue: INCAPACITATION_RECOVERY_FATIGUE,
         minutesSinceMeal: 0,
         expeditionOutcome: null,
         activeConstraint: null,
         majorEvent: null,
-        symsLine: recoveryLine,
       } : {}),
     };
   }),

@@ -252,6 +252,11 @@ canonical display names through `game-core/regionMaps.js`. For example,
 | `darwin5LocomotionPreview` | true | true | `/assets/models/darwin5-locomotion-preview.glb` | `/assets/models/darwin5-motion-bank.glb`, `/assets/models/darwin5-action-bank.glb`, `/assets/models/darwin5-character-bank.glb` | 60500 |
 | `syms` | true | false | `/assets/models/syms-animated.glb` | _none_ | 10000 |
 | `lawson` | true | false | `/assets/models/npc-nicolas-lawson.glb` | _none_ | 15000 |
+| `fitzroy` | true | false | `/assets/models/npc-robert-fitzroy.glb` | _none_ | 15000 |
+| `maria` | true | false | `/assets/models/npc-maria.glb` | _none_ | 10000 |
+| `gabriel` | true | false | `/assets/models/npc-gabriel.glb` | _none_ | 6000 |
+| `wellBoy` | true | false | `/assets/models/npc-well-boy.glb` | _none_ | 6000 |
+| `stokes` | true | false | `/assets/models/npc-john-lort-stokes.glb` | _none_ | 19000 |
 | `crab` | true |  | `/assets/models/animals/runtime/bundle-sally-lightfoot-crab.glb` | _none_ | 3000 |
 | `settlementCat` | true |  | `/assets/models/animals/runtime/settlement-cat.glb` | _none_ | 3000 |
 | `feralGoat` | true | false | `/assets/models/animals/runtime/feral-goat.glb` | _none_ | 1500 |

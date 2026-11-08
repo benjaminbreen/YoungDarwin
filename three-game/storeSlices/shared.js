@@ -27,6 +27,8 @@ import { createInitialExpeditionState } from '../../game-core/save';
 import { currentZoneId, getZone } from '../world/floreanaZones';
 import { darwinThought, zoneNarration } from '../narrator/narratorContent';
 import { getNpcPoses } from '../world/npcRuntime';
+import { ISLAND_NPC_IDS } from '../npcs/islandNpcSchedule';
+import { getNpcEncounter } from '../encounters/npcEncounters';
 import { getSpecimenRarity } from '../rarity';
 import { getWildlifeBehaviorProfile, normalizeWildlifeId } from '../wildlife/wildlifeCatalog';
 import { WARINESS, disturbWildlifeState } from '../wildlife/wariness';
@@ -198,6 +200,7 @@ export function healthDamagePatch(state, {
     examineSession: null,
     readableBookSession: null,
     activeNpcEncounter: null,
+    npcGuideRequest: null,
     beagleTravelPrompt: null,
     carriedObjectId: null,
     carryDropRequest: null,
@@ -374,8 +377,15 @@ export function nearbyPeopleContext(state, zone) {
       : 'the large collecting case remains with the expedition stores';
     people.push(`Syms Covington is ${distance < 3 ? 'close by' : `${distance.toFixed(1)}m away`} and ${activity}; he keeps the collecting case supplied and ready, while ${caseContext}.`);
   }
+  const poses = getNpcPoses(state.currentZoneId);
+  for (const npcId of ISLAND_NPC_IDS) {
+    const pose = poses?.get(npcId);
+    if (pose && Number.isFinite(px) && Number.isFinite(pz) && Math.hypot(px - pose.x, pz - pose.z) < 12) {
+      people.push(`${getNpcEncounter(npcId).name} nearby: ${pose.activity}`);
+    }
+  }
   for (const npcId of zone?.npcs || []) {
-    if (npcId !== 'syms_covington') people.push(`regional NPC present: ${npcId}`);
+    if (npcId !== 'syms_covington' && !ISLAND_NPC_IDS.includes(npcId)) people.push(`regional NPC present: ${npcId}`);
   }
   return people.slice(0, 4);
 }
@@ -559,6 +569,7 @@ export function recordSpecimenPatch(state, {
   result,
   documented = false,
   actorId = null,
+  labelAfter,
   caseEntry = {},
   location,
   narrationSource,
@@ -611,7 +622,10 @@ export function recordSpecimenPatch(state, {
       ? { sightedSpecimenIds: [...state.sightedSpecimenIds, specimen.id] }
       : {}),
     questComplete: state.questComplete || collected || documented,
-    lastOutcome: { specimen, tool, result, documented, collectedActorId: collected ? actorId : null },
+    lastOutcome: {
+      specimen, tool, result, documented, collectedActorId: collected ? actorId : null,
+      ...(collected && Number.isFinite(labelAfter) ? { labelAfter } : {}),
+    },
     // The case tab's shimmer and the case-button glow need markers that
     // survive the per-frame actions that clear lastOutcome after a collect.
     ...(collected ? { lastCasedActorId: actorId, lastCasedAt: Date.now(), lastCasedRarityTier: rarityTier } : {}),
@@ -801,6 +815,7 @@ export function createExpeditionSlice() {
     currentZoneId: expedition.currentZoneId,
     currentLocalCellId: expedition.currentLocalCellId,
     playerSpawnId: expedition.playerSpawnId,
+    playerSpawnRevision: 0,
     visitedZoneIds: expedition.visitedZoneIds,
     visitedLocalCellIds: expedition.visitedLocalCellIds,
     timeOfDay: expedition.timeMinutes / 60,
@@ -851,6 +866,7 @@ export function createSceneSlice() {
     narratorPending: false,
     narratorError: null,
     activeNpcEncounter: null,
+    npcGuideRequest: null,
     npcEncounterPending: false,
     npcEncounterError: null,
     // Encounter consequences persist in the bounded classroom resume snapshot

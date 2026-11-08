@@ -1087,6 +1087,10 @@ export function playAudioSprite(sprite, {
   filterHz = null,
   send = 1,
   position = null,
+  // Play only part of the slot: from `offset` seconds in, for `duration`
+  // seconds, with a short fade so the cut does not click.
+  offset = 0,
+  duration = null,
 } = {}) {
   if (!audioSpriteReady(sprite, { family, priority })) return false;
   const context = audioState.context;
@@ -1140,7 +1144,20 @@ export function playAudioSprite(sprite, {
     audioState.voices.delete(voice);
     exposeDebugState();
   };
-  source.start(0, safeIndex * sprite.slotDuration, sprite.slotDuration);
+  const startOffset = Math.max(0, Math.min(sprite.slotDuration - 0.02, Number(offset) || 0));
+  const length = Number.isFinite(duration) && duration > 0
+    ? Math.min(duration, sprite.slotDuration - startOffset)
+    : sprite.slotDuration - startOffset;
+  if (Number.isFinite(duration) && duration > 0) {
+    const now = context.currentTime;
+    const level = voiceGain.gain.value;
+    const fade = Math.min(0.04, length * 0.4);
+    voiceGain.gain.setValueAtTime(0, now);
+    voiceGain.gain.linearRampToValueAtTime(level, now + 0.006);
+    voiceGain.gain.setValueAtTime(level, now + length / source.playbackRate.value - fade);
+    voiceGain.gain.linearRampToValueAtTime(0, now + length / source.playbackRate.value);
+  }
+  source.start(0, safeIndex * sprite.slotDuration + startOffset, length);
   if (family && Object.hasOwn(audioState.debug.events, family)) audioState.debug.events[family] += 1;
   audioState.debug.lastEvent = { family, index: safeIndex, at: performance.now() };
   exposeDebugState();
@@ -1153,7 +1170,7 @@ export function playAudioSprite(sprite, {
 // has decoded starts the load and stays silent this once.
 const interfaceLastVariant = new Map();
 
-export function playInterfaceCue(key, { gain = 0.1, playbackRate = 1, pan = 0 } = {}) {
+export function playInterfaceCue(key, { gain = 0.1, playbackRate = 1, pan = 0, offset = 0, duration = null } = {}) {
   const family = INTERFACE_CUE_FAMILIES[key];
   const sprite = INTERFACE_AUDIO[key];
   if (!family || !sprite?.url) return false;
@@ -1173,6 +1190,8 @@ export function playInterfaceCue(key, { gain = 0.1, playbackRate = 1, pan = 0 } 
     pan,
     priority: true,
     send: 0,
+    offset,
+    duration,
   });
 }
 

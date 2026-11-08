@@ -2,6 +2,7 @@
 // same lethal drop height as the old 22 under 10.8 x 1.34 gravity.
 export const CATASTROPHIC_FALL_SPEED = 26.5;
 export const INCAPACITATION_RECOVERY_ZONE_ID = 'BEAGLE_CABIN';
+export const INCAPACITATION_RECOVERY_SPAWN_ID = 'recovery-hammock';
 export const INCAPACITATION_RECOVERY_HOUR = 7;
 export const INCAPACITATION_RECOVERY_HEALTH = 60;
 export const INCAPACITATION_RECOVERY_FATIGUE = 12;

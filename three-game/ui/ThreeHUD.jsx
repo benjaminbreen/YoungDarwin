@@ -95,6 +95,7 @@ import {
 } from './expedition/map/islandLocations';
 import { devRoutesEnabled } from '../../app/devRoutes';
 import { SYMS_DIRECTIVES } from '../npcs/symsActivityPlan';
+import { getNpcEncounter } from '../encounters/npcEncounters';
 import { getNpcPoses } from '../world/npcRuntime';
 import { getInteriorDefinition, getInteriorQuickExit } from '../interiors/interiorRegistry';
 import { InteriorFloorPlan } from '../interiors/InteriorFloorPlan';
@@ -2632,7 +2633,8 @@ function entryTime(entry, fallbackTime) {
 
 function entryPresentation(entry) {
   if (entry?.kind === 'npcActivity' || entry?.kind === 'syms') {
-    return { speaker: 'Syms Covington', portrait: '/portraits/syms_covington.jpg' };
+    const encounter = getNpcEncounter(entry.meta?.npcId || 'syms_covington');
+    return { speaker: entry.speaker || encounter?.name, portrait: encounter?.portrait };
   }
   if (entry?.kind === 'fieldNote') {
     return { speaker: 'Field Note', icon: <OpenBookIcon className="h-5 w-5" /> };
@@ -4095,9 +4097,9 @@ const HINT_SKETCH = 'verb-sketch';
 const HINT_EXAMINE = 'first-examine';
 const HINT_TEXT = {
   [HINT_TAKE]: 'E takes what is already loose.',
-  [HINT_NPC]: 'You speak in your own words. What you ask shapes the reply.',
+  [HINT_NPC]: 'Type what you want to say.',
   [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
-  [HINT_EXAMINE]: 'E examines a creature. What you observe and write is what Henslow judges at the end.',
+  [HINT_EXAMINE]: 'E examines a creature. Henslow reads your notes at the end.',
 };
 
 function promptActionText(value) {
@@ -4412,6 +4414,13 @@ function TargetBracket() {
   );
 }
 
+// A specimen taken (not sketched, not a failed attempt) is labelled before its
+// success card shows.
+function outcomeNeedsLabel(outcome) {
+  return Boolean(outcome?.specimen && outcome.result?.success && !outcome.documented && !outcome.labelled
+    && outcome.result?.outcomeType !== 'documented');
+}
+
 function InteractionPrompt() {
   const nearbySpecimenId = useThreeGameStore(state => state.nearbySpecimenId);
   const nearbyNpcEncounter = useThreeGameStore(state => state.nearbyNpcEncounter);
@@ -4521,6 +4530,10 @@ function InteractionPrompt() {
   const [renderedContextPrompt, setRenderedContextPrompt] = useState(null);
   const [contextPromptVisible, setContextPromptVisible] = useState(false);
   const [outcomeToast, setOutcomeToast] = useState(null);
+  const openCaptureLabel = useThreeGameStore(state => state.openCaptureLabel);
+  // Cancels a label waiting for the pickup or a prior examination to finish.
+  const pendingLabelRef = React.useRef(null);
+  useEffect(() => () => pendingLabelRef.current?.(), []);
   const seenOutcomeRef = React.useRef(lastOutcome);
   const outcomeTimersRef = React.useRef([]);
 
@@ -4543,6 +4556,36 @@ function InteractionPrompt() {
       return undefined;
     }
     seenOutcomeRef.current = lastOutcome;
+    // A catch goes to its label first (examineSlice openCaptureLabel); the
+    // card below comes when the label is put down. A catch made from the
+    // examine view is reported before that view closes, so wait for it.
+    if (outcomeNeedsLabel(lastOutcome)) {
+      pendingLabelRef.current?.();
+      const outcome = lastOutcome;
+      const open = () => {
+        pendingLabelRef.current = null;
+        const state = useThreeGameStore.getState();
+        if (state.lastOutcome !== outcome) return;
+        if (!state.examineSession) {
+          openCaptureLabel(outcome);
+          return;
+        }
+        const unsubscribe = useThreeGameStore.subscribe(next => {
+          if (next.examineSession && next.lastOutcome === outcome) return;
+          unsubscribe();
+          open();
+        });
+        pendingLabelRef.current = unsubscribe;
+      };
+      const delay = Number.isFinite(outcome.labelAfter) ? outcome.labelAfter - performance.now() : 0;
+      if (delay > 0) {
+        const timer = window.setTimeout(open, delay);
+        pendingLabelRef.current = () => window.clearTimeout(timer);
+      } else {
+        open();
+      }
+      return undefined;
+    }
     clearOutcomeTimers();
     const id = `${lastOutcome.specimen?.id || 'specimen'}:${lastOutcome.tool?.id || 'tool'}:${Date.now()}`;
     const visibleMs = celebrationVisibleMs(lastOutcome);
@@ -4557,7 +4600,7 @@ function InteractionPrompt() {
       setOutcomeToast(current => current?.id === id ? null : current);
     }, visibleMs + RESULT_TOAST_EXIT_MS));
     return undefined;
-  }, [clearOutcomeTimers, lastOutcome]);
+  }, [clearOutcomeTimers, lastOutcome, openCaptureLabel]);
 
   useEffect(() => {
     let timer = 0;
@@ -5307,6 +5350,7 @@ export function ThreeHUD({
   const openLibrary = useThreeGameStore(state => state.openLibrary);
   const beagleTravelPromptOpen = useThreeGameStore(state => Boolean(state.beagleTravelPrompt));
   const npcEncounterOpen = useThreeGameStore(state => Boolean(state.activeNpcEncounter));
+  const recoveryEncounterOpen = useThreeGameStore(state => state.activeNpcEncounter?.recovery === true);
   const contextualControlHintId = useThreeGameStore(state => state.contextPrompt?.hintId || null);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const activeConstraint = useThreeGameStore(state => state.activeConstraint);
@@ -5326,8 +5370,8 @@ export function ThreeHUD({
   // there — stowing the case aboard, or the night catching Darwin ashore —
   // Henslow's judgment runs without asking.
   useEffect(() => {
-    if (expeditionDeparted && !finalAssessment) void beginFinalAssessment();
-  }, [expeditionDeparted, finalAssessment, beginFinalAssessment]);
+    if (expeditionDeparted && !finalAssessment && !recoveryEncounterOpen) void beginFinalAssessment();
+  }, [expeditionDeparted, finalAssessment, recoveryEncounterOpen, beginFinalAssessment]);
 
   const blockingUiOpen = Boolean(panel || mapOpen || inventoryOpen || specimenDetailOpen || statusViewOpen || examineOpen || readableBookOpen || beagleTravelPromptOpen || npcEncounterOpen || outcomeOpen || assessmentOpen || nightlyDebriefOpen || fieldDilemmaOpen || caseFullOpen || shotgunChoiceOpen || endGameConfirmationOpen || pauseOpen || controlsOpen);
   const closeEndGameConfirmation = useCallback(() => setEndGameConfirmationOpen(false), []);

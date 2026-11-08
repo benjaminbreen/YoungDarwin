@@ -10,10 +10,12 @@
   "navigation": {
     "defaultSpawn": [0, 0, 8.85],
     "entrySpawns": {
-      "from-deck": [0, 0, 8.85]
+      "from-deck": [0, 0, 8.85],
+      "recovery-hammock": [4.05, 0, 7.45]
     },
     "entryFacings": {
-      "from-deck": [0, 0, -1]
+      "from-deck": [0, 0, -1],
+      "recovery-hammock": [-0.15, 0, -1]
     },
     "transitions": [
       {

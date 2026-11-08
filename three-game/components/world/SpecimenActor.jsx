@@ -21,6 +21,7 @@ import {
   setSpecimenRuntimePose,
 } from '../../world/specimenRuntime';
 import { useFaunaBehavior } from '../../fauna/useFaunaBehavior';
+import { HermitCrabShape } from './HermitCrabShape';
 import { useFaunaFrameTask } from '../../fauna/useFaunaFrameTask';
 import { getFaunaBehaviorProfile, getFaunaCarryProfile } from '../../fauna/faunaBehaviorProfiles';
 import { getWildlifeAssetId, getWildlifeRenderProfile, isAquaticWildlife } from '../../wildlife/wildlifeCatalog';
@@ -464,6 +465,15 @@ export function SpecimenShape({
     );
   }
   const assetId = getSpecimenModelAssetId(specimen);
+  if (assetId === 'hermitCrab') {
+    return (
+      <HermitCrabShape
+        animationSelector={animationSelector}
+        instanceSeed={specimen.instanceId || specimen.id}
+        onSceneReady={onSceneReady}
+      />
+    );
+  }
   // Hand-authored procedural creatures replace their Tripo GLBs here; they
   // self-animate from observed motion, so the animationSelector isn't needed.
   if (assetId === 'lavalizard') {
@@ -728,10 +738,11 @@ export function SpecimenActor({ specimen }) {
   }, [actorId, currentZoneId, isCollectedActor, position, setSpecimenRuntimePosition, specimen.id]);
 
   // Reset any relocated home when the zone (and therefore spawn) changes.
+  const resetFauna = faunaBehavior.reset;
   useEffect(() => {
     behaviorBaseRef.current = position;
-    faunaBehavior.reset?.({ basePosition: position, zoneId: currentZoneId });
-  }, [currentZoneId, faunaBehavior, position]);
+    resetFauna({ basePosition: position, zoneId: currentZoneId });
+  }, [currentZoneId, position, resetFauna]);
 
   // Release carry state if this actor unmounts while being held.
   useEffect(() => {

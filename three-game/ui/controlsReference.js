@@ -86,6 +86,7 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'Shotgun: hold F or right mouse to aim; tap F or click to fire',
       'R: halt and rest — two hours, one provision',
       'Hold G: gestures — sit, point, look around, kneel, write, pray',
+      'Writing a label: type to write, drag on the card to sketch, Ctrl/⌘+Enter to record, Esc to put down',
     ]],
     ['Interface', [
       ...INTERFACE_CONTROLS(polished),

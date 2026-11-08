@@ -12,6 +12,7 @@ import {
   resolveSpecimenFrameHint,
 } from '../../world/specimenRuntime';
 import { examineOrbitActive } from '../../examine/examinables';
+import { LABEL, computeLabelFrame, createLabelFrame, labelRig, labelWritingOpen } from '../../examine/labelWriting';
 import { sunDirection } from '../../world/celestial';
 import {
   consumeExamineCameraDirective,
@@ -115,6 +116,7 @@ export function usePlayerCameraRig() {
   const lastPointerYRef = useRef(0);
   const cameraFollowYRef = useRef(null);
   const statusLookRef = useRef(null);
+  const labelFacingRef = useRef({ key: null, facing: new THREE.Vector3() });
   const examineOrbitRef = useRef({
     sessionKey: null,
     yaw: 0,
@@ -172,6 +174,7 @@ export function usePlayerCameraRig() {
   const dragPointerTypeRef = useRef('mouse');
   const aimDir = useMemo(() => new THREE.Vector3(), []);
   const scratch = useMemo(() => ({
+    labelEye: new THREE.Vector3(),
     panRight: new THREE.Vector3(),
     panVertical: new THREE.Vector3(),
     recenterForward: new THREE.Vector3(),
@@ -272,6 +275,8 @@ export function usePlayerCameraRig() {
         return;
       }
       const examineSession = useThreeGameStore.getState().examineSession;
+      // Writing a label, the mouse is the pencil (LabelCard), not the orbit.
+      if (labelWritingOpen(examineSession)) return;
       if (examineOrbitActive(examineSession)) {
         if (event.button !== 0) return;
         draggingRef.current = true;
@@ -409,6 +414,7 @@ export function usePlayerCameraRig() {
       const pixelDelta = event.deltaY * (event.deltaMode === 1 ? 32 : event.deltaMode === 2 ? 400 : 1);
       const normalizedDelta = Math.sign(pixelDelta) * Math.min(1.8, Math.abs(pixelDelta) / 80);
       const examineSession = useThreeGameStore.getState().examineSession;
+      if (labelWritingOpen(examineSession)) return;
       if (examineOrbitActive(examineSession)) {
         // A procedure move may park the zoom below the manual floor (macro
         // texture inspection); let the wheel back out of it continuously
@@ -803,7 +809,44 @@ export function usePlayerCameraRig() {
     }
     const pivotY = cameraProfile?.pivotY ?? 1.22;
     const statusPivot = scratch.statusPivot.copy(cameraAnchor).add(scratch.panVertical.set(0, pivotY, 0)).add(panOffsetRef.current);
-    if (examineOrbitActive(examineSession)) {
+    if (labelWritingOpen(examineSession)) {
+      // He turns to the subject once, when he raises the card, and holds it
+      // there; the frame stays behind after he lowers it so the card and
+      // pencil can drop out of view from where they were.
+      const labelKey = `${examineSession.actorId}:${examineSession.openedAt || 0}`;
+      if (labelFacingRef.current.key !== labelKey) {
+        const focus = cameraFocusPoint(examineSession.focus);
+        labelFacingRef.current.key = labelKey;
+        labelFacingRef.current.facing.set(
+          focus ? focus.x - playerPosition.x : facing?.x || 0,
+          0,
+          focus ? focus.z - playerPosition.z : facing?.z || -1,
+        );
+        if (labelFacingRef.current.facing.lengthSq() < 0.01) {
+          labelFacingRef.current.facing.set(facing?.x || 0, 0, facing?.z || -1);
+        }
+      }
+      labelRig.frame = computeLabelFrame(
+        scratch.labelEye.set(playerPosition.x, playerPosition.y + LABEL.eyeHeight, playerPosition.z),
+        labelFacingRef.current.facing,
+        labelRig.frame || createLabelFrame(),
+      );
+    }
+    const labelFrame = labelWritingOpen(examineSession) ? labelRig.frame : null;
+    if (labelFrame) {
+      // Writing a label: Darwin's own eyes, looking down at the card in his
+      // hand with the subject behind it (examine/labelWriting.js). The frame
+      // is kept up above from his position; the camera only eases onto it,
+      // so the move from the orbit reads as dropping into his view.
+      if (!statusLookRef.current) {
+        statusLookRef.current = camera.position.clone()
+          .add(camera.getWorldDirection(scratch.worldDirection).multiplyScalar(6));
+      }
+      const ease = 1 - Math.exp(-5 * delta);
+      camera.position.lerp(labelFrame.eye, ease);
+      statusLookRef.current.lerp(labelFrame.look, ease);
+      camera.lookAt(statusLookRef.current);
+    } else if (examineOrbitActive(examineSession)) {
       // A live, subject-owned inspection orbit. Runtime pose data is kept out
       // of React so the camera can follow a moving/falling actor without a
       // stale one-time focus snapshot. The framing distance is derived from
@@ -1548,8 +1591,9 @@ export function usePlayerCameraRig() {
       ? CAMERA.isometricFov
       : THREE.MathUtils.lerp(embodiedFov, SHOTGUN.ads.fov, adsBlendRef.current)
       + (sprintBlendRef.current * SPRINT.fovBonus + surgePop + firstPersonFov) * (1 - adsBlendRef.current);
-    if (Math.abs(camera.fov - targetFov) > 0.02) {
-      camera.fov = targetFov;
+    const fovTarget = labelWritingOpen(examineSession) ? LABEL.fov : targetFov;
+    if (Math.abs(camera.fov - fovTarget) > 0.02) {
+      camera.fov = fovTarget;
       camera.updateProjectionMatrix();
     }
     if (aiming) {

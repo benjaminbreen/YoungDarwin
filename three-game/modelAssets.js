@@ -284,9 +284,8 @@ export const modelAssets = {
       maxElevation: 1.5,
       // Hand clearance from the live body outline: the outermost non-arm
       // vertex per (side, forward, height) cell around hand height is picked
-      // from the bind pose and re-skinned each frame, because the satchel is
-      // skinned to the right thigh and the coat skirts to both, so the outline
-      // moves with the stride. Wrist and fingertip stay `clearanceMargin`
+      // from the bind pose and re-skinned each frame as the satchel and coat
+      // move. Wrist and fingertip stay `clearanceMargin`
       // outside the widest sample within the window around them.
       chestBone: 'mixamorig:Spine2',
       clearanceMargin: 0.045,
@@ -322,6 +321,10 @@ export const modelAssets = {
         { bone: 'mixamorig:RightHandIndex3', axis: [1, 0, 0], angle: 0.25 },
         { bone: 'mixamorig:RightHandThumb1', axis: [1, 0, 0], angle: 0.12 },
       ],
+    },
+    secondaryClothingMotion: {
+      material: 'Materialmat',
+      vertexCounts: [100557, 100558],
     },
     secondaryHairMotion: {
       positiveName: 'HairSwayPositive',
@@ -445,6 +448,64 @@ export const modelAssets = {
     materialUpgrade: { rimIntensity: 0.02, rimPower: 5.0, envMapIntensity: 0.2 },
     targetTriangles: 15000,
     prompt: 'Stylized low-poly Nicolás Lawson, Vice-Governor of the Galápagos 1835, heavy-set weathered Norwegian-born administrator in an unbuttoned dark navy officer’s frock coat over cream waistcoat, no hat, strict T-pose, historically grounded, readable silhouette, hand-painted texture, cel-shaded game asset, clean topology, GLB.',
+  },
+  // Ben's Tripo character mesh, skinned and animated locally in Blender.
+  fitzroy: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-robert-fitzroy.glb',
+    cacheKey: 'fitzroy-blender-idle-1k',
+    scale: 1,
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.1,
+    materialEmissive: '#201b16',
+    materialEmissiveIntensity: 0.24,
+    targetTriangles: 15000,
+  },
+  // Existing Tripo characters with locally authored rigs and motion.
+  maria: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-maria.glb',
+    cacheKey: 'maria-island-motion-1k',
+    scale: 1,
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.06,
+    targetTriangles: 10000,
+  },
+  gabriel: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-gabriel.glb',
+    cacheKey: 'gabriel-island-motion-1k',
+    scale: 1,
+    yOffset: 0,
+    normalizeMaterials: true,
+    materialLift: 0.07,
+    targetTriangles: 6000,
+  },
+  // Existing Tripo meshes with costume edits, fitted rigs and props made in Blender.
+  wellBoy: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-well-boy.glb',
+    cacheKey: 'well-boy-local-motion-v1',
+    scale: 1,
+    normalizeMaterials: true,
+    materialLift: 0.055,
+    targetTriangles: 6000,
+  },
+  stokes: {
+    enabled: true,
+    preload: false,
+    path: '/assets/models/npc-john-lort-stokes.glb',
+    cacheKey: 'stokes-local-motion-v1',
+    scale: 1,
+    normalizeMaterials: true,
+    materialLift: 0.055,
+    targetTriangles: 19000,
   },
   crab: {
     enabled: true,
@@ -839,7 +900,7 @@ export const modelAssets = {
     cacheKey: 'hermit-crab-fbx-runtime-20260703',
     scale: 0.42,
     rotation: [0, 0, 0],
-    yOffset: 0.02,
+    yOffset: 0,
     normalizeMaterials: true,
     materialLift: 0.03,
     materialEmissive: '#1d110b',

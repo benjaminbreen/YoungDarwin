@@ -551,7 +551,10 @@ function listNearbyTargets({ radius = 20, limit = 25, kinds = null } = {}) {
     });
   }
   for (const [npcId, pose] of getNpcPoses(zoneId) || []) {
-    push({ category: 'npc', id: npcId, kind: 'npc', x: pose.x, z: pose.z, radius: 0.45 });
+    push({
+      category: 'npc', id: npcId, kind: 'npc', x: pose.x, z: pose.z, radius: 0.45,
+      activity: pose.activity, encounterEnabled: pose.encounterEnabled,
+    });
   }
   items.sort((a, b) => a.distance - b.distance);
   return { origin: { x: round2(origin.x), y: round2(origin.y), z: round2(origin.z) }, zoneId, items: items.slice(0, limit) };

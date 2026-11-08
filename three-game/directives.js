@@ -17,12 +17,7 @@
 //            expanded, so it can run to two sentences. Plain statements; do
 //            not restate the hint.
 
-// Words the final assessment already scores as intellectual honesty
-// (see noteRigor in finalAssessment.js). Reused here so "record something you
-// could not settle" is satisfied by exactly what the ending rewards.
 import { comparableLandingCount } from './examine/populationTraits';
-
-const HEDGE_PATTERN = /\b(perhaps|possibly|probably|appears?|seems?|uncertain|unclear|cannot determine|may be|might be|not sure)\b/i;
 
 function playerNotes(state) {
   return (state.journal || []).filter(entry => entry?.authorship === 'player');
@@ -93,28 +88,28 @@ export const DIRECTIVES = [
     id: 'examine',
     text: 'Examine something closely',
     hint: 'Approach a specimen with bare hands and press Enter.',
-    detail: 'Examining is what puts an animal in your record, and the written note is what Henslow weighs at the end. A specimen taken unexamined fills the case but says nothing.',
+    detail: 'Examining adds an animal to your record. Henslow reads your written notes in the assessment at the end.',
     isDone: state => (state.examinedTypeIds || []).length >= 1,
   },
   {
     id: 'collect',
     text: 'Collect your first specimen',
     hint: 'Equip a tool and press E, or collect from the examine view.',
-    detail: 'A collected specimen goes back to England for other naturalists to study. It is also dead and gone from the island. The case holds very little, so choose what is worth taking.',
+    detail: 'Collected specimens are shipped to England. Collecting removes the animal from the island, and the field case only holds a few.',
     isDone: state => (state.collectedSpecimenIds || []).length >= 1,
   },
   {
     id: 'syms',
     text: 'Speak with Syms Covington',
     hint: 'Your assistant is somewhere near the landing.',
-    detail: 'Covington shoots and skins faster than you do. Most of what reaches England will have passed through his hands.',
+    detail: 'Covington is your assistant. He shoots and skins specimens for the collection.',
     isDone: state => ((state.npcEncounterState || {}).syms_covington?.flags || []).length > 0,
   },
   {
     id: 'travel',
     text: 'Travel inland to another region',
     hint: 'Walk to the edge of the map, or use the island chart.',
-    detail: 'One landing tells you what lives at one landing. The highlands, the lava flats, and the shore hold different animals.',
+    detail: 'The highlands, the lava flats and the shore each have different animals.',
     isDone: state => (state.visitedZoneIds || []).length >= 2,
   },
   {
@@ -128,23 +123,23 @@ export const DIRECTIVES = [
   // comparisons the expedition is actually for.
   {
     id: 'write-up',
-    text: 'Write up a specimen in your own words',
-    hint: 'A note of your own carries more weight than a record entry.',
-    detail: 'The automatic record entry shows you were there. A description in your own words shows what you saw, and it is the part of the journal the final assessment reads.',
+    text: 'Write a label for a specimen',
+    hint: 'Write a label when you catch or examine something.',
+    detail: 'The final assessment reads the notes you write, not the automatic record entries.',
     isDone: state => playerNotes(state).some(entry => entry.specimenId),
   },
   {
     id: 'watch-habits',
     text: 'Watch two animals deal with one another',
-    hint: 'Keep still near animals and watch: a display, a chase, finches at a tortoise. The journal\'s Behaviour tab keeps what you saw.',
-    detail: 'A specimen in the case tells you what an animal is; watching it tells you how it lives. Stand still where animals are about, keep them in view, and let them get on with it. What they do to each other is the part a skin cannot show.',
+    hint: 'Keep still near animals and watch: a display, a chase, finches at a tortoise.',
+    detail: 'Stand still near animals and keep them in view. What you see is logged in the journal\'s Behaviour tab.',
     isDone: state => (state.fieldObservations || []).some(record => record.partnerSpeciesId && record.partnerSpeciesId !== 'darwin'),
   },
   {
     id: 'two-landings',
     text: 'Record the same creature at two different landings',
     hint: 'Measure it in the examine view at each place; the journal\'s Measures tab sets the landings side by side.',
-    detail: 'You need the same animal recorded in two places before you can compare them, and more than one of them at each place before a difference means anything. That comparison is what the survey is for.',
+    detail: 'Record the same species at two landings, more than one at each, to compare them side by side.',
     isDone: state => {
       for (const specimenId of new Set((state.fieldMeasurements || []).map(record => record.specimenId))) {
         if (comparableLandingCount(state.fieldMeasurements, specimenId, 1) >= 2) return true;
@@ -157,13 +152,6 @@ export const DIRECTIVES = [
       for (const zones of bySpecies.values()) if (zones.size >= 2) return true;
       return false;
     },
-  },
-  {
-    id: 'uncertain',
-    text: 'Record one thing you could not settle',
-    hint: 'An honest uncertainty is worth more than a confident error.',
-    detail: 'Write down what you could not work out, and say so in the note: perhaps, appears, unclear. The assessment counts a hedge you can defend for more than a guess stated as fact.',
-    isDone: state => playerNotes(state).some(entry => HEDGE_PATTERN.test(String(entry.content || ''))),
   },
 ];
 

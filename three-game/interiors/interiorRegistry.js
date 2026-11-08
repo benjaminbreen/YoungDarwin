@@ -22,7 +22,7 @@ const INTERIORS = {
       ecology: false,
       landmarks: false,
       specimens: false,
-      npcs: false,
+      npcs: true,
     },
     narrationTriggers: [
       {

@@ -55,6 +55,53 @@ export function playPageTurn() {
   playInterfaceCue('pageTurn', { gain: vary(0.06, 0.12), playbackRate: vary(1, 0.05) });
 }
 
+// A pencil on a label card. The pencil samples are whole scribbles (about
+// 0.6 s of sound in each slot), so the card plays short pieces of them: one
+// quick stroke per keystroke, and while drawing, back-to-back pieces whose
+// loudness follows how fast the pencil moves. Overlapping whole scribbles
+// would smear into a hiss.
+const PENCIL_SOUND_SPAN = 0.55;
+let lastPencilStrokeAt = 0;
+
+export function playPencilStroke() {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (now - lastPencilStrokeAt < 55) return;
+  lastPencilStrokeAt = now;
+  playInterfaceCue('pencil', {
+    gain: vary(0.05, 0.3),
+    playbackRate: vary(1.08, 0.08),
+    offset: 0.04 + Math.random() * (PENCIL_SOUND_SPAN - 0.14),
+    duration: vary(0.075, 0.25),
+  });
+}
+
+let lastPencilDrawAt = 0;
+let pencilDrawDistance = 0;
+
+// `distance` is how far the point moved since the last call, in card pixels
+// (the card is 1200 wide).
+export function playPencilDraw(distance) {
+  pencilDrawDistance += distance;
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  if (now - lastPencilDrawAt < 120 || pencilDrawDistance < 6) return;
+  const elapsed = Math.min(0.3, (now - lastPencilDrawAt) / 1000);
+  const speed = pencilDrawDistance / Math.max(0.05, elapsed);
+  lastPencilDrawAt = now;
+  pencilDrawDistance = 0;
+  const pressure = Math.min(1, speed / 900);
+  playInterfaceCue('pencil', {
+    gain: 0.02 + pressure * 0.045,
+    playbackRate: vary(0.95 + pressure * 0.15, 0.05),
+    offset: 0.04 + Math.random() * (PENCIL_SOUND_SPAN - 0.2),
+    duration: 0.15,
+  });
+}
+
+// India rubber taking back a stroke: a brief soft brush of paper.
+export function playRubOut() {
+  playInterfaceCue('paperOpen', { gain: vary(0.03, 0.15), playbackRate: 0.9, offset: 0.03, duration: 0.16 });
+}
+
 // Journal entries written in Darwin's hand. Collection and documentation
 // records already carry the field-note and container sounds in the world;
 // these are the ones the player writes or that are fair-copied aboard.

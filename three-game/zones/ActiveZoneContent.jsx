@@ -26,6 +26,7 @@ import { PostOfficeWhalersRest } from '../components/scene/PostOfficeWhalersRest
 import { WaterSplashes } from '../physics/props/WaterSplash';
 import { SymsCovington } from '../components/world/SymsCovington';
 import { StationaryNpcs } from '../components/world/StationaryNpc';
+import { IslandNpcActors } from '../components/world/IslandNpcActors';
 import { AnimalModeDarwinNpc } from '../components/world/AnimalModeDarwinNpc';
 import { getThreeSpecimens } from '../data';
 import { PhysicsObstacles } from '../physics/PhysicsObstacles';
@@ -136,6 +137,16 @@ export function ActiveZoneContent({
         )}
         {/* Papers to read: the letters, maps and broadsides of an interior. */}
         {interactablesReady && <ExaminableItems />}
+        {actorsReady && settings.syms !== false && (
+          <Suspense fallback={null}>
+            <IslandNpcActors zoneId={currentZoneId} motionPaused={actorMotionPaused} />
+          </Suspense>
+        )}
+        {actorsReady && interior.scene?.npcs && settings.syms !== false && (
+          <Suspense fallback={null}>
+            <StationaryNpcs />
+          </Suspense>
+        )}
       </>
     );
   }
@@ -203,6 +214,7 @@ export function ActiveZoneContent({
       {actorsReady && settings.syms !== false && (
         <Suspense fallback={null}>
           <StationaryNpcs />
+          <IslandNpcActors zoneId={currentZoneId} motionPaused={actorMotionPaused} />
         </Suspense>
       )}
       {actorsReady && settings.npcDarwin !== false && (

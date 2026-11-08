@@ -10,16 +10,18 @@ import {
 import { SYMS_DIRECTIVES, normalizeSymsDirective } from '../npcs/symsActivityPlan';
 import {
   clampNpcEncounterEffects,
+  createNpcEncounterSession,
   encounterAmbientLine,
   getAuthoredNpcReply,
   getNpcEncounter,
-  getNpcEncounterPresentation,
 } from '../encounters/npcEncounters';
 import { fetchWithTimeout, narratorSessionId } from './shared';
 import { generativeRequestsAllowed } from '../ai/generativePolicy';
 import { getThreeIslandLocation } from '../data';
 import { getZone } from '../world/floreanaZones';
 import { symsZoneAfterDirective } from '../npcs/symsCompanion';
+import { getNpcPoses } from '../world/npcRuntime';
+import { getIslandNpcGuide } from '../npcs/islandNpcSchedule';
 
 export const createNpcActions = (set, get) => ({
   setNearbyNpcEncounter: nearbyNpcEncounter => set(state => (
@@ -28,7 +30,8 @@ export const createNpcActions = (set, get) => ({
       ? state
       : { nearbyNpcEncounter }
   )),
-  recordNpcActivity: (npcId, event = 'nearby') => set(state => {
+  recordNpcActivity: (npcId, event = 'nearby', effects = null) => set(state => {
+    if (event === 'nearby' && state.activeNpcEncounter?.recovery && state.activeNpcEncounter.npcId === npcId) return {};
     const encounter = getNpcEncounter(npcId);
     const relation = state.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
     const line = encounterAmbientLine(npcId, event, relation);
@@ -37,6 +40,7 @@ export const createNpcActions = (set, get) => ({
     const nowMinutes = gameClockMinutes(state);
     const lastSeen = state.narratorScriptedKeys?.[key];
     if (Number.isFinite(lastSeen) && nowMinutes - lastSeen < SCRIPTED_NARRATION_COOLDOWN_MINUTES) return {};
+    const { trustDelta, flags } = clampNpcEncounterEffects(npcId, effects || {});
     return {
       narratorLog: appendNarratorEvents(state.narratorLog, createNarratorEvent({
         kind: 'npcActivity',
@@ -48,6 +52,15 @@ export const createNpcActions = (set, get) => ({
         meta: { npcId, event },
       })),
       narratorScriptedKeys: { ...state.narratorScriptedKeys, [key]: nowMinutes },
+      ...(trustDelta || flags.length ? {
+        npcEncounterState: {
+          ...state.npcEncounterState,
+          [npcId]: {
+            trust: Math.max(0, Math.min(100, relation.trust + trustDelta)),
+            flags: [...new Set([...relation.flags, ...flags])],
+          },
+        },
+      } : {}),
     };
   }),
   setSymsDirective: value => set(state => {
@@ -93,22 +106,31 @@ export const createNpcActions = (set, get) => ({
   openNpcEncounter: npcId => set(state => {
     const encounter = getNpcEncounter(npcId);
     if (!encounter) return {};
-    const relation = state.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
-    const presentation = getNpcEncounterPresentation(npcId, relation) || encounter;
+    const pose = getNpcPoses(state.currentZoneId)?.get(encounter.runtimeNpcId);
+    if (encounter.roaming && !pose?.encounterEnabled) return {};
+    const session = createNpcEncounterSession(npcId, state.npcEncounterState?.[npcId], {
+      zoneId: state.currentZoneId, activity: pose?.activity,
+    });
+    if (!session) return {};
     return {
-      activeNpcEncounter: {
-        npcId,
-        openedAt: Date.now(),
-        turns: [{ role: 'npc', text: presentation.opener }],
-        suggestedReplies: presentation.suggestedReplies,
-        trust: relation.trust,
-        flags: relation.flags || [],
-      },
+      activeNpcEncounter: session,
       npcEncounterPending: false,
       npcEncounterError: null,
     };
   }),
-  closeNpcEncounter: () => set({ activeNpcEncounter: null, npcEncounterPending: false, npcEncounterError: null }),
+  closeNpcEncounter: ({ followGuide = false } = {}) => set(state => {
+    const session = state.activeNpcEncounter;
+    const guideId = session?.guideId;
+    const zoneId = state.currentZoneId;
+    const guide = followGuide && guideId && getIslandNpcGuide(guideId, session.npcId, zoneId);
+    return {
+      activeNpcEncounter: null,
+      npcEncounterPending: false,
+      npcEncounterError: null,
+      ...(guide ? { npcGuideRequest: { id: guideId, npcId: session.npcId, zoneId } } : {}),
+    };
+  }),
+  consumeNpcGuide: request => set(state => state.npcGuideRequest === request ? { npcGuideRequest: null } : state),
   submitNpcEncounter: async input => {
     const playerInput = String(input || '').trim();
     const state = get();
@@ -130,11 +152,14 @@ export const createNpcActions = (set, get) => ({
     }));
     const requestState = get();
     // One player turn has one request identity. Do not derive this from the
-    // reply text: repeated questions are valid new turns with new trust effects.
+    // reply text: repeated questions are valid new turns.
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     const idempotencyKey = [requestState.seed || 'three', npcId, 'encounter-turn', turnId].join(':');
-    if (!generativeRequestsAllowed()) {
+    if (encounter.authoredOnly || !generativeRequestsAllowed()) {
       const data = getAuthoredNpcReply(npcId, playerInput, {
+        zoneId: requestState.currentZoneId,
+        activity: active.activity,
+        flags: active.flags,
         specimenCount: new Set([
           ...(requestState.collectedSpecimenIds || []),
           ...(requestState.documentedSpecimenIds || []),
@@ -148,14 +173,18 @@ export const createNpcActions = (set, get) => ({
       set(current => {
         if (current.activeNpcEncounter?.npcId !== npcId) return { npcEncounterPending: false };
         const previous = current.npcEncounterState?.[npcId] || { trust: 50, flags: [] };
-        const nextTrust = Math.max(0, Math.min(100, previous.trust + trustDelta));
+        const hasNewFlag = flags.some(flag => !previous.flags?.includes(flag));
+        const repeatedFavor = encounter.roaming && trustDelta > 0 && flags.length > 0 && !hasNewFlag;
+        const nextTrust = Math.max(0, Math.min(100, previous.trust + (repeatedFavor ? 0 : trustDelta)));
         const nextFlags = [...new Set([...(previous.flags || []), ...flags])];
+        const guide = data.guideId && getIslandNpcGuide(data.guideId, npcId, current.currentZoneId);
         return {
           activeNpcEncounter: {
             ...current.activeNpcEncounter,
             turns: [...(current.activeNpcEncounter.turns || []), { role: 'npc', text: data.dialogue }].slice(-8),
             trust: nextTrust,
             flags: nextFlags,
+            ...(guide ? { guideId: data.guideId } : {}),
           },
           npcEncounterState: {
             ...current.npcEncounterState,

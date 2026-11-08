@@ -295,6 +295,7 @@ export const useThreeGameStore = create((set, get) => ({
       examineSession: null,
       readableBookSession: null,
       activeNpcEncounter: null,
+      npcGuideRequest: null,
       beagleTravelPrompt: null,
       transition: null,
       edgePrompt: null,
@@ -440,6 +441,7 @@ export const useThreeGameStore = create((set, get) => ({
       nearbySpecimenId: null,
       nearbyNpcEncounter: null,
       activeNpcEncounter: null,
+      npcGuideRequest: null,
       carryPrompt: null,
       fieldAction: null,
       observationMode: false,
@@ -1114,7 +1116,7 @@ export const useThreeGameStore = create((set, get) => ({
 
   beginIncapacitationRecovery: () => {
     const state = get();
-    if (state.expeditionOutcome?.type !== 'incapacitated') return;
+    if (state.expeditionOutcome?.type !== 'incapacitated' || state.expeditionOutcome.phase === 'recovering') return;
     const minutes = minutesUntilRecoveryMorning(state.timeOfDay);
     set(current => ({
       expeditionOutcome: current.expeditionOutcome
@@ -1435,7 +1437,7 @@ export const useThreeGameStore = create((set, get) => ({
 
   ...createNarratorActions(set, get),
 
-  collectNearby: async (targetSpecimenId = null, { assured = false } = {}) => {
+  collectNearby: async (targetSpecimenId = null, { assured = false, labelAfter } = {}) => {
     const state = get();
     const specimenId = targetSpecimenId || state.nearbySpecimenId || state.selectedSpecimenId;
     const zoneSpecimens = getThreeSpecimens(state.currentZoneId);
@@ -1538,6 +1540,7 @@ export const useThreeGameStore = create((set, get) => ({
           result,
           documented,
           actorId,
+          labelAfter,
           location: islandLocation,
           caseEntry: { sourceZoneId: current.currentZoneId, sourceZoneName: islandLocation.name },
           narrationSource: documented ? 'documentation' : 'collection',

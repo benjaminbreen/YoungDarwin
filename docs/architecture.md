@@ -102,6 +102,15 @@ working on existing legacy Post Office Bay detail or deliberately migrating it.
 Movement height should usually be smoother than render height. Keep analytic JS
 terrain masks aligned with matching GLSL material math.
 
+María, Gabriel, Stokes, and the boy have daily circuits in `three-game/npcs/islandNpcSchedule.js`.
+The expedition clock locates them even while Darwin is in another zone.
+`IslandNpcActors.jsx` handles visible movement on terrain and cave paths,
+and uses `islandNpcReactions.js` to decide whether they continue, stop,
+approach, or run. Nearby witnesses, Darwin’s approach, and weather can change
+what they do. Authored replies can offer a short guided walk in the current
+zone. Guides wait for Darwin and go back to their routine if he leaves.
+Social consequences use the same saved trust and flags as stationary encounters.
+
 ## Player, Camera, And Animation
 
 Core player files:

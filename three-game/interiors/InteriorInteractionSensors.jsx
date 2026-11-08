@@ -18,6 +18,7 @@ export function InteriorInteractionSensors({ zoneId }) {
   }, [setInteriorPrompt, zoneId]);
 
   useEffect(() => {
+    if (useThreeGameStore.getState().activeNpcEncounter?.recovery) return undefined;
     const arrival = getInteriorNarrationTriggers(zoneId).find(trigger => trigger.mode === 'arrival');
     if (!arrival?.text) return undefined;
     const key = `${zoneId}:${arrival.id}`;

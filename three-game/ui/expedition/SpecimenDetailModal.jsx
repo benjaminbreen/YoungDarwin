@@ -302,6 +302,34 @@ function SketchesTab({ specimen }) {
   );
 }
 
+// A drawing made on a label card (examine/labelWriting.js), kept as compact
+// strokes on a 300 x 200 grid, shown as a small pencil sketch on paper.
+function LabelSketchThumb({ sketch }) {
+  if (!Array.isArray(sketch) || !sketch.length) return null;
+  return (
+    <svg
+      viewBox="0 0 300 200"
+      role="img"
+      aria-label="Pencil sketch from the label"
+      className="mt-2.5 block w-[min(240px,100%)] rounded-[2px] bg-[#eadcb8] shadow-[inset_0_0_18px_rgba(96,70,34,0.28)]"
+    >
+      {sketch.map((stroke, index) => (stroke.length <= 2
+        ? <circle key={index} cx={stroke[0]} cy={stroke[1]} r="1.2" fill="rgba(38,35,33,0.85)" />
+        : (
+          <polyline
+            key={index}
+            points={stroke.join(' ')}
+            fill="none"
+            stroke="rgba(38,35,33,0.85)"
+            strokeWidth="1.15"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )))}
+    </svg>
+  );
+}
+
 function NotesTab({ specimen, entries }) {
   return (
     <div className="grid content-start gap-2.5">
@@ -312,6 +340,7 @@ function NotesTab({ specimen, entries }) {
             <span className="font-expedition text-[12px] text-expedition-faded">{entry.location}</span>
           </div>
           <p className="font-expedition text-[14.5px] italic leading-relaxed text-expedition-parchment/95">{entry.content}</p>
+          <LabelSketchThumb sketch={entry.sketch} />
         </div>
       )) : (
         <p className="py-8 text-center font-expedition text-[14px] italic text-expedition-faded">

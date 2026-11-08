@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { setTypingMode } from '../input/typingMode';
 import { useThreeGameStore } from '../store';
 import { getZone } from '../world/floreanaZones';
 import { expeditionDateForDay } from '../expeditionOutcomes';
 import { useDismissableOverlay } from './useDismissableOverlay';
+import { LabelWritingPanel } from './LabelWritingPanel';
+import { labelDraft, labelSketch } from '../examine/labelWriting';
 import styles from './ExamineView.module.css';
 import { PLAYER_VISIBLE_GENERATIVE_ENABLED } from '../ai/generativePolicy';
 import { MemoryLinkedText } from '../library/MemoryLinkedText';
@@ -242,7 +244,7 @@ export function ExamineView() {
   const sendExamineMessage = useThreeGameStore(state => state.sendExamineMessage);
   const measureExamineSubject = useThreeGameStore(state => state.measureExamineSubject);
   const saveExamineFact = useThreeGameStore(state => state.saveExamineFact);
-  const saveExamineNote = useThreeGameStore(state => state.saveExamineNote);
+  const setExamineLabelOpen = useThreeGameStore(state => state.setExamineLabelOpen);
   const collectFromExamine = useThreeGameStore(state => state.collectFromExamine);
   const examinedTypeIds = useThreeGameStore(state => state.examinedTypeIds);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -255,13 +257,14 @@ export function ExamineView() {
     && state.collectedSpecimenIds?.includes(state.examineSession.typeId)));
 
   const [question, setQuestion] = useState('');
-  const [note, setNote] = useState('');
+  const note = useSyncExternalStore(labelDraft.subscribe, labelDraft.get, labelDraft.get);
+  const sketchVersion = useSyncExternalStore(labelSketch.subscribe, labelSketch.version, labelSketch.version);
+  const sketched = sketchVersion >= 0 && !labelSketch.empty();
   const [noteSavedFlash, setNoteSavedFlash] = useState(false);
   const [activePanel, setActivePanel] = useState('inquiry');
   const [collecting, setCollecting] = useState(false);
 
   const scrollRef = useRef(null);
-  const noteRef = useRef(null);
   const noteFlashTimerRef = useRef(null);
   const strikeTimerRef = useRef(null);
 
@@ -293,7 +296,7 @@ export function ExamineView() {
   };
   const subjectName = casualName(session);
   const collectButton = !plan
-    ? { label: session?.collectVerb, hint: 'Press C to collect. A written note deepens the record.' }
+    ? { label: session?.collectVerb, hint: 'Press C to collect.' }
     : plan.kind === 'wrongTool'
       ? { label: `Take up the ${toolDisplayName(plan.bestToolId)}${slot(plan.bestToolId)}`, hint: plan.advice }
       : plan.kind === 'net'
@@ -304,13 +307,14 @@ export function ExamineView() {
             ? { label: 'Close and shoot', hint: 'Hold F or the right mouse button to aim, then fire. Pick it up afterwards.' }
             : plan.kind === 'document'
               ? { label: 'Document', hint: 'Press C to record it without taking it.' }
-              : { label: session?.collectVerb, hint: 'Press C to collect. A written note deepens the record.' };
+              : { label: session?.collectVerb, hint: 'Press C to collect.' };
 
   useEffect(() => {
     if (!open) {
       setTypingMode(false);
       setQuestion('');
-      setNote('');
+      labelDraft.set('');
+      labelSketch.clear();
       setNoteSavedFlash(false);
       setActivePanel('inquiry');
       setCollecting(false);
@@ -389,17 +393,14 @@ export function ExamineView() {
     }
   }, [measureExamineSubject, sendExamineMessage, session]);
 
-  const submitNote = useCallback(() => {
-    const trimmed = note.trim();
-    if (!trimmed) return;
-    if (saveExamineNote(trimmed)) {
-      setNote('');
-      setNoteSavedFlash(true);
-      window.clearTimeout(noteFlashTimerRef.current);
-      noteFlashTimerRef.current = window.setTimeout(() => setNoteSavedFlash(false), 2800);
-      noteRef.current?.blur();
-    }
-  }, [note, saveExamineNote]);
+  // The note is written on a label in Darwin's hand (LabelWritingPanel);
+  // coming back from a recorded one flashes the notebook's state line.
+  const onLabelRecorded = useCallback(() => {
+    setNoteSavedFlash(true);
+    window.clearTimeout(noteFlashTimerRef.current);
+    noteFlashTimerRef.current = window.setTimeout(() => setNoteSavedFlash(false), 2800);
+  }, []);
+  const openLabel = useCallback(() => setExamineLabelOpen(true), [setExamineLabelOpen]);
 
   const confirmCollection = useCallback(async () => {
     if (!collectReady || collecting) return;
@@ -451,6 +452,7 @@ export function ExamineView() {
   ), [session?.facts]);
 
   if (!open) return null;
+  if (session.labelOpen) return <LabelWritingPanel onRecorded={onLabelRecorded} />;
 
   const headerSubtitle = [zone?.name, session.subtitle, expeditionDate(session.day)].filter(Boolean);
   const identityLabel = session.kind === 'item'
@@ -460,9 +462,9 @@ export function ExamineView() {
     ? 'Recorded in field book'
     : examined
       ? 'Observation complete'
-      : note.trim()
+      : note.trim() || sketched
         ? 'Ready to record'
-        : 'Write in your own words';
+        : 'Write a label';
 
   return (
     <div
@@ -620,7 +622,7 @@ export function ExamineView() {
                 </div>
 
                 {PLAYER_VISIBLE_GENERATIVE_ENABLED && <div className="mt-4">
-                  <MicroLabel>Ask in your own words</MicroLabel>
+                  <MicroLabel>Ask a question</MicroLabel>
                   <form
                     className="mt-2 grid grid-cols-[minmax(0,1fr)_52px] border border-expedition-brass/70 bg-black/40 transition focus-within:border-expedition-goldbright focus-within:shadow-[0_0_0_3px_rgba(191,152,81,0.12)]"
                     onSubmit={event => {
@@ -657,7 +659,7 @@ export function ExamineView() {
                   <MicroLabel>Working description</MicroLabel>
                   <h2 className="mb-1 mt-2 text-[21px] font-normal leading-tight text-[#f1e4c7] lg:text-[23px]">{session.name}</h2>
                   <p className="m-0 text-[14px] leading-relaxed text-expedition-faded lg:text-[15px]">
-                    {examined ? 'Recorded from your authored field observation.' : 'Evidence remains provisional until you record an observation.'}
+                    {examined ? 'From your field notes.' : 'Provisional until you write a label.'}
                   </p>
                 </div>
                 <span className={`shrink-0 border px-2 py-1.5 font-sans text-[10px] font-semibold uppercase tracking-[0.1em] ${examined ? 'border-[#9db485]/40 text-[#9db485]' : 'border-expedition-brass/35 text-expedition-goldbright'}`}>
@@ -679,7 +681,7 @@ export function ExamineView() {
 
               {session.uncertainties.length > 0 && (
                 <div className="mt-5 border border-expedition-brass/25 bg-[linear-gradient(135deg,rgba(191,152,81,0.055),transparent)] p-3.5">
-                  <MicroLabel>What remains uncertain</MicroLabel>
+                  <MicroLabel>Open questions</MicroLabel>
                   <ul className="mt-2.5 grid list-none gap-2 p-0">
                     {session.uncertainties.map(item => (
                       <li key={item} className="relative pl-4 text-[14px] italic leading-relaxed text-expedition-parchment/75 before:absolute before:left-0 before:top-0 before:font-sans before:text-[11px] before:font-semibold before:not-italic before:text-expedition-gold before:content-['?'] lg:text-[15px]">
@@ -705,26 +707,30 @@ export function ExamineView() {
             </span>
           </div>
 
-          <textarea
-            ref={noteRef}
-            value={note}
-            onChange={event => setNote(event.target.value)}
-            onFocus={() => setTypingMode(true)}
-            onBlur={() => setTypingMode(false)}
-            rows={2}
-            placeholder={examined ? 'Add a further observation…' : 'What do you observe? Recording a note completes the examination.'}
-            className={`${styles.noteInput} block max-h-28 min-h-[52px] w-full resize-none border-0 border-b border-expedition-brass/50 bg-transparent px-px pb-2 text-[16px] leading-relaxed text-expedition-parchment outline-none placeholder:italic placeholder:text-expedition-faded/60 lg:min-h-[62px] lg:text-[17px]`}
-          />
+          <button
+            type="button"
+            onClick={openLabel}
+            aria-label={examined ? 'Write a further label' : 'Write a label'}
+            className="block min-h-[52px] w-full cursor-text border-0 border-b border-expedition-brass/50 bg-transparent px-px pb-2 text-left text-[16px] italic leading-relaxed text-expedition-faded/70 transition hover:text-expedition-parchment lg:min-h-[62px] lg:text-[17px]"
+          >
+            {note.trim() || sketched
+              ? (
+                <span className="not-italic text-expedition-parchment/85 [font-family:var(--font-caveat)] text-[20px]">
+                  {note.trim() ? (note.length > 90 ? `${note.slice(0, 90)}…` : note) : 'A sketch'}
+                  {note.trim() && sketched ? ' · with a sketch' : ''}
+                </span>
+              )
+              : examined ? 'Write a further label…' : 'Write a label, or sketch it.'}
+          </button>
 
           <div className="mt-2.5 grid grid-cols-2 gap-2 lg:mt-3">
             <button
               type="button"
-              data-testid="examine-record-note"
-              disabled={!note.trim()}
-              onClick={submitNote}
-              className="min-h-[46px] rounded-[3px] border border-expedition-goldbright/60 bg-[linear-gradient(135deg,rgba(191,152,81,0.22),rgba(191,152,81,0.08))] px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-[#f5e5bd] transition hover:border-expedition-goldbright hover:bg-expedition-gold/20 hover:shadow-[0_0_14px_rgba(227,197,133,0.25)] disabled:cursor-not-allowed disabled:border-expedition-brass/20 disabled:bg-transparent disabled:text-expedition-faded/35 disabled:shadow-none"
+              data-testid="examine-write-label"
+              onClick={openLabel}
+              className="min-h-[46px] rounded-[3px] border border-expedition-goldbright/60 bg-[linear-gradient(135deg,rgba(191,152,81,0.22),rgba(191,152,81,0.08))] px-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-[#f5e5bd] transition hover:border-expedition-goldbright hover:bg-expedition-gold/20 hover:shadow-[0_0_14px_rgba(227,197,133,0.25)]"
             >
-              Record note
+              {note.trim() || sketched ? 'Go on writing' : 'Write label'}
             </button>
             <button
               type="button"

@@ -18,11 +18,11 @@ const SYMS_FIELD_ORDERS = Object.freeze([
 function EncounterTurn({ turn, featured = false }) {
   const isPlayer = turn.role === 'player';
   return (
-    <p className={isPlayer
+    <p className={`whitespace-pre-line ${isPlayer
       ? 'text-expedition-parchment/78 italic'
       : featured
         ? 'font-expedition text-[1.2rem] font-medium leading-[1.37] text-expedition-parchment sm:text-[1.32rem]'
-        : 'text-expedition-parchment'}>
+        : 'text-expedition-parchment'}`}>
       {isPlayer ? `You: ${turn.text}` : <MemoryLinkedText>{turn.text}</MemoryLinkedText>}
     </p>
   );
@@ -30,6 +30,7 @@ function EncounterTurn({ turn, featured = false }) {
 
 export function NpcEncounterModal() {
   const active = useThreeGameStore(state => state.activeNpcEncounter);
+  const inTransit = useThreeGameStore(state => Boolean(state.transition));
   const pending = useThreeGameStore(state => state.npcEncounterPending);
   const error = useThreeGameStore(state => state.npcEncounterError);
   const close = useThreeGameStore(state => state.closeNpcEncounter);
@@ -40,6 +41,9 @@ export function NpcEncounterModal() {
   const inputRef = useRef(null);
   const transcriptRef = useRef(null);
   const encounter = getNpcEncounter(active?.npcId);
+  const recovery = active?.recovery === true;
+  const visible = Boolean(active && (!recovery || !inTransit));
+  const freeText = PLAYER_VISIBLE_GENERATIVE_ENABLED && !encounter?.authoredOnly;
 
   // A reply in flight holds the conversation open: Escape must not abandon a
   // turn the NPC is already answering.
@@ -48,24 +52,24 @@ export function NpcEncounterModal() {
   }, [close, pending]);
   // The reply field takes focus on its own short delay (after the panel's
   // entrance), so the hook's immediate autoFocus would only fight it.
-  const panelRef = useDismissableOverlay(Boolean(active), dismiss, { autoFocus: false });
+  const panelRef = useDismissableOverlay(visible, dismiss, { autoFocus: !freeText });
 
   useEffect(() => {
-    if (!active) return undefined;
-    const timer = PLAYER_VISIBLE_GENERATIVE_ENABLED
+    if (!visible) return undefined;
+    const timer = freeText
       ? window.setTimeout(() => inputRef.current?.focus(), 170)
       : null;
     return () => {
       if (timer) window.clearTimeout(timer);
       setTypingMode(false);
     };
-  }, [active]);
+  }, [freeText, visible]);
 
   useEffect(() => {
     if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
   }, [active?.turns, pending]);
 
-  if (!active || !encounter) return null;
+  if (!visible || !encounter) return null;
   const turns = active.turns || [];
   const visibleTurns = turns.slice(-5);
   const submitReply = value => {
@@ -76,16 +80,18 @@ export function NpcEncounterModal() {
   };
 
   return (
-    <div className="pointer-events-auto fixed inset-0 z-40 flex items-end bg-black/45 px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-16 backdrop-blur-[2px] sm:px-6 sm:pb-8">
+    <div className={`pointer-events-auto fixed inset-0 z-40 flex items-end px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-16 sm:px-6 sm:pb-8 ${recovery ? '' : 'bg-black/45 backdrop-blur-[2px]'}`}>
       <section
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`Conversation with ${encounter.name || 'NPC'}`}
         tabIndex={-1}
-        className="npc-encounter-panel focus:outline-none relative mx-auto grid w-full max-w-[72.5rem] grid-rows-[auto_minmax(0,1fr)] overflow-visible border border-expedition-brass/55 border-t-[3px] border-t-[#527b77] bg-[#101a27] shadow-[0_28px_76px_rgba(0,0,0,0.66)] sm:grid-cols-[13.25rem_minmax(0,1fr)] sm:grid-rows-1"
+        className={`npc-encounter-panel focus:outline-none relative mx-auto w-full border border-expedition-brass/55 border-t-[3px] border-t-[#527b77] bg-[#101a27] shadow-[0_28px_76px_rgba(0,0,0,0.66)] ${recovery
+          ? 'max-w-2xl'
+          : 'grid max-w-[72.5rem] grid-rows-[auto_minmax(0,1fr)] overflow-visible sm:grid-cols-[13.25rem_minmax(0,1fr)] sm:grid-rows-1'}`}
       >
-        <aside className="relative flex min-h-[5.1rem] items-center border-b border-expedition-brass/25 bg-[#1d3038] px-4 py-3 sm:min-h-[25.5rem] sm:items-end sm:border-b-0 sm:border-r sm:px-5 sm:pb-6">
+        {!recovery && <aside className="relative flex min-h-[5.1rem] items-center border-b border-expedition-brass/25 bg-[#1d3038] px-4 py-3 sm:min-h-[25.5rem] sm:items-end sm:border-b-0 sm:border-r sm:px-5 sm:pb-6">
           <div className="absolute -top-7 left-4 h-[3.8rem] w-[3.8rem] overflow-hidden rounded-full border-[3px] border-[#e7ddc9] bg-[#d9cfb9] shadow-[0_14px_29px_rgba(0,0,0,0.43)] sm:-top-12 sm:left-1/2 sm:h-[11.3rem] sm:w-[8.4rem] sm:-translate-x-1/2 sm:rounded-b-[4.2rem] sm:rounded-t-sm sm:border-[5px]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={encounter.portrait} alt={encounter.name} className="h-full w-full object-cover object-top sepia-[0.22]" />
@@ -93,25 +99,26 @@ export function NpcEncounterModal() {
           <h2 className="ml-[4.6rem] font-expedition text-[1.35rem] font-medium leading-[0.88] text-expedition-parchment sm:ml-0 sm:text-[1.75rem]">
             {encounter.name?.split(' ').map((word, index) => <React.Fragment key={word}>{index > 0 && <br />}{word}</React.Fragment>)}
           </h2>
-        </aside>
+        </aside>}
 
-        <div className="relative flex min-h-0 flex-col px-4 pb-4 pt-5 sm:min-h-[25.5rem] sm:px-8 sm:pb-5 sm:pt-8">
+        <div className={`relative flex min-h-0 flex-col px-4 pb-4 sm:px-8 ${recovery ? 'pt-3' : 'pt-5 sm:min-h-[25.5rem] sm:pb-5 sm:pt-8'}`}>
+          {recovery && <h2 className="mb-2 pr-16 font-expedition text-[1.15rem] text-expedition-gold">{encounter.name}</h2>}
           <button
             type="button"
-            onClick={close}
+            onClick={() => close()}
             disabled={pending}
-            aria-label="Close conversation"
-            className="absolute right-3 top-2 h-8 w-8 text-[1.25rem] leading-none text-expedition-faded transition hover:text-expedition-goldbright disabled:opacity-30 sm:right-5 sm:top-3"
+            aria-label={recovery ? 'Sit up' : 'Close conversation'}
+            className={`absolute right-3 top-2 h-8 leading-none text-expedition-faded transition hover:text-expedition-goldbright disabled:opacity-30 sm:right-5 sm:top-3 ${recovery ? 'px-2 font-expedition' : 'w-8 text-[1.25rem]'}`}
           >
-            ×
+            {recovery ? 'Sit up' : '×'}
           </button>
-          <div ref={transcriptRef} className="min-h-0 flex-1 overflow-y-auto pr-1 sm:pr-3">
-            <div className="max-w-[50rem] space-y-2 pb-5 pr-7 sm:pb-7">
-              {visibleTurns.map((turn, index) => (
+          <div ref={transcriptRef} className={`min-h-0 flex-1 overflow-y-auto pr-1 sm:pr-3 ${recovery ? 'max-h-[26dvh]' : ''}`}>
+            <div className={`max-w-[50rem] space-y-2 ${recovery ? 'pb-2' : 'pb-5 pr-7 sm:pb-7'}`}>
+              {(recovery ? visibleTurns.slice(-1) : visibleTurns).map((turn, index) => (
                 <EncounterTurn
                   key={`${turn.role}-${index}-${turn.text}`}
                   turn={turn}
-                  featured={turn.role === 'npc' && index === visibleTurns.length - 1}
+                  featured={turn.role === 'npc' && (recovery || index === visibleTurns.length - 1)}
                 />
               ))}
               {pending && (
@@ -150,7 +157,7 @@ export function NpcEncounterModal() {
               </div>
             )}
             <div className="grid gap-px">
-              {(active.suggestedReplies || []).slice(0, 2).map((reply, index) => (
+              {(active.suggestedReplies || []).slice(0, 3).map((reply, index) => (
                 <button
                   key={reply}
                   type="button"
@@ -159,12 +166,23 @@ export function NpcEncounterModal() {
                   onClick={() => submitReply(reply)}
                   className="grid min-h-10 grid-cols-[2rem_1fr] items-center border-b border-expedition-brass/20 px-1 text-left font-expedition text-[1rem] text-expedition-parchment transition hover:bg-[#527b77]/15 hover:pl-3 hover:shadow-[-3px_0_0_#A96F54_inset] focus-visible:bg-[#527b77]/15 focus-visible:pl-3 focus-visible:outline-none disabled:opacity-45 sm:text-[1.08rem]"
                 >
-                  <span className="font-serif text-[0.75rem] text-[#a96f54]">{index === 0 ? 'I.' : 'II.'}</span>
-                  <span>{reply}</span>
+                  <span className="font-serif text-[0.75rem] text-[#a96f54]">{['I.', 'II.', 'III.'][index]}</span>
+                  <span className="whitespace-pre-line">{reply}</span>
                 </button>
               ))}
             </div>
-            {PLAYER_VISIBLE_GENERATIVE_ENABLED && <form
+            {active.guideId && (
+              <button
+                type="button"
+                disabled={pending}
+                data-ui-sound="seal"
+                onClick={() => close({ followGuide: true })}
+                className="mt-3 min-h-9 border border-expedition-brass/60 bg-[#527b77]/30 px-4 font-expedition text-expedition-parchment transition hover:bg-[#527b77]/50 focus-visible:ring-2 focus-visible:ring-expedition-gold disabled:opacity-45"
+              >
+                Follow along
+              </button>
+            )}
+            {freeText && <form
               className="relative mt-3"
               onSubmit={event => {
                 event.preventDefault();
