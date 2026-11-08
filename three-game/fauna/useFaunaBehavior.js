@@ -233,6 +233,7 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     specimenId,
   ]);
 
+  const reset = useCallback(next => controller?.reset(next), [controller]);
   return useMemo(() => ({
     active: Boolean(controller && profile),
     profile,
@@ -245,6 +246,6 @@ export function useFaunaBehavior({ specimen, basePositionRef, basePosition, paus
     debugRef,
     statusRef,
     update,
-    reset: next => controller?.reset(next),
-  }), [controller, profile, update]);
+    reset,
+  }), [controller, profile, reset, update]);
 }

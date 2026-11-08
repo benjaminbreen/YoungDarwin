@@ -5,7 +5,9 @@ import { maybeTriggerNetSnagFromSwing } from './fieldDilemmaTriggers';
 import { tryFireShotgun } from '../../shooting/fireShotgun';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
 import { SLING, slingDrawState } from './shotgunSling';
-import { toolTargetDirection } from './toolTargeting';
+import { toolTargetDirection, toolTargetState } from './toolTargeting';
+import { beginHammerContact } from './toolContact';
+import { fieldReachApproach } from './fieldReach';
 import { NET_SWEEP, beginNetSweep, netSweepState } from './netSweep';
 
 // A swing at a marked subject turns Darwin onto it over the wind-up, so the
@@ -110,15 +112,24 @@ export function triggerDirectPlayerActions({
     },
   );
   const hammerBlocked = toolBlocked('hammer', 'hammer');
-  triggerAction('hammer', 'swingHammer', ACTION_DURATION.swingHammer, {
+  triggerAction('hammer', 'swingHammer', stateRef?.current?.modelAssetId === 'darwin5' ? 1.1 : ACTION_DURATION.swingHammer, {
     ...actionOptions,
     movementLocked: movementLocked || hammerBlocked,
     onStart: () => {
+      const swingFacing = aimToolSwing('hammer', group, facing, stateRef);
+      const now = performance.now() / 1000;
+      const point = toolTargetState.valid && toolTargetState.toolId === 'hammer'
+        ? toolTargetState.contactPoint : null;
+      beginHammerContact(now, point);
+      if (stateRef?.current?.modelAssetId === 'darwin5' && point) {
+        const approach = fieldReachApproach(group.current.position, point, 0.55, 0.42);
+        stateRef.current.reachApproach = approach ? { ...approach, startedAt: now, clip: 'swingHammer' } : null;
+      }
       emitPropEvent('tool-swing', {
         tool: 'hammer',
         swingId: nextSwingId(),
         position: { x: group.current.position.x, y: group.current.position.y, z: group.current.position.z },
-        facing: aimToolSwing('hammer', group, facing, stateRef),
+        facing: swingFacing,
         impactDelay: 0.55,
       });
     },

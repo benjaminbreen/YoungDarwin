@@ -24,7 +24,11 @@ import {
   darwin5TransitionFade,
 } from '../player/darwin5AnimationManifest.mjs';
 import { createFootContactRig } from '../player/footContactRig';
-import { getFootContactProfile } from '../player/gaitProfiles';
+import { createPlayerTurnRig } from '../player/playerTurnMotion';
+import { createFieldReachRig } from '../player/fieldReachRig';
+import { createRockScrambleRig } from '../player/rockScrambleRig';
+import { createToolContactRig } from '../player/toolContact';
+import { alignedGaitPhase, getFootContactProfile } from '../player/gaitProfiles';
 import { createLazyAnimationActions } from './lazyAnimationActions';
 import { useTrackedGLTF } from './gltfCachePolicy';
 import { getGazeTarget } from '../../fauna/faunaFrameScheduler';
@@ -34,6 +38,7 @@ import { applyPlayerHairShading, applyPlayerSkinShading } from './playerSkinHair
 import { installDarwinLookComparison } from './darwinLookComparison';
 import { DARWIN5_WATCH_CHAIN } from './darwin5WatchChain';
 import { DARWIN5_HAIR_FACE_SKIN, DARWIN5_HEAD_HAIR, DARWIN5_HEAD_SKIN } from './darwin5HeadSplits';
+import { createDarwinClothingRig } from './darwinClothingRig';
 
 const DEFAULT_IMPORTED_SHADOW_CASTERS = new Set([
   'darwin5',
@@ -91,6 +96,7 @@ function applyGazeMotion({ targets, state, enabled, delta, group, motionState, s
   const dt = THREE.MathUtils.clamp(delta, 0, 0.05);
 
   const suppressed = !enabled
+    || (motionState?.fieldReach?.groundStudy && motionState.action === motionState.fieldReach.clip)
     || (config.suppressWhileAiming !== false && shotgunAimState.active)
     || (config.suppressWhileRunning !== false && Boolean(motionState?.running))
     || (config.suppressWhileAirborne !== false && Boolean(motionState?.airborne));
@@ -233,9 +239,7 @@ const ARM_WEIGHTED_BONE = /Arm|Hand|Shoulder/;
 
 // Pick the vertices that define the body's outline around hand height: in the
 // bind pose, the outermost non-arm vertex per (side, forward, height) cell.
-// The satchel is skinned to the right thigh and the coat skirts to both, so the
-// outline moves with every stride; these few hundred samples are re-skinned
-// each frame instead of trusting a static table.
+// The coat and satchel move with the rig, so re-skin the samples each frame.
 function buildArmSilhouette(scene, hips, arms, chest, config) {
   const sampling = config.silhouette || {};
   const cellForward = sampling.cellForward ?? 0.03;
@@ -1732,9 +1736,7 @@ function syncGaitPhase(previous, next, assetId, resolvedClip) {
   const prevPhase = (((previous.time || 0) / prevDuration) % 1 + 1) % 1;
   const prevProfile = getFootContactProfile(assetId, prevClip.name);
   const nextProfile = getFootContactProfile(assetId, resolvedClip);
-  const phase = prevProfile && nextProfile
-    ? ((prevPhase - prevProfile.left + nextProfile.left) % 1 + 1) % 1
-    : prevPhase;
+  const phase = alignedGaitPhase(prevPhase, prevProfile, nextProfile);
   next.time = phase * nextDuration;
 }
 
@@ -1776,6 +1778,7 @@ function normalizeAnimationRequest(request) {
     timeScale: request.timeScale ?? 1,
     fade: request.fade ?? null,
     maxTime: request.maxTime ?? null,
+    sampleTime: Number.isFinite(request.sampleTime) ? request.sampleTime : null,
   };
 }
 
@@ -1948,10 +1951,15 @@ function GLBPrimitive({
     });
     return ported.length ? nativeAnimations.concat(ported) : nativeAnimations;
   }, [nativeAnimations, ownAnimations, sourceAnimations, sourceAsset, asset.scale]);
-  const importedScene = useMemo(() => {
+  const playerClothing = Boolean(grounding?.motionRef && asset.secondaryClothingMotion);
+  const { importedScene, clothingRig } = useMemo(() => {
     const cloned = cloneSkeleton(scene);
-    return prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
-  }, [scene, assetId, asset, castShadow, receiveShadow]);
+    const imported = prepareImportedScene(cloned, assetId, asset, { castShadow, receiveShadow });
+    return {
+      importedScene: imported,
+      clothingRig: playerClothing ? createDarwinClothingRig(imported, asset.secondaryClothingMotion) : null,
+    };
+  }, [scene, assetId, asset, castShadow, receiveShadow, playerClothing]);
   useEffect(() => () => {
     // SkeletonUtils creates a distinct Skeleton (and therefore a distinct GPU
     // bone texture after first draw) for every actor clone. `<primitive>` roots
@@ -1971,7 +1979,8 @@ function GLBPrimitive({
     });
     skeletons.forEach(skeleton => skeleton.dispose());
     ownedMaterials.forEach(material => material.dispose());
-  }, [asset.cloneMaterials, asset.materialColorGrade, importedScene]);
+    clothingRig?.dispose();
+  }, [asset.cloneMaterials, asset.materialColorGrade, importedScene, clothingRig]);
   const mixer = useMemo(() => new THREE.AnimationMixer(importedScene), [importedScene]);
   const creatureMotionTargets = useMemo(() => {
     const config = asset.proceduralCreatureMotion;
@@ -2198,6 +2207,18 @@ function GLBPrimitive({
     groupRef: group,
     grounding,
   }), [animationProfileId, asset, importedScene, grounding]);
+  const playerTurnRig = useMemo(() => animationProfileId === 'darwin5'
+    ? createPlayerTurnRig(importedScene, group, grounding?.motionRef) : null,
+  [animationProfileId, importedScene, grounding]);
+  const fieldReachRig = useMemo(() => animationProfileId === 'darwin5'
+    ? createFieldReachRig(importedScene, grounding?.motionRef) : null,
+  [animationProfileId, importedScene, grounding]);
+  const toolContactRig = useMemo(() => animationProfileId === 'darwin5'
+    ? createToolContactRig(importedScene, grounding?.motionRef) : null,
+  [animationProfileId, importedScene, grounding]);
+  const rockScrambleRig = useMemo(() => animationProfileId === 'darwin5'
+    ? createRockScrambleRig(importedScene, group, grounding) : null,
+  [animationProfileId, importedScene, grounding]);
   const renderUserData = useMemo(() => ({
     ...(reflect ? { reflect: true } : {}),
     renderSource: `model:${assetId}`,
@@ -2251,6 +2272,7 @@ function GLBPrimitive({
       1.8,
     );
     const maxTime = Number.isFinite(normalized?.maxTime) ? Math.max(0, normalized.maxTime) : null;
+    const sampleTime = normalized?.sampleTime ?? null;
     const fallbackClip = animationProfileId === 'darwin5'
       ? (darwin5ClipFallback(requestedClip) || CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)])
       : (CLIP_FALLBACKS[requestedClip] || CLIP_FALLBACKS[normalizeClipName(requestedClip)]);
@@ -2276,7 +2298,12 @@ function GLBPrimitive({
     }
     if (next === activeAction.current && activeRequestClip === activeRequest.current) {
       next.setEffectiveTimeScale(timeScale);
-      if (maxTime !== null && next.time >= maxTime) {
+      if (sampleTime !== null) {
+        // Gameplay may scrub an authored pose from velocity/contact rather
+        // than let the clip's clock drift away from the physical trajectory.
+        next.time = THREE.MathUtils.clamp(sampleTime, 0, next.getClip().duration);
+        next.paused = true;
+      } else if (maxTime !== null && next.time >= maxTime) {
         next.time = maxTime;
         next.paused = true;
       } else {
@@ -2301,7 +2328,10 @@ function GLBPrimitive({
     next.clampWhenFinished = oneShot;
     next.setLoop(oneShot ? THREE.LoopOnce : THREE.LoopRepeat, oneShot ? 1 : Infinity);
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
-    if (!previous && next.getClip()?.duration > 0) {
+    if (sampleTime !== null) {
+      next.time = THREE.MathUtils.clamp(sampleTime, 0, next.getClip().duration);
+      next.paused = true;
+    } else if (!previous && next.getClip()?.duration > 0) {
       next.time = animationVariation.phase * next.getClip().duration;
     }
     if (previous && previous !== next) {
@@ -2454,6 +2484,10 @@ function GLBPrimitive({
   }, [importedScene, lazyActions, mixer]);
 
   useEffect(() => () => footContactRig.dispose(), [footContactRig]);
+  useEffect(() => () => playerTurnRig?.dispose(), [playerTurnRig]);
+  useEffect(() => () => fieldReachRig?.dispose(), [fieldReachRig]);
+  useEffect(() => () => rockScrambleRig?.dispose(), [rockScrambleRig]);
+  useEffect(() => () => toolContactRig?.dispose(), [toolContactRig]);
 
   useEffect(() => {
     const state = blinkStateRef.current;
@@ -2823,11 +2857,19 @@ function GLBPrimitive({
         if (fromDuration > 0.05 && toDuration > 0.05) {
           // syncGaitPhase aligned the cycles at the handoff; matching phase
           // rates keeps them aligned for the rest of the fade.
-          from.setEffectiveTimeScale(to.getEffectiveTimeScale() * (fromDuration / toDuration));
+          const fromCycles = getFootContactProfile(animationProfileId, from.getClip().name)?.cycles || 1;
+          const toCycles = getFootContactProfile(animationProfileId, to.getClip().name)?.cycles || 1;
+          from.setEffectiveTimeScale(to.getEffectiveTimeScale() * (fromDuration / toDuration) * (toCycles / fromCycles));
         }
       }
     }
+    footContactRig.restorePose();
+    rockScrambleRig?.restorePose();
+    playerTurnRig?.restorePose();
+    fieldReachRig?.restorePose();
+    toolContactRig?.restorePose();
     mixer.update(mixerDelta);
+    playerTurnRig?.update(mixerDelta, activeAction.current?.getClip?.()?.name);
     if (creatureMotionTargets) {
       const { head, neck, config } = creatureMotionTargets;
       const time = frameState.clock.elapsedTime * (config.frequency ?? 0.42)
@@ -2890,6 +2932,7 @@ function GLBPrimitive({
     } else if (overlayState.action?.isRunning()) {
       overlayState.action.stop();
     }
+    clothingRig?.update(delta, group.current, grounding?.motionRef?.current, activeAction.current);
     if (armPoseTargets) {
       applyArmPoseCorrection({
         targets: armPoseTargets,
@@ -2902,7 +2945,11 @@ function GLBPrimitive({
         scratch: armPoseScratch,
       });
     }
-    footContactRig.update(mixerDelta, activeAction.current, activeRequest.current);
+    rockScrambleRig?.updateBody();
+    footContactRig.update(mixerDelta, activeAction.current, activeRequest.current, rockScrambleRig?.updateFeet);
+    rockScrambleRig?.updateHands();
+    fieldReachRig?.update(performance.now() / 1000);
+    toolContactRig?.update(performance.now() / 1000);
     afterPoseRef.current?.(frameState, delta);
     if ((assetId === 'darwin' || assetId === 'syms') && modelBoundsDebugEnabled()) {
       const elapsed = frameState.clock.elapsedTime;

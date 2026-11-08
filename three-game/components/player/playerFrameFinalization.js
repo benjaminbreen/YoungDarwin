@@ -182,6 +182,8 @@ export function finalizePlayerFrame({
   stateRef.current.animationSpeed = locomotionSpeed;
   stateRef.current.travelRunInPlace = runInPlace;
   stateRef.current.turnRate = turnRate;
+  const intendedYaw = Math.atan2(facing.current.x, facing.current.z);
+  stateRef.current.headingError = Math.atan2(Math.sin(intendedYaw - currentYaw), Math.cos(intendedYaw - currentYaw));
   stateRef.current.turnDirection = Math.sign(turnRate);
   stateRef.current.slopeGrade = terrainFeedback.current.grade;
   stateRef.current.uphillDot = terrainFeedback.current.uphillDot;

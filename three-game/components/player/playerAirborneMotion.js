@@ -5,6 +5,7 @@ import { WATER_LEVEL } from '../../world/water';
 import { ACTION_DURATION, PLAYER, SWIM } from './playerConfig';
 import { arcadeLandingMomentum } from './arcadeLocomotion';
 import { triggerHitstop } from '../../world/worldTime';
+import { jumpStyleForLaunch, jumpTimeToContact } from './playerJumpAnimation';
 
 const WATER_JUMP_PREDICT_SECONDS = 2.35;
 const WATER_JUMP_PREDICT_STEP = 0.08;
@@ -116,8 +117,12 @@ export function updatePlayerJumpInputAndGravity({
     stateRef.current.jumpPhase = 'takeoff';
     stateRef.current.jumpWasRunning = launchRunning;
     stateRef.current.jumpChargeAmount = charge;
+    stateRef.current.jumpLaunchVelocity = velocity.current.y;
+    stateRef.current.jumpTimeToContact = Infinity;
+    stateRef.current.jumpRecovery = null;
     // Feeds the takeoff stretch in playerFrameFeedback.
     stateRef.current.impactTakeoffAt = now;
+    stateRef.current.impactFromPlayerJump = true;
     stateRef.current.impactStretch = THREE.MathUtils.clamp(
       0.55 + charge * 0.45 + Math.hypot(velocity.current.x, velocity.current.z) / 9,
       0.55,
@@ -151,7 +156,9 @@ export function updatePlayerJumpInputAndGravity({
     jumpBufferedUntil.current = now + PLAYER.jumpBufferTime;
   }
   if ((jumpJustPressed || now <= jumpBufferedUntil.current) && canStartJumpInput && !swimState.current.active) {
-    const launchRunning = moving || running || Math.hypot(velocity.current.x, velocity.current.z) > PLAYER.walkSpeed * 1.05;
+    const style = jumpStyleForLaunch({ moving, running, speed: Math.hypot(velocity.current.x, velocity.current.z), walkSpeed: PLAYER.walkSpeed });
+    const launchRunning = style === 'running';
+    stateRef.current.jumpStyle = style;
     // Both jumps leave the ground on the press. The standing jump used to wait
     // for the key to come up (so a hold could charge it), which made a tap
     // feel late next to the running jump.
@@ -252,10 +259,15 @@ export function resolvePlayerLanding({
     && (velocity.current.y <= 0 || groundDistance < -PLAYER.groundSnapDistance);
   const canResolveGroundContact = velocity.current.y <= 0 && jumpState.current.phase !== 'takeoff';
   const terrainContact = canResolveGroundContact && groundDistance <= PLAYER.groundContactEpsilon;
+  // Intentional jumps meet the ground at actual contact. The generous walking
+  // snap used to end flight more than half a metre above the support surface.
+  const snapDistance = wasAirborne.current && jumpState.current.fromPlayerJump
+    ? PLAYER.groundContactEpsilon
+    : PLAYER.groundSnapDistance;
   const terrainSnapContact = velocity.current.y <= 0
     && jumpState.current.phase !== 'takeoff'
-    && groundDistance <= PLAYER.groundSnapDistance;
-  const rapierContact = canResolveGroundContact && characterMove.grounded && Math.abs(groundDistance) <= PLAYER.groundSnapDistance;
+    && groundDistance <= snapDistance;
+  const rapierContact = canResolveGroundContact && characterMove.grounded && Math.abs(groundDistance) <= snapDistance;
   const landed = terrainContact || terrainSnapContact || rapierContact || belowTerrainFloor;
 
   if (landed) {
@@ -263,7 +275,6 @@ export function resolvePlayerLanding({
     const intentionalPlayerJump = wasAirborne.current && jumpState.current.fromPlayerJump;
     const landedJumpWasRunning = jumpState.current.wasRunning;
     const landedJumpCharge = jumpState.current.chargeAmount || 0;
-    const standingPlayerJump = intentionalPlayerJump && !landedJumpWasRunning;
     const landedJumpTravelDistance = wasAirborne.current
       ? Math.hypot(
         group.current.position.x - (Number.isFinite(jumpState.current.launchX) ? jumpState.current.launchX : group.current.position.x),
@@ -280,7 +291,7 @@ export function resolvePlayerLanding({
       : (falling * falling) / (2 * PLAYER.gravity * 1.28);
     // Fall-speed thresholds below are tuned for gravity 16.5 x 1.28: the same
     // drop heights as the old 10.8 x 1.34 tuning hit ~1.21x the impact speed.
-    const ordinaryStandingJumpLanding = standingPlayerJump && falling < 11.5;
+    const ordinaryPlayerJumpLanding = intentionalPlayerJump && falling < 11.5;
 
     if (groundDistance <= PLAYER.groundSnapDistance || belowTerrainFloor) {
       group.current.position.y = nextGroundY;
@@ -305,6 +316,15 @@ export function resolvePlayerLanding({
     }
 
     const landingSpeed = Math.hypot(velocity.current.x, velocity.current.z);
+    if (ordinaryPlayerJumpLanding && !stateRef.current.action) {
+      // A visual recovery, independent of action locks and locomotion's
+      // start/stop transitions. Walking and the next jump remain responsive.
+      stateRef.current.jumpRecovery = {
+        startedAt: now,
+        running: landedJumpWasRunning,
+        duration: moving || landingSpeed > 0.7 ? 0.2 : 0.34,
+      };
+    }
     if (wasAirborne.current && (falling > 0.35 || intentionalPlayerJump)) {
       const landingBiome = terrainBiomeAt(group.current.position.x, group.current.position.z, group.current.position.y, currentZoneId);
       const supportContact = characterMove.collisionDetails?.find(contact => (contact.normal?.y || 0) > 0.45);
@@ -411,6 +431,7 @@ export function resolvePlayerLanding({
       // Tiered landing impact: small hops whisper, big drops thump. The
       // squash in playerFrameFeedback reads impactLandedAt/impactIntensity.
       stateRef.current.impactLandedAt = now;
+      stateRef.current.impactFromPlayerJump = intentionalPlayerJump;
       stateRef.current.impactIntensity = THREE.MathUtils.clamp(
         (falling - 1.5) / 11 + landedJumpCharge * 0.14,
         intentionalPlayerJump ? 0.22 : 0,
@@ -461,9 +482,9 @@ export function resolvePlayerLanding({
       startAction('bigJumpDown', durationFor('bigJumpDown'), { lockMovement: 0.38 });
     } else if (!intentionalPlayerJump && falling > 4.6 && !stateRef.current.action) {
       startAction('jumpDown', durationFor('jumpDown'), { lockMovement: 0.28 });
-    } else if (!ordinaryStandingJumpLanding && falling > 2.9 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
+    } else if (!ordinaryPlayerJumpLanding && falling > 2.9 && landingSpeed > PLAYER.walkSpeed * 1.1 && !stateRef.current.action) {
       startAction('runningLanding', ACTION_DURATION.runningLanding, { lockMovement: false });
-    } else if (!ordinaryStandingJumpLanding && falling > 2.9 && !stateRef.current.action) {
+    } else if (!ordinaryPlayerJumpLanding && falling > 2.9 && !stateRef.current.action) {
       startAction('landing', ACTION_DURATION.landing, { lockMovement: false });
     }
     // Walking off an obstacle: the character controller snap-follows steep
@@ -494,6 +515,7 @@ export function resolvePlayerLanding({
           // Feed the landing squash so the settle reads in the silhouette,
           // not just as a clip swap.
           stateRef.current.impactLandedAt = now;
+          stateRef.current.impactFromPlayerJump = false;
           stateRef.current.impactIntensity = THREE.MathUtils.clamp(0.12 + descent.drop * 0.16, 0.2, 0.62);
           // Waist-height step-offs keep the walk/run gait — squash, lean, and
           // dust sell the drop without a clip hijacking movement. Only
@@ -565,9 +587,12 @@ export function resolvePlayerLanding({
       jumpState.current.phase = 'airborne';
       stateRef.current.jumpPhase = 'airborne';
     }
-    // 1.6m at the new fall speeds gives roughly the same anticipation time the
-    // old 1.35m window did.
-    if (jumpState.current.phase !== 'takeoff' && velocity.current.y < -1.2 && groundDistance < 1.6) {
+    stateRef.current.jumpTimeToContact = jumpTimeToContact(
+      groundDistance - PLAYER.groundContactEpsilon,
+      velocity.current.y,
+      PLAYER.gravity * PLAYER.fallGravityMultiplier,
+    );
+    if (jumpState.current.phase !== 'takeoff' && stateRef.current.jumpTimeToContact < 0.14) {
       stateRef.current.jumpPhase = 'prelanding';
     } else if (jumpState.current.phase !== 'takeoff') {
       stateRef.current.jumpPhase = 'airborne';

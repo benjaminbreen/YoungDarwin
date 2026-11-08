@@ -17,6 +17,7 @@ import { selectLooseRockStrikeTarget } from '../looseRockContact';
 import { claimSwing, emitPropEvent, onPropEvent } from './propEvents';
 import { getLooseRockStates } from './propRuntime';
 import { triggerHitstop } from '../../world/worldTime';
+import { rockSurfaceRadius, rockStrikeContact } from './rockContact';
 import { makeChipGeometry, makeFragmentGeometry, seededUnit } from './rockDebrisGeometry';
 import {
   getHammerMaterialProfile,
@@ -41,29 +42,6 @@ function normalize2(x, z, fallback = { x: 0, z: -1 }) {
   return { x: x / length, z: z / length };
 }
 
-function rockSurfaceRadius(rock, normal) {
-  const scale = typeof rock.scale === 'number' ? rock.scale : 1;
-  const yaw = rock.yaw || 0;
-  const cos = Math.cos(yaw);
-  const sin = Math.sin(yaw);
-  const localX = normal.x * cos - normal.z * sin;
-  const localZ = normal.x * sin + normal.z * cos;
-  let support = 0;
-  for (const shape of rock.shapes || []) {
-    const [offsetX = 0, , offsetZ = 0] = shape.offset || [0, 0, 0];
-    if (shape.type === 'convex' && shape.points?.length) {
-      support = Math.max(support, ...shape.points.map(([x, z]) => (
-        ((x + offsetX) * localX + (z + offsetZ) * localZ) * scale
-      )));
-    } else if (shape.radius) {
-      support = Math.max(
-        support,
-        ((offsetX * localX + offsetZ * localZ) + shape.radius) * scale,
-      );
-    }
-  }
-  return Math.max(0.35, support || rock.radius || 0.5);
-}
 
 function configureChipTexture(texture, repeat = 1.4) {
   if (!texture) return;
@@ -182,18 +160,9 @@ function profileForTarget(target, zoneId) {
 function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) {
   const rock = target.rock;
   const key = target.key || rockSampleKey(zoneId, rock.id);
-  const playerX = strike.position?.x || 0;
-  const playerZ = strike.position?.z || 0;
-  const fallback = normalize2(-(strike.facing?.x || 0), -(strike.facing?.z || -1), { x: 0, z: 1 });
-  const normal = normalize2(playerX - (rock.x || 0), playerZ - (rock.z || 0), fallback);
-  const radius = rockSurfaceRadius(rock, normal);
-  const surfaceX = (rock.x || 0) + normal.x * radius * 0.92;
-  const surfaceZ = (rock.z || 0) + normal.z * radius * 0.92;
-  const groundY = movementTerrainHeight(surfaceX, surfaceZ, zoneId);
-  const rockTop = rock.colliderTop ?? rock.height ?? 0.9;
-  const hitY = target.groundSample
-    ? groundY + 0.08
-    : groundY + THREE.MathUtils.clamp(rockTop * 0.52, 0.35, 1.42);
+  const contact = rockStrikeContact(rock, strike.position || { x: 0, z: 0 }, (x, z) => movementTerrainHeight(x, z, zoneId), target.groundSample, strike.facing);
+  const { normal, surfaceX, surfaceZ } = contact;
+  const hitY = contact.position.y;
   const seed = `${key}:${sequence}`;
   const side = { x: -normal.z, z: normal.x };
   const chipRadius = (0.16 + seededUnit(seed, 1) * 0.08) * (profile.shape === 'flake' ? 0.92 : 1);
@@ -227,11 +196,7 @@ function makeChipFromTarget(target, strike, zoneId, sequence, profile, outcome) 
       y: hitY + 0.04,
       z: surfaceZ + normal.z * (chipRadius + 0.12),
     },
-    scarPosition: {
-      x: surfaceX + normal.x * 0.045,
-      y: hitY,
-      z: surfaceZ + normal.z * 0.045,
-    },
+    scarPosition: contact.position,
     normal,
     radius: chipRadius,
     scale: chipScaleForShape(profile.shape, seed),

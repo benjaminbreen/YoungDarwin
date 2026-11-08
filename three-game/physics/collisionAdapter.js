@@ -42,8 +42,8 @@ function terrainCacheKey(x, z) {
   return `${cacheCoord(x)}:${cacheCoord(z)}`;
 }
 
-function groundCacheKey(position, supportRadius, ignoreObstacles) {
-  return `${cacheCoord(position.x)}:${cacheCoord(position.y)}:${cacheCoord(position.z)}:${cacheCoord(supportRadius)}:${ignoreObstacles ? 1 : 0}`;
+function groundCacheKey(position, supportRadius, ignoreObstacles, ignoreLooseRocks) {
+  return `${cacheCoord(position.x)}:${cacheCoord(position.y)}:${cacheCoord(position.z)}:${cacheCoord(supportRadius)}:${ignoreObstacles ? 1 : 0}:${ignoreLooseRocks ? 1 : 0}`;
 }
 
 function stanceCacheKey(position, facing) {
@@ -169,9 +169,9 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
   // Live loose-rock support from the Rapier poses LooseRocks publishes. Only
   // surfaces above the terrain and within a stride of Darwin count, so a
   // rock tumbling past at head height never yanks him up onto it.
-  const looseRockSupport = position => {
+  const looseRockSupport = (position, states = getLooseRockStates(zoneId)) => {
     let best = null;
-    for (const state of getLooseRockStates(zoneId)) {
+    for (const state of states) {
       if (!state.radii) continue;
       const surfaceY = looseRockSurfaceY(state, state.radii, position.x, position.z);
       if (surfaceY === null || surfaceY > position.y + LOOSE_ROCK_MAX_STEP) continue;
@@ -179,7 +179,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
       if (!best || surfaceY > best.height) {
         best = {
           height: surfaceY,
-          obstacle: { id: state.id, kind: 'loose-rock', looseRockKey: state.id, mass: state.mass },
+          obstacle: { id: state.id, kind: 'loose-rock', looseRockKey: state.id, mass: state.mass, radii: state.radii },
         };
       }
     }
@@ -189,7 +189,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
   const getGroundInfo = (position, options = {}) => {
     const supportRadius = options.supportRadius ?? DEFAULT_SUPPORT_RADIUS;
     const ignoreObstacles = options.ignoreObstacles === true;
-    const key = groundCacheKey(position, supportRadius, ignoreObstacles);
+    const key = groundCacheKey(position, supportRadius, ignoreObstacles, options.ignoreLooseRocks);
     const cached = frameCache.ground.get(key);
     if (cached) return cached;
     const terrain = getTerrainSample(position.x, position.z);
@@ -202,7 +202,7 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     const obstacleSupport = ignoreObstacles
       ? null
       : getObstacleSupport(position.x, position.z, position.y, supportRadius, obstacles);
-    const looseSupport = ignoreObstacles ? null : looseRockSupport(position);
+    const looseSupport = ignoreObstacles || options.ignoreLooseRocks ? null : looseRockSupport(position);
     const useLoose = looseSupport && looseSupport.height > (obstacleSupport?.height ?? -Infinity);
     const obstacleGroundY = obstacleSupport?.height ?? null;
     let result;
@@ -313,6 +313,25 @@ export function createCollisionAdapter(zoneId, rapierContext = null, obstacleOff
     isWalkableTerrain: (x, z) => isWalkableTerrain(x, z, zoneId),
     spawnY: (x, z) => getTerrainSample(x, z).movementY,
     groundInfo: getGroundInfo,
+    // Sole probes already have the exact drawn terrain height. Select nearby
+    // solid supports once per boot, then query that same geometry without
+    // rebuilding a complete terrain/diagnostic sample for every mesh point.
+    createFootSurfaceSampler: (bounds, ignoredVisualIds = null) => {
+      const nearby = queryObstacleBounds(obstacles, bounds.minX, bounds.minZ, bounds.maxX, bounds.maxZ)
+        .filter(obstacle => !ignoredVisualIds?.has(obstacle.sourceRock?.id || obstacle.id));
+      const loose = [...getLooseRockStates(zoneId)].filter(state => {
+        if (!state.radii) return false;
+        const radius = Math.max(...state.radii);
+        return state.x + radius >= bounds.minX && state.x - radius <= bounds.maxX
+          && state.z + radius >= bounds.minZ && state.z - radius <= bounds.maxZ;
+      });
+      return position => {
+        const authored = nearby.length ? getObstacleSupport(position.x, position.z, position.y, 0, nearby)?.height : null;
+        const moving = loose.length ? looseRockSupport(position, loose)?.height : null;
+        if (authored == null) return moving ?? null;
+        return moving == null ? authored : Math.max(authored, moving);
+      };
+    },
     stanceGroundInfo: getStanceGroundInfo,
     groundY: position => getGroundInfo(position).y,
     findClimbTarget: (position, facing) => findClimbTarget(position, facing, { obstacles }),

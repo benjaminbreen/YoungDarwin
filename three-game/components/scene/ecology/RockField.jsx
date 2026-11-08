@@ -10,6 +10,7 @@ import { rockRenderTransform, rockVisualBounds } from '../../../world/procedural
 import { createTriplanarRockMaterial } from '../../../world/regions/materials/triplanarRockMaterial';
 import { useDeferredDisposal } from '../../assets/useDeferredDisposal';
 import { ContactShadowField } from '../ContactShadow';
+import { registerRockFootSurfaces } from '../../../world/visualFootSurfaces';
 
 // Instanced craggy rocks. Rock items come from a zone layout module (which
 // also feeds the physics obstacle list) — this component is display only.
@@ -271,7 +272,8 @@ function carveDamagedRockGeometry(baseGeometry, item, bites) {
   return geo;
 }
 
-function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
+function DamagedRock({ item, bites, baseGeometry, material, sourceUserData, zoneId }) {
+  const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   const geometry = useMemo(
     () => carveDamagedRockGeometry(baseGeometry, item, bites),
@@ -279,8 +281,10 @@ function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
   );
   useDeferredDisposal(geometry, disposeGeometry);
   const transform = rockRenderTransform(item);
+  useLayoutEffect(() => ref.current ? registerRockFootSurfaces(zoneId, ref.current, [item]) : undefined, [zoneId, item, geometry]);
   return (
     <mesh
+      ref={ref}
       geometry={geometry}
       material={material}
       position={transform.position}
@@ -299,7 +303,7 @@ function DamagedRock({ item, bites, baseGeometry, material, sourceUserData }) {
   );
 }
 
-function InstancedRocks({ items, geometry, material, castShadow, sourceUserData }) {
+function InstancedRocks({ items, geometry, material, castShadow, sourceUserData, zoneId }) {
   const ref = useRef(null);
   const setInspectedObject = useThreeGameStore(state => state.setInspectedObject);
   useLayoutEffect(() => {
@@ -319,7 +323,8 @@ function InstancedRocks({ items, geometry, material, castShadow, sourceUserData 
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere?.();
     mesh.computeBoundingBox?.();
-  }, [items, geometry, material]);
+    return registerRockFootSurfaces(zoneId, mesh, items);
+  }, [items, geometry, material, zoneId]);
   return (
     <instancedMesh
       ref={ref}
@@ -461,6 +466,7 @@ export function RockField({ rocks, excludeIds = null, dust = null, sourceId = 'e
           material={materials[bucket.materialKey]}
           castShadow={bucket.castShadow}
           sourceUserData={renderUserData}
+          zoneId={currentZoneId}
         />
       ))}
       {damagedRocks.map(({ rock, variant, damage }) => (
@@ -471,6 +477,7 @@ export function RockField({ rocks, excludeIds = null, dust = null, sourceId = 'e
           baseGeometry={geometries[variant]}
           material={materials[rockMaterialKey(rock)]}
           sourceUserData={renderUserData}
+          zoneId={currentZoneId}
         />
       ))}
       <RockContactShadows rocks={visibleRocks} />

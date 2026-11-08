@@ -4,6 +4,29 @@
 // Keep them short and on open ground; they measure feel, not navigation.
 
 export const MOVE_DRILLS = {
+  collectReach: {
+    about: 'Reach for the prompted specimen or sample, then walk during final recovery.',
+    durationMs: 3000,
+    steps: [{ at: 200, down: ['interact'] }, { at: 300, up: ['interact'] }, { at: 1650, down: ['backward'] }, { at: 2400, up: ['backward'] }],
+  },
+  hammerStrike: {
+    about: 'A stationary hammer strike: visible tool head versus rock contact.',
+    tool: 'hammer', durationMs: 1800,
+    steps: [{ at: 200, down: ['useTool'] }, { at: 300, up: ['useTool'] }],
+  },
+  plantwalk: {
+    about: 'Walk across the camera, then stop: side-view sole contact and knee shape.',
+    durationMs: 4000,
+    steps: [{ at: 200, down: ['right'] }, { at: 2700, up: ['right'] }],
+  },
+  turnstep: {
+    about: 'Standing 90-degree turns in both directions: stepping feet and body timing.',
+    durationMs: 2600,
+    steps: [
+      { at: 300, down: ['rotateLeft'] }, { at: 400, up: ['rotateLeft'] },
+      { at: 1400, down: ['rotateRight'] }, { at: 1500, up: ['rotateRight'] },
+    ],
+  },
   walk: {
     about: 'Walk forward 2.5s and let go: start ramp, cruise, stop slide.',
     durationMs: 4000,
@@ -82,6 +105,29 @@ export const MOVE_DRILLS = {
       { at: 1800, up: ['jump'] },
       { at: 3400, up: ['forward', 'run'] },
     ],
+  },
+  walkjump: {
+    about: 'Walking hop, continuing to walk through the landing.',
+    durationMs: 3400,
+    steps: [
+      { at: 200, down: ['forward'] },
+      { at: 1200, down: ['jump'] },
+      { at: 1300, up: ['jump'] },
+      { at: 2800, up: ['forward'] },
+    ],
+  },
+  repeatjump: {
+    about: 'Two standing hops: the second interrupts the first landing recovery.',
+    durationMs: 2600,
+    steps: [
+      { at: 300, down: ['jump'] }, { at: 400, up: ['jump'] },
+      { at: 1100, down: ['jump'] }, { at: 1200, up: ['jump'] },
+    ],
+  },
+  holdjump: {
+    about: 'Hold jump through the apex: flight poses follow the longer trajectory.',
+    durationMs: 2400,
+    steps: [{ at: 300, down: ['jump'] }, { at: 1300, up: ['jump'] }],
   },
   // Tool drills equip `tool` first. Each presses F, then asks to walk on
   // before the swing has finished: how soon does Darwin answer the stick?

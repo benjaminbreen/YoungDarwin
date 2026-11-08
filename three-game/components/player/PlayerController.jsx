@@ -4,9 +4,10 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { CapsuleCollider, CylinderCollider, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
-import { updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
+import { getRuntimeFootContacts, updateRuntimePlayerMotion, useThreeGameStore } from '../../store';
 import { clampFrameDelta } from '../../frameTiming';
 import { faunaDebugEnabled } from '../../runtimeDebug';
+import { advancePlayerHeading, turnTravelScale } from './playerTurnMotion';
 import { getThreeSpecimens } from '../../data';
 import { DEFAULT_PLAYER_MODEL_ASSET_ID, getModelAsset } from '../../modelAssets';
 import { consumeTouchControls } from '../../input/touchControls';
@@ -62,6 +63,7 @@ import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './player
 import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
 import { findLooseRockPushTarget } from './playerLooseRocks';
 import { MAX_WALK_STEP_HEIGHT } from '../../physics/looseRockContact';
+import { findRockScrambleTarget, isRockSupport, resolvePlayerRockSupport } from './playerRockTraversal';
 import { CONTEXT_PROMPT_PRIORITY } from '../../ui/contextPromptService';
 import { registerPlayerHarnessBridge } from '../../e2e/playerHarnessBridge';
 import {
@@ -98,6 +100,7 @@ import {
   computeArcadeLocomotion,
   createArcadeLocomotionState,
 } from './arcadeLocomotion';
+import { balanceAllowsAction, beginFootingRecovery, createTerrainBalanceState, updateTerrainBalance } from './terrainBalance';
 import {
   dampAngle,
   formatVector,
@@ -314,6 +317,7 @@ export function PlayerController({
   const lastWallRunAt = useRef(0);
   const lastTurnFlourishAt = useRef(0);
   const lastAutoClimbAt = useRef(0);
+  const rockScrambleLatch = useRef(null);
   const lastPushAnimationAt = useRef(-10);
   const latestPropPushContact = useRef(null);
   const pendingAnimalDropping = useRef(null);
@@ -479,6 +483,7 @@ export function PlayerController({
     slopeGrade: 0,
     uphillDot: 0,
     groundPitch: 0,
+    terrainBalance: createTerrainBalanceState(),
     arcadeSkid: 0,
     arcadeScramble: 0,
     groundDistance: 0,
@@ -528,6 +533,7 @@ export function PlayerController({
   const inventoryCount = useThreeGameStore(state => state.inventory.length);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
   const playerSpawnId = useThreeGameStore(state => state.playerSpawnId);
+  const playerSpawnRevision = useThreeGameStore(state => state.playerSpawnRevision);
   const playableModeId = useThreeGameStore(state => state.playableModeId);
   const playableSpawnPoint = useThreeGameStore(state => state.playableSpawnPoint);
   const playableHiddenActorId = useThreeGameStore(state => state.playableHiddenActorId);
@@ -563,9 +569,10 @@ export function PlayerController({
     [currentZoneId, physicsDebug, pushableObstacleOffsets, rapierContext],
   );
   const modelGrounding = useMemo(() => ({
+    zoneId: currentZoneId,
     collisionAdapter,
     motionRef: stateRef,
-  }), [collisionAdapter]);
+  }), [collisionAdapter, currentZoneId]);
   const characterController = useKinematicCharacterController(rapierContext, characterBodyRef, characterColliderRef);
   const spawnPoint = useMemo(() => {
     // Runtime-owned starts (animal possession and multiplayer role spawns)
@@ -588,7 +595,7 @@ export function PlayerController({
   const startZ = spawnPoint.z;
   // Identity of the spawn the body belongs at. Only a change here may move
   // Darwin to the spawn; see the spawn effect and spawnPosition below.
-  const spawnKey = `${currentZoneId}|${playerSpawnId ?? ''}|${playableMode.id}|${startX}|${startZ}`;
+  const spawnKey = `${currentZoneId}|${playerSpawnId ?? ''}|${playerSpawnRevision}|${playableMode.id}|${startX}|${startZ}`;
 
   useEffect(() => {
     stateRef.current.playableModeId = playableMode.id;
@@ -827,9 +834,14 @@ export function PlayerController({
     stateRef.current.jumpPhase = startsInFlight ? 'flight' : 'grounded';
     stateRef.current.climbMotion = null;
     stateRef.current.traverseMotion = null;
+    stateRef.current.rockScramble = null;
+    rockScrambleLatch.current = null;
     stateRef.current.rollMotion = null;
     stateRef.current.turnMotion = null;
     stateRef.current.collectionFaceMotion = null;
+    stateRef.current.fieldReach = null;
+    stateRef.current.reachApproach = null;
+    stateRef.current.terrainBalance = createTerrainBalanceState();
     stateRef.current.lockMovementUntil = 0;
     jumpState.current = {
       phase: startsInFlight ? 'airborne' : 'grounded',
@@ -929,6 +941,17 @@ export function PlayerController({
     getCameraYaw: () => yawRef.current,
     getMotionState: () => ({
       action: stateRef.current.action || null,
+      terrainBalance: { ...stateRef.current.terrainBalance },
+      scramble: stateRef.current.rockScramble ? { id: stateRef.current.rockScramble.obstacleId, progress: stateRef.current.rockScramble.progress, contacts: stateRef.current.rockScramble.contacts, pose: stateRef.current.rockScramble.pose } : null,
+      reach: stateRef.current.fieldReach ? {
+        clip: stateRef.current.fieldReach.clip,
+        kind: stateRef.current.fieldReach.kind,
+        target: { ...stateRef.current.fieldReach.target },
+        hand: stateRef.current.fieldReach.witness,
+        committed: stateRef.current.fieldReach.committed,
+        contactAt: stateRef.current.fieldReach.contactAt,
+        releaseAt: stateRef.current.fieldReach.releaseAt,
+      } : null,
       jumpPhase: stateRef.current.jumpPhase || null,
       speed: stateRef.current.speed || 0,
       swimming: Boolean(stateRef.current.swimming),
@@ -987,8 +1010,11 @@ export function PlayerController({
       wasAirborne.current = false;
       stateRef.current.action = null;
       stateRef.current.jumpPhase = 'grounded';
+      stateRef.current.terrainBalance = createTerrainBalanceState();
       stateRef.current.climbMotion = null;
       stateRef.current.traverseMotion = null;
+      stateRef.current.rockScramble = null;
+      rockScrambleLatch.current = null;
       stateRef.current.rollMotion = null;
       stateRef.current.turnMotion = null;
       stateRef.current.lockMovementUntil = 0;
@@ -1411,7 +1437,9 @@ export function PlayerController({
             seed: cameraImpulse.current.seed + 1,
           };
         } else if (looseFootingEvent.kind === 'wobble') {
-          if (!stateRef.current.action) startAction('stumble', durationFor('stumble'), { lockMovement: false });
+          if (balanceAllowsAction(stateRef.current.action)) beginFootingRecovery(stateRef.current.terrainBalance, {
+            now, position: group.current.position, rise: Math.min(0.3, 0.1 + (looseFootingEvent.speed || 0) * 0.08), source: 'loose-rock-wobble', supportKey: looseFootingEvent.rockKey,
+          });
           cameraImpulse.current = {
             startedAt: now,
             intensity: 0.12,
@@ -1633,6 +1661,9 @@ export function PlayerController({
     if (moving) {
       interruptAction(MOVEMENT_INTERRUPTIBLE_ACTIONS);
       if (inToolFollowThrough(stateRef.current, now)) interruptAction(new Set([stateRef.current.action]));
+      if (stateRef.current.fieldReach?.committed && now >= stateRef.current.fieldReach.releaseAt) {
+        interruptAction(new Set([stateRef.current.fieldReach.clip]));
+      }
     }
     // The action keys cut short a stop or idle flourish too: E pressed the
     // moment Darwin halts used to land during stopWalking and be dropped.
@@ -1760,6 +1791,7 @@ export function PlayerController({
       const targetYaw = group.current.rotation.y + Math.PI / 2;
       startAction('turnLeft90', ACTION_DURATION.turnLeft90, { lockMovement: true });
       stateRef.current.turnMotion = {
+        startYaw: group.current.rotation.y,
         startedAt: now,
         duration: ACTION_DURATION.turnLeft90,
         targetYaw,
@@ -1769,6 +1801,7 @@ export function PlayerController({
       const targetYaw = group.current.rotation.y - Math.PI / 2;
       startAction('turnRight90', ACTION_DURATION.turnRight90, { lockMovement: true });
       stateRef.current.turnMotion = {
+        startYaw: group.current.rotation.y,
         startedAt: now,
         duration: ACTION_DURATION.turnRight90,
         targetYaw,
@@ -2106,9 +2139,8 @@ export function PlayerController({
           ? durationFor(turnClip)
           : Math.min(durationFor(turnClip), currentSpeed > playerConfig.walkSpeed * 1.25 ? 0.38 : 0.32);
         startAction(turnClip, turnDuration, { lockMovement: false });
-        const skidSpeed = THREE.MathUtils.clamp(currentSpeed * 0.58, playerConfig.walkSpeed * 0.85, playerConfig.runSpeed * 0.72);
-        velocity.current.x = input.x * skidSpeed;
-        velocity.current.z = input.z * skidSpeed;
+        velocity.current.x *= 0.5;
+        velocity.current.z *= 0.5;
         if (now - lastSkidDustAt.current > 0.18) {
           lastSkidDustAt.current = now;
           const runningPivot = turnClip === 'runningTurn180';
@@ -2132,12 +2164,6 @@ export function PlayerController({
           };
         }
         facing.current.copy(input);
-        group.current.rotation.y = dampAngle(
-          group.current.rotation.y,
-          Math.atan2(input.x, input.z),
-          playerConfig.turnDamping * 2.4,
-          delta,
-        );
       } else if (isDarwinMode
         && !sidestepping
         && !airborneForControl
@@ -2160,9 +2186,8 @@ export function PlayerController({
           ? durationFor(turnClip)
           : Math.min(durationFor(turnClip), 0.34);
         startAction(turnClip, turnDuration, { lockMovement: false });
-        const carveSpeed = THREE.MathUtils.clamp(currentSpeed * 0.82, playerConfig.walkSpeed * 1.15, playerConfig.runSpeed * 0.92);
-        velocity.current.x = input.x * carveSpeed;
-        velocity.current.z = input.z * carveSpeed;
+        velocity.current.x *= 0.82;
+        velocity.current.z *= 0.82;
         if (now - lastSkidDustAt.current > 0.18) {
           lastSkidDustAt.current = now;
           collisionDustTriggerRef.current?.({
@@ -2176,7 +2201,9 @@ export function PlayerController({
         }
       }
       facing.current.copy(sidestepping ? forwardFacing : input);
-      const targetVelocity = frameScratch.targetVelocity.copy(input).multiplyScalar(movementSpeed);
+      const turnSpeedScale = isDarwinMode && !airborneForControl
+        ? turnTravelScale(stateRef.current.action, stateRef.current.actionStartedAt, now) : 1;
+      const targetVelocity = frameScratch.targetVelocity.copy(input).multiplyScalar(movementSpeed * turnSpeedScale);
       applyArcadeSteering({
         state: arcadeLocomotion.current,
         velocity: velocity.current,
@@ -2251,7 +2278,9 @@ export function PlayerController({
         1,
         THREE.MathUtils.clamp(currentSpeed / playerConfig.runSpeed, 0, 1),
       );
-      group.current.rotation.y = dampAngle(group.current.rotation.y, targetYaw, playerConfig.turnDamping * turnAssist * (1 - arcade.skid * 0.16), delta);
+      group.current.rotation.y = isDarwinMode && !sidestepping && !airborneForControl
+        ? advancePlayerHeading(group.current.rotation.y, targetYaw, currentSpeed, delta)
+        : dampAngle(group.current.rotation.y, targetYaw, playerConfig.turnDamping * turnAssist * (1 - arcade.skid * 0.16), delta);
     } else {
       // The stop clips plant and brake over their first half; a gentler
       // envelope left a long sub-1 m/s creep after the pose had settled,
@@ -2289,11 +2318,12 @@ export function PlayerController({
       resetShotgunAimState();
     }
 
-    const groundInfo = collisionAdapter.groundInfo(group.current.position);
+    const groundInfo = resolvePlayerRockSupport(group.current.position, facing.current, collisionAdapter, isDarwinMode ? getRuntimeFootContacts() : null).ground;
     const groundY = groundInfo.y;
     const groundGap = group.current.position.y - groundY;
     const canSnapToGround = !flightState.current.active
       && jumpState.current.phase !== 'takeoff'
+      && !(wasAirborne.current && jumpState.current.fromPlayerJump)
       && velocity.current.y <= 0
       && groundGap <= playerConfig.groundSnapDistance;
     if (canSnapToGround && groundGap > -playerConfig.groundContactEpsilon) {
@@ -2654,6 +2684,28 @@ export function PlayerController({
       }
     }
     const desiredDelta = frameScratch.desiredDelta.copy(velocity.current).multiplyScalar(delta);
+    if (stateRef.current.modelAssetId === 'darwin5' && playerConfig.canAutoTraverse !== false && grounded && moving && !stateRef.current.aiming && !carriedObjectId
+      && (!movementLocked || /^(startWalking|startRunning)$/.test(stateRef.current.action || ''))
+      && !stateRef.current.crouching && !stateRef.current.climbMotion && !stateRef.current.traverseMotion
+      && (!stateRef.current.action || /^(startWalking|startRunning)$/.test(stateRef.current.action))
+      && desiredDelta.lengthSq() > 0.00001) {
+      const target = findRockScrambleTarget(group.current.position, desiredDelta, collisionAdapter, rockScrambleLatch.current);
+      if (target) {
+        const duration = THREE.MathUtils.clamp(0.9 + target.heightDelta * 0.35, 1, 1.2);
+        startAction('climbWaistHeight', duration + 0.1, { lockMovement: true });
+        const scramble = { start: group.current.position.clone(), end: target.end, duration, startedAt: now,
+          targetYaw: Math.atan2(target.direction.x, target.direction.z), heightDelta: target.heightDelta,
+          obstacleId: target.obstacle.id, direction: target.direction, progress: 0, exitSpeed: 0 };
+        stateRef.current.rockScramble = scramble;
+        stateRef.current.climbMotion = scramble;
+        rockScrambleLatch.current = { id: target.obstacle.id, x: target.obstacle.x, z: target.obstacle.z, radius: target.obstacle.radius || 0.6 };
+        stateRef.current.terrainBalance.pulse = 0;
+        stateRef.current.stepSmoothOffset = 0;
+        velocity.current.set(0, 0, 0);
+        finalizeFrame({ moving: false, running: false, groundDistance: 0, skipFootsteps: true });
+        return;
+      }
+    }
     const canAutoTraverse = playerConfig.canAutoTraverse !== false
       && grounded
       && moving
@@ -3256,8 +3308,9 @@ export function PlayerController({
       }
     }
 
-    let nextGroundInfo = collisionAdapter.groundInfo(group.current.position);
-    let stanceGroundInfo = collisionAdapter.stanceGroundInfo?.(group.current.position, facing.current);
+    const resolvedSupport = resolvePlayerRockSupport(group.current.position, facing.current, collisionAdapter, isDarwinMode ? getRuntimeFootContacts() : null);
+    let nextGroundInfo = resolvedSupport.ground;
+    let stanceGroundInfo = resolvedSupport.stance;
     if (
       characterMove.grounded
       && String(rapierGroundTarget?.kind || '').startsWith('physics-')
@@ -3275,6 +3328,7 @@ export function PlayerController({
     }
     if (
       (nextGroundInfo.source === 'authored-obstacle' || nextGroundInfo.source === 'loose-rock')
+      && !isRockSupport(nextGroundInfo)
       && stanceGroundInfo
       && stanceGroundInfo.obstacleSupportCount <= 1
       && stanceGroundInfo.spread > 0.14
@@ -3580,7 +3634,7 @@ export function PlayerController({
     }
     const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     if (!swim.active && !wasAirborne.current && jumpState.current.phase !== 'takeoff') {
-      const finalGroundInfo = collisionAdapter.groundInfo(p);
+      const finalGroundInfo = resolvePlayerRockSupport(p, facing.current, collisionAdapter, isDarwinMode ? getRuntimeFootContacts() : null).ground;
       const groundLift = finalGroundInfo.y - p.y;
       if (groundLift < -(playerConfig.ledgeReleaseDrop ?? PLAYER.ledgeReleaseDrop)) {
         // The ground fell away by more than a body-length in a single frame —
@@ -3613,8 +3667,8 @@ export function PlayerController({
     // Step smoothing: obstacle support moves the collider up or down in sharp
     // per-frame increments a walk cycle cannot follow. Bank the vertical snap
     // as a visual model offset (eased back by playerFrameFeedback) so the body
-    // rises or settles through the step instead of teleporting, and pulse the
-    // squash/stretch fields so bigger steps read in the silhouette.
+    // rises or settles through the step instead of teleporting. Darwin5 uses
+    // joint-based balance below; older avatars keep the impact scale pulse.
     if (!swim.active
       && !wasAirborneAtFrameStart
       && !wasAirborne.current
@@ -3639,7 +3693,7 @@ export function PlayerController({
           velocity.current.x *= stepMomentumKeep;
           velocity.current.z *= stepMomentumKeep;
         }
-        if (Math.abs(stepDy) > 0.15 && !stateRef.current.action && now - lastStepPulseAt.current > 0.3) {
+        if (stateRef.current.modelAssetId !== 'darwin5' && Math.abs(stepDy) > 0.15 && !stateRef.current.action && now - lastStepPulseAt.current > 0.3) {
           lastStepPulseAt.current = now;
           if (stepDy > 0) {
             stateRef.current.impactTakeoffAt = now;
@@ -3651,6 +3705,14 @@ export function PlayerController({
         }
       }
     }
+
+    updateTerrainBalance(stateRef.current.terrainBalance, {
+      now, delta, position: p, previous: startOfFramePosition, facing: facing.current,
+      slope, stance: stanceGroundInfo, speed: horizontalSpeed,
+      enabled: isDarwinMode && !wasAirborne.current && !wasAirborneAtFrameStart && !swim.active
+        && !stateRef.current.crouching && !stateRef.current.aiming
+        && balanceAllowsAction(stateRef.current.action) && spawnDrop.current.phase === 'complete',
+    });
 
     if (!swim.active && (moving || horizontalSpeed > 0.05) && now - lastDroppingSmushAt.current > 0.12) {
       const realNow = Date.now();

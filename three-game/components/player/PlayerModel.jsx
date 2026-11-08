@@ -37,6 +37,10 @@ import {
 } from './shotgunSling';
 import { NET_SWEEP, netSweepState, netSweepTime } from './netSweep';
 import { longGunQuaternion, solveTwoBoneIK } from './armIK';
+import { darwinJumpAnimation, darwinJumpRecoveryAnimation } from './playerJumpAnimation';
+import { turnAnimationRequest } from './playerTurnMotion';
+import { fieldReachAnimation } from './fieldReach';
+import { HAMMER_CONTACT, hammerContactState, toolContactWeight } from './toolContact';
 
 const RIGHT_HAND = /righthand$/i;
 const LEFT_HAND = /lefthand$/i;
@@ -613,19 +617,6 @@ const PLAYER_MODEL_CYCLE = Array.from(new Set([
   'darwin5',
 ]));
 
-function darwin5StandingJumpRequest(charge, jumpPhase) {
-  const charged = charge >= 0.35;
-  return {
-    clip: 'standingJump',
-    fade: jumpPhase === 'takeoff' ? 0.04 : 0.02,
-    // The source clip is a full 1.93s Mixamo jump cycle, while normal game
-    // airtime is much shorter. Play only the takeoff/air pose window and let
-    // the landing resolver handle impact procedurally.
-    timeScale: THREE.MathUtils.lerp(1.55, 1.28, charge),
-    maxTime: charged ? 1.28 : 0.92,
-  };
-}
-
 const DARWIN5_FALL_IDLE_MIN_DISTANCE = 1.35;
 const DARWIN5_FALL_IDLE_MIN_DESCENT_SPEED = -1.05;
 
@@ -866,9 +857,10 @@ function perpendicularTo(v, axis, fallback) {
 // local +Y, as built by createButterflyNetVisual.
 function applyNetSweepPose(group, bone, scratch) {
   const now = performance.now() / 1000;
-  const u = netSweepTime(now);
+  let u = netSweepTime(now);
   if (u === null) return;
   const S = NET_SWEEP;
+  if (!netSweepState.strikeSampled && u >= S.strike) u = S.strike;
   bone.getWorldQuaternion(scratch.boneQuat);
   scratch.carryQuat.copy(scratch.boneQuat).multiply(group.quaternion);
   group.getWorldPosition(scratch.grip);
@@ -941,7 +933,6 @@ function applyNetSweepPose(group, bone, scratch) {
     netSweepState.strikeSampled = true;
     // At the strike the hoop is on the aim line, whatever this frame's
     // lerp step left it at.
-    scratch.hoop.copy(scratch.aimDir).multiplyScalar(S.poleLength).add(scratch.grip);
     Object.assign(netSweepState.hoop, { x: scratch.hoop.x, y: scratch.hoop.y, z: scratch.hoop.z });
     Object.assign(netSweepState.grip, { x: scratch.grip.x, y: scratch.grip.y, z: scratch.grip.z });
   }
@@ -967,6 +958,12 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
   const aimRight = useMemo(() => new THREE.Vector3(), []);
   const gripPos = useMemo(() => new THREE.Vector3(), []);
   const offHandPos = useMemo(() => new THREE.Vector3(), []);
+  const contactTip = useMemo(() => new THREE.Vector3(), []);
+  const contactDirection = useMemo(() => new THREE.Vector3(), []);
+  const contactQuat = useMemo(() => new THREE.Quaternion(), []);
+  const contactDelta = useMemo(() => new THREE.Quaternion(), []);
+  const supportWristQuat = useMemo(() => new THREE.Quaternion(), []);
+  const supportParentQuat = useMemo(() => new THREE.Quaternion(), []);
   const localShaftAxis = useMemo(() => {
     const axis = resolvedConfig.shaftAxis;
     return axis ? new THREE.Vector3(axis[0], axis[1], axis[2]) : new THREE.Vector3(0, 0, -1);
@@ -1036,6 +1033,7 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
       position: resolvedConfig.position,
     });
     if (!handle) return undefined;
+    if (resolvedConfig.toolId === 'hammer') hammerContactState.handOffset = resolvedConfig.position || [0, 0, 0];
     // twoHand orientation (and the two-handed swing) needs the off hand to
     // aim the shaft at.
     if (resolvedConfig.orient === 'twoHand' || resolvedConfig.swingTwoHand) {
@@ -1046,7 +1044,7 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
       });
       offHandBoneRef.current = offBone;
     }
-    if (resolvedConfig.supportHand) {
+    if (resolvedConfig.supportHand || resolvedConfig.swingTwoHand) {
       const find = regex => {
         let found = null;
         scene.traverse(node => { if (!found && node.isBone && regex.test(node.name)) found = node; });
@@ -1152,7 +1150,8 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
     const storeState = useThreeGameStore.getState();
     const wantHeld = storeState.activeToolId === resolvedConfig.toolId
       && !storeState.carriedObjectId
-      && motionRef?.current?.action !== 'pickUp';
+      && motionRef?.current?.action !== 'pickUp'
+      && !motionRef?.current?.rockScramble;
     if (slingRef.current) {
       // Covington carries the gun until he hands it over; once Darwin has it,
       // it rides on his back and comes off only to be shouldered and fired.
@@ -1278,6 +1277,34 @@ function HandProp({ scene, config, modelAssetId, motionRef, postPose }) {
         aimDir.normalize();
         aimQuat.setFromUnitVectors(localShaftAxis, aimDir).multiply(swingTweakQuat);
         group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+        const contact = hammerContactState;
+        const weight = contact.active ? toolContactWeight(performance.now() / 1000 - contact.startedAt, HAMMER_CONTACT.strike) : 0;
+        if (contact.point && weight > 0.005) {
+          group.getWorldPosition(gripPos);
+          contactDirection.set(contact.point.x, contact.point.y, contact.point.z).sub(gripPos).normalize();
+          contactTip.fromArray(HAMMER_CONTACT.face).normalize().applyQuaternion(aimQuat);
+          contactDelta.setFromUnitVectors(contactTip, contactDirection);
+          contactQuat.copy(aimQuat).premultiply(contactDelta);
+          aimQuat.slerp(contactQuat, weight);
+          group.quaternion.copy(boneQuat).invert().multiply(aimQuat);
+          group.updateWorldMatrix(true, true);
+          contactTip.fromArray(HAMMER_CONTACT.face).applyMatrix4(group.matrixWorld);
+          contact.witness = { x: contactTip.x, y: contactTip.y, z: contactTip.z, at: performance.now() / 1000,
+            error: Math.hypot(contactTip.x - contact.point.x, contactTip.y - contact.point.y, contactTip.z - contact.point.z) };
+          if (motionRef.current.fieldReach?.clip === 'heavyToolSwing') motionRef.current.fieldReach.witness = contact.witness;
+          const support = supportArmRef.current;
+          if (support) {
+            supportTarget.set(0, 0.12, 0).applyMatrix4(group.matrixWorld);
+            support.end.getWorldPosition(offHandPos);
+            contactDirection.subVectors(supportTarget, offHandPos).clampLength(0, 0.28).multiplyScalar(weight);
+            supportTarget.copy(offHandPos).add(contactDirection);
+            support.end.getWorldQuaternion(supportWristQuat);
+            solveTwoBoneIK(support.upper, support.lower, support.end, supportTarget);
+            support.end.parent.getWorldQuaternion(supportParentQuat);
+            support.end.quaternion.copy(supportParentQuat.invert().multiply(supportWristQuat));
+          }
+          if (typeof window !== 'undefined') window.__darwinHammerContact = { point: { ...contact.point }, tip: { ...contact.witness }, weight };
+        }
         return;
       }
     }
@@ -1572,7 +1599,23 @@ export function NaturalistModel({
     motionRef.current.handsBusy = carryingObject || holdingTool || rifleInHands || torchMode;
     const groundPitch = motionRef.current.groundPitch || 0;
     if (status.health <= 0) return 'fallingForwardDeath';
+    if (modelAssetId === 'darwin5') {
+      const reach = fieldReachAnimation(motionRef.current.fieldReach, motionRef.current.action, performance.now() / 1000);
+      if (reach) return reach;
+      if (motionRef.current.action === 'swingHammer') {
+        return fieldReachAnimation({ clip: 'heavyToolSwing', startedAt: motionRef.current.actionStartedAt, endAt: motionRef.current.actionUntil }, 'heavyToolSwing', performance.now() / 1000);
+      }
+    }
+    if (modelAssetId === 'darwin5' && status.health >= 45
+      && (!motionRef.current.action || /^(startWalking|startRunning|stopWalking|runToStop)$/.test(motionRef.current.action))) {
+      const recovery = darwinJumpRecoveryAnimation(motionRef.current, performance.now() / 1000);
+      if (recovery) return recovery;
+    }
     if (motionRef.current.action) {
+      if (motionRef.current.rockScramble) {
+        if (motionRef.current.rockScramble.progress > 0.76) return { clip: 'idle', fade: 0.24 };
+        return { clip: 'crouchWalk', sampleTime: (darwin5ClipDuration('crouchWalk') || 1) * (0.18 + 0.7 * motionRef.current.rockScramble.progress), fade: 0.12 };
+      }
       if (motionRef.current.modelVariantId === 'darwin5LocomotionPreview') {
         if (motionRef.current.action === 'startWalking') {
           return { clip: 'startWalking', timeScale: 1.25, fade: 0.08 };
@@ -1600,6 +1643,8 @@ export function NaturalistModel({
         if (torchAction) return torchAction;
       }
       if (modelAssetId === 'darwin5') {
+        const turnRequest = turnAnimationRequest(motionRef.current, performance.now() / 1000);
+        if (turnRequest) return turnRequest;
         // Tall climbs: sync the clip speed to the controller's height-scaled
         // action span so hand/foot placement tracks short and tall faces alike
         // instead of playing the wall mantle at one fixed rate.
@@ -1648,10 +1693,7 @@ export function NaturalistModel({
       if (modelAssetId === 'darwin5' && motionRef.current.jumpWaterEntryIntent === 'dive' && !injured) {
         return { clip: 'dive', fade: jumpPhase === 'takeoff' ? 0.04 : 0.08, timeScale: 1 };
       }
-      const useDarwin5FullStandingJump = modelAssetId === 'darwin5' && !motionRef.current.jumpWasRunning;
-      if (useDarwin5FullStandingJump) {
-        return darwin5StandingJumpRequest(charge, jumpPhase);
-      }
+      if (modelAssetId === 'darwin5' && !injured) return darwinJumpAnimation(motionRef.current);
       if (jumpPhase === 'takeoff') {
         if (injured) return motionRef.current.jumpWasRunning ? 'injuredRunJump' : 'injuredStandingJump';
         if (motionRef.current.jumpFromHeight) return { clip: 'jumpFromWall', fade: 0.05, timeScale: 1.05 };
@@ -1790,7 +1832,7 @@ export function NaturalistModel({
     // shin-deep water keep their dedicated clips below.
     if (modelAssetId === 'darwin5'
       && (motionRef.current.running || motionRef.current.walking)
-      && Math.abs(groundPitch) <= STAIR_PITCH
+      && (!/stairs|steps/.test(motionRef.current.supportObstacle?.kind || '') || Math.abs(groundPitch) <= STAIR_PITCH)
       && (motionRef.current.wadeDepth || 0) <= 0.16) {
       const gait = forwardGaitForSpeed(speed, forwardGaitRef.current);
       forwardGaitRef.current = gait;

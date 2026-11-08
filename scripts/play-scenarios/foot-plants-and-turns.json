@@ -1,0 +1,12 @@
+[
+  ["tp", 32.08, 22.57],
+  ["eval", "(window.__enableFootDebug = true, api.setCameraYaw(0.243))"],
+  ["eval", "window.__footTurnReview = await api.recordMotion([{at:200,down:['right','run']},{at:1500,up:['right'],down:['left']},{at:2800,up:['left','run']}],{durationMs:4000})"],
+  ["expect", "window.__footTurnReview.samples.some(s => s.action === 'runningTurn180')", {"equals":true}],
+  ["expect", "window.__footTurnReview.samples.filter(s => s.action === 'runningTurn180').every(s => !s.locked)", {"equals":true}],
+  ["expect", "window.__footTurnReview.samples.every((s,i,a) => {let j=i;while(j>0&&s.t-a[j].t<80)j--;return Math.abs(Math.atan2(Math.sin(s.body-a[j].body),Math.cos(s.body-a[j].body)))/Math.max(0.001,(s.t-a[j].t)/1000)<22;})", {"equals":true}],
+  ["expect", "window.__footTurnReview.samples.slice(1).every((s,i) => {const p=window.__footTurnReview.samples[i];return Math.abs(Math.atan2(Math.sin(s.body-p.body),Math.cos(s.body-p.body)))<0.6;})", {"equals":true}],
+  ["expect", "window.__footTurnReview.samples.filter(s => s.foot?.lp > 0.9 || s.foot?.rp > 0.9).length > 3", {"equals":true}],
+  ["expect", "api.getMotionState().airborne", {"equals":false}],
+  ["expect", "api.renderAudit().ok", {"equals":true}]
+]

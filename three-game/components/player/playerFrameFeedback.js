@@ -60,7 +60,8 @@ export function updatePlayerFrameFeedback({
     lastModelYaw.current = group.current.rotation.y;
     const slope = terrainFeedback.current;
     const collisionLean = feedbackEase * feedback.intensity * 0.105;
-    const slopePitch = THREE.MathUtils.clamp(slope.grade * slope.uphillDot * -0.18, -0.12, 0.09);
+    const balancedGait = stateRef?.current?.modelAssetId === 'darwin5';
+    const slopePitch = balancedGait ? 0 : THREE.MathUtils.clamp(slope.grade * slope.uphillDot * -0.18, -0.12, 0.09);
     // The controller's stance plane is deliberately subtle in motion. At rest
     // it can align much more closely to the ground beneath both boots, which
     // removes the persistent uphill-foot/downhill-foot gap without touching
@@ -70,7 +71,7 @@ export function updatePlayerFrameFeedback({
       0,
       1,
     );
-    const stanceAlignment = THREE.MathUtils.lerp(1, IDLE_STANCE_ALIGNMENT_BOOST, idleStanceBlend);
+    const stanceAlignment = stateRef?.current?.rockScramble ? 0 : THREE.MathUtils.lerp(balancedGait ? 0.2 : 1, IDLE_STANCE_ALIGNMENT_BOOST, idleStanceBlend);
     const stancePitch = THREE.MathUtils.clamp(
       (slope.stancePitch || 0) * stanceAlignment,
       -IDLE_STANCE_MAX_TILT,
@@ -102,15 +103,16 @@ export function updatePlayerFrameFeedback({
     modelFeedbackRef.current.position.x = feedback.normal.x * feedbackEase * feedback.intensity * 0.045;
     modelFeedbackRef.current.position.z = feedback.normal.z * feedbackEase * feedback.intensity * 0.045;
 
-    // Squash & stretch: landing compresses toward the feet (group origin is
-    // at ground level, so scaling reads as sinking into the landing), takeoff
-    // stretches tall. Impact fields are written by playerAirborneMotion.
+    // Darwin's authored flight/recovery poses absorb impact through his knees
+    // and hips. Preserve body proportions instead of scaling his whole rig.
+    // Step-offs and other avatars retain their procedural impact feedback.
     let squashY = 1;
     let squashXZ = 1;
     const impact = stateRef?.current;
     if (impact) {
+      const darwinJump = impact.modelAssetId === 'darwin5' && impact.impactFromPlayerJump;
       const landAge = now - (impact.impactLandedAt ?? -10);
-      if (landAge >= 0 && landAge < 0.34) {
+      if (!darwinJump && landAge >= 0 && landAge < 0.34) {
         const p = landAge / 0.34;
         const env = (1 - p) * (1 - p);
         const amp = impact.impactIntensity || 0;
@@ -118,7 +120,7 @@ export function updatePlayerFrameFeedback({
         squashXZ += amp * 0.1 * env;
       }
       const takeAge = now - (impact.impactTakeoffAt ?? -10);
-      if (takeAge >= 0 && takeAge < 0.24) {
+      if (impact.modelAssetId !== 'darwin5' && takeAge >= 0 && takeAge < 0.24) {
         const env = Math.sin((takeAge / 0.24) * Math.PI);
         const amp = impact.impactStretch || 0;
         squashY += amp * 0.075 * env;

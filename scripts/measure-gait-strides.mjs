@@ -123,6 +123,19 @@ async function measure(file) {
     if (!speeds.length) continue;
     speeds.sort((x, y) => x - y);
     results.push({
+      stanceWindows: Object.fromEntries(['left', 'right'].map(side => {
+        const min = Math.min(...frames.map(frame => frame[side].y));
+        const windows = [];
+        let active = false;
+        frames.forEach((frame, index) => {
+          const low = frame[side].y < min + 0.035;
+          if (low && !active) windows.push([Number((index / steps).toFixed(3))]);
+          if (!low && active) windows.at(-1).push(Number((index / steps).toFixed(3)));
+          active = low;
+        });
+        if (active) windows.at(-1).push(1);
+        return [side, windows];
+      })),
       clip: name,
       duration: Number(duration.toFixed(3)),
       strideSpeed: Number(speeds[Math.floor(speeds.length / 2)].toFixed(2)),
@@ -135,10 +148,15 @@ async function measure(file) {
   return results;
 }
 
-const files = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_FILES;
+// --contacts exposes the measured normalized stance intervals used by
+// gaitProfiles.js; default stride-speed output remains unchanged.
+const reportContacts = process.argv.includes('--contacts');
+const fileArgs = process.argv.slice(2).filter(arg => arg !== '--contacts');
+const files = fileArgs.length ? fileArgs : DEFAULT_FILES;
 const all = [];
 for (const file of files) all.push(...await measure(file));
 const seen = new Set();
 all.filter(row => (seen.has(row.clip) ? false : seen.add(row.clip))).forEach(row => {
+  if (reportContacts) { console.log(JSON.stringify({ clip: row.clip, file: row.file, stanceWindows: row.stanceWindows })); return; }
   console.log(`${row.clip.padEnd(22)} ${String(row.strideSpeed).padStart(5)} m/s  ${String(row.duration).padStart(6)}s  dir ${row.forwardSign > 0 ? '+' : '-'}  ${row.file}`);
 });

@@ -7,7 +7,8 @@
 // Mutable module state, like shotgunAimState: written by the interaction pass,
 // read by the marker and the swing triggers, never through React.
 
-import { terrainHeight } from '../../world/terrain';
+import { terrainHeight, movementTerrainHeight } from '../../world/terrain';
+import { rockStrikeContact } from '../../physics/props/rockContact';
 import { rockSampleKey, selectRockSampleTarget } from '../../physics/props/rockSampling';
 import { getSpecimenRuntimePoses } from '../../world/specimenRuntime';
 import { getPollinatorFlight } from '../../wildlife/pollinators/pollinatorFlight';
@@ -41,6 +42,7 @@ export const toolTargetState = {
   perched: false,
   // Still, or near enough that the hoop will meet it where the ring is.
   catchable: false,
+  contactPoint: null,
 };
 
 export function clearToolTarget() {
@@ -53,6 +55,7 @@ export function clearToolTarget() {
   toolTargetState.label = null;
   toolTargetState.perched = false;
   toolTargetState.catchable = false;
+  toolTargetState.contactPoint = null;
 }
 
 function forwardOf(facing) {
@@ -104,6 +107,7 @@ function netTarget({ zoneId, position, facing, zoneSpecimens, runtimePositions, 
     radius: Math.max(0.22, Math.min(0.6, best.specimen.examineRadius || 0.35)),
     perched: best.perched,
     catchable: !best.flying,
+    contactPoint: null,
   };
 }
 
@@ -133,6 +137,7 @@ function hammerTarget({ position, facing, zoneId, obstacles, rockDamage }) {
     radius: Math.max(0.35, rock.radius || 0.5),
     perched: false,
     catchable: true,
+    contactPoint: rockStrikeContact(rock, position, (x, z) => movementTerrainHeight(x, z, zoneId)).position,
   };
 }
 

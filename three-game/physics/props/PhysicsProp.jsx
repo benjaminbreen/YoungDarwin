@@ -820,6 +820,7 @@ export function PhysicsProp({ prop, onBreak }) {
             id: prop.id,
             label: prop.label,
             mode: 'pickup',
+            focus: { x: translation.x, y: translation.y + 0.08, z: translation.z },
             distance,
             text: `Press E to pick up ${prop.label}`,
           });

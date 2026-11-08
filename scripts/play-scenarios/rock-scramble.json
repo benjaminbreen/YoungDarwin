@@ -1,0 +1,15 @@
+[
+  ["tool", "hands"],
+  ["eval", "(async()=>{window.__enableFootDebug=true;window.__rockHealth=api.store('health').health;window.__rockRoutes=[];for(const [x,heading,yaw,hold] of [[-15.96,0,1.55,1000],[-16.2,.25,1.25,1500]]){api.teleport(x,18.1,{heading:{x:heading,z:-1}});await api.waitForSettled(4000);api.setCameraYaw(yaw);const [record,released]=await Promise.all([api.recordMotion([],{durationMs:6200}),new Promise(r=>setTimeout(r,250)).then(async()=>{await api.walk(0,.25,hold);return api.getMotionState().scramble?.progress;})]);window.__rockRoutes.push({samples:record.samples,released});}return window.__rockRoutes.map(r=>r.released);})()"],
+  ["expect", "window.__rockRoutes.every(({samples,released})=>released>0&&released<1&&samples.filter((s,i,a)=>s.scramble&&!a[i-1]?.scramble).length===1)", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.every(s=>!s.airborne&&!/fall|trip|gettingUp/i.test(s.action||'')))", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>{const contacts=samples.filter(s=>s.scramble?.contacts?.hands?.some(h=>h.weight>.9&&h.error<.025));return contacts.length>=2&&contacts.at(-1).t-contacts[0].t>=60&&contacts.every(s=>s.scramble.contacts.hands[0].target.every((x,i)=>Math.abs(x-contacts.at(-1).scramble.contacts.hands[0].target[i])<.02));})", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.filter(s=>s.scramble?.progress>0.03).every(s=>s.scramble.pose?.headAboveHips>0.25&&Math.abs(s.scramble.pose.torsoPitch)<0.9&&s.scramble.pose.legs.every(l=>l.hipClearance>0.18&&l.kneeFlexion<2.24)))", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.every((s,i,a)=>!i||Math.abs(s.y-a[i-1].y)<0.16))", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.every(s=>s.foot?.ls>=-0.003&&s.foot?.rs>=-0.003))", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.filter(s=>s.scramble).every(s=>Math.min(s.foot.ls,s.foot.rs)<0.035))", {"equals":true}],
+  ["expect", "window.__rockRoutes.every(({samples})=>samples.filter(s=>s.t>5500).every(s=>s.action===null&&s.foot.ls<0.025&&s.foot.rs<0.025))", {"equals":true}],
+  ["expect", "api.store('health').health===window.__rockHealth", {"equals":true}],
+  ["expect", "api.getMotionState().action", {"equals":null}],
+  ["expect", "api.renderAudit().ok", {"equals":true}]
+]

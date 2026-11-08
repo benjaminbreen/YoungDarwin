@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER } from './playerConfig';
 import { dampAngle, easeInOutCubic } from './playerUtils';
+import { sampleRockScramble } from './playerRockTraversal';
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
@@ -32,6 +33,32 @@ export function updatePlayerActionMotion({
   delta,
   finalizeFrame,
 }) {
+  const reach = stateRef.current.fieldReach;
+  if (reach?.groundStudy && stateRef.current.action === reach.clip && now < reach.releaseAt) {
+    // The approach owns horizontal movement until the plant. The velocity
+    // left over from walking would otherwise carry him through the kneel.
+    velocity.current.x = 0;
+    velocity.current.z = 0;
+  }
+  const approach = stateRef.current.reachApproach;
+  if (approach) {
+    if (stateRef.current.action !== approach.clip) {
+      stateRef.current.reachApproach = null;
+    } else {
+      const progress = THREE.MathUtils.smoothstep((now - approach.startedAt) / approach.duration, 0, 1);
+      const step = Math.max(0, (progress - approach.done) * approach.distance);
+      approach.done = progress;
+      const before = frameScratch.reachBefore || (frameScratch.reachBefore = new THREE.Vector3());
+      before.copy(group.current.position);
+      group.current.position.x += approach.x * step;
+      group.current.position.z += approach.z * step;
+      const collision = collisionAdapter.resolveCollision(group.current.position, before);
+      if (collision) { group.current.position.copy(collision.position).addScaledVector(collision.normal, 0.025); stateRef.current.reachApproach = null; }
+      group.current.position.y = collisionAdapter.groundInfo(group.current.position).y;
+      characterController.sync(group.current.position);
+      if (progress >= 1) stateRef.current.reachApproach = null;
+    }
+  }
   if (stateRef.current.collectionFaceMotion) {
     const motion = stateRef.current.collectionFaceMotion;
     if (!stateRef.current.action || now >= motion.until) {
@@ -79,8 +106,13 @@ export function updatePlayerActionMotion({
       ? climb.arcHeight
       : Math.max(0.28, climb.heightDelta * 0.32);
     const arc = Math.sin(Math.PI * progress) * arcHeight;
-    group.current.position.lerpVectors(climb.start, climb.end, eased);
-    group.current.position.y += arc;
+    if (stateRef.current.rockScramble === climb) {
+      climb.progress = progress;
+      sampleRockScramble(climb, progress, group.current.position);
+    } else {
+      group.current.position.lerpVectors(climb.start, climb.end, eased);
+      group.current.position.y += arc;
+    }
     characterController.sync(group.current.position);
     velocity.current.set(0, 0, 0);
     group.current.rotation.y = THREE.MathUtils.damp(group.current.rotation.y, climb.targetYaw, 10, delta);
@@ -98,6 +130,7 @@ export function updatePlayerActionMotion({
       group.current.position.copy(climb.end);
       characterController.sync(group.current.position);
       stateRef.current.climbMotion = null;
+      stateRef.current.rockScramble = null;
       stateRef.current.action = null;
       stateRef.current.lockMovementUntil = 0;
       if (climb.exitSpeed && !climbCancelled) {
@@ -213,7 +246,12 @@ export function updatePlayerActionMotion({
   if (stateRef.current.turnMotion) {
     const turn = stateRef.current.turnMotion;
     const progress = THREE.MathUtils.clamp((now - turn.startedAt) / turn.duration, 0, 1);
-    group.current.rotation.y = dampAngle(group.current.rotation.y, turn.targetYaw, 18, delta);
+    if (Number.isFinite(turn.startYaw)) {
+      const yawSpan = Math.atan2(Math.sin(turn.targetYaw - turn.startYaw), Math.cos(turn.targetYaw - turn.startYaw));
+      group.current.rotation.y = turn.startYaw + yawSpan * THREE.MathUtils.smoothstep(progress, 0, 1);
+    } else {
+      group.current.rotation.y = dampAngle(group.current.rotation.y, turn.targetYaw, 18, delta);
+    }
     const turnForward = frameScratch.forwardFacing.set(Math.sin(group.current.rotation.y), 0, Math.cos(group.current.rotation.y));
     const horizontalSpeed = Math.hypot(velocity.current.x, velocity.current.z);
     if (horizontalSpeed > 0.05) {

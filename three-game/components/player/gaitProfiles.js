@@ -118,6 +118,19 @@ const FOOT_CONTACT_PROFILES = {
   rifleCrouchWalk: { left: 0.16, right: 0.66, width: 0.24 },
 };
 
+// Measured with `node scripts/measure-gait-strides.mjs --contacts`. Sprint
+// contains TWO complete strides; contact and crossfade phase must agree.
+const DARWIN5_FOOT_CONTACT_PROFILES = {
+  walk: { left: 0.58, right: 0.09, width: 0.24, cycles: 1 },
+  tiredWalk: { left: 0.58, right: 0.09, width: 0.24, cycles: 1 },
+  jog: { left: 0.46, right: 0.97, width: 0.14, cycles: 1 },
+  run: { left: 0.46, right: 0.97, width: 0.14, cycles: 1 },
+  sprint: { left: 0.25, right: 0, width: 0.07, cycles: 2 },
+  grassRun: { left: 0.52, right: 0.05, width: 0.14, cycles: 1 },
+  crouchWalk: { left: 0.57, right: 0.01, width: 0.23, cycles: 1 },
+  crouchRun: { left: 0.53, right: 0.03, width: 0.16, cycles: 1 },
+};
+
 const FOOT_PROBE_PATTERNS = {
   default: {
     left: [/lefttoebase$/i, /lefttoe_end$/i, /leftfoot$/i],
@@ -142,6 +155,9 @@ function normalizeClipName(name = '') {
 const FOOT_CONTACT_PROFILE_BY_NORMALIZED = new Map(
   Object.entries(FOOT_CONTACT_PROFILES).map(([name, profile]) => [normalizeClipName(name), profile]),
 );
+const DARWIN5_PROFILE_BY_NORMALIZED = new Map(
+  Object.entries(DARWIN5_FOOT_CONTACT_PROFILES).map(([name, profile]) => [normalizeClipName(name), profile]),
+);
 
 function strideFamilyForClip(clip = '') {
   if (clip.includes('Run') || clip === 'run') return 'run';
@@ -156,6 +172,10 @@ export function calibratedStrideTimeScale(modelAssetId, clip, scale) {
 
 export function getFootContactProfile(modelAssetId, clip) {
   const normalized = normalizeClipName(clip);
+  if (modelAssetId === 'darwin5') {
+    const profile = DARWIN5_PROFILE_BY_NORMALIZED.get(normalized);
+    if (profile) return profile;
+  }
   return FOOT_CONTACT_PROFILES[clip] || FOOT_CONTACT_PROFILE_BY_NORMALIZED.get(normalized) || null;
 }
 
@@ -168,7 +188,13 @@ export function getVisualSoleOffset(modelAssetId, side) {
   return THREE.MathUtils.clamp(profile?.[side] ?? VISUAL_SOLE_OFFSET.default[side] ?? 0.006, 0, 0.06);
 }
 
-export function footPhasePulse(phase, center, width) {
-  const distance = Math.abs(((phase - center + 0.5) % 1) - 0.5);
+export function footPhasePulse(phase, center, width, cycles = 1) {
+  const distance = Math.abs(THREE.MathUtils.euclideanModulo((phase - center) * cycles + 0.5, 1) - 0.5) / cycles;
   return THREE.MathUtils.clamp(1 - distance / Math.max(0.001, width), 0, 1);
+}
+
+export function alignedGaitPhase(phase, from, to) {
+  if (!from || !to) return phase;
+  const stridePhase = THREE.MathUtils.euclideanModulo((phase - from.left) * (from.cycles || 1), 1);
+  return THREE.MathUtils.euclideanModulo(stridePhase / (to.cycles || 1) + to.left, 1);
 }

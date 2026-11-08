@@ -6,11 +6,15 @@ import {
   getFootProbePatterns,
   getVisualSoleOffset,
 } from './gaitProfiles';
+import { createLegPlantRig } from './legPlanting';
+import { createTerrainBalanceRig } from './terrainBalance';
+import { createBootGroundConstraint } from './bootGroundConstraint';
+import { rockScrambleWeight } from './playerRockTraversal';
 
 const VISUAL_GROUNDING_MAX_UP = 0.14;
-// Whole-body drop allowance for convex crests, where the movement surface sits
-// above the drawn mesh and both feet hover. Group translate only — never
-// per-foot bone forcing, which deformed the rig when tried.
+// Whole-body allowance for convex crests where movement support sits above
+// the drawn mesh. Small per-boot corrections use rotation-only leg IK; bone
+// translations and segment lengths always remain authored.
 const VISUAL_GROUNDING_MAX_DOWN = 0.16;
 const VISUAL_GROUNDING_DOWN_DEADZONE = 0.05;
 const VISUAL_GROUNDING_OBSTACLE_MAX_UP = 0.9;
@@ -38,7 +42,7 @@ function speedScaledObstacleLiftCap(speed, slowCap, fastCap) {
 
 function visibleGroundY(ground, fallback = 0) {
   if (!ground) return fallback;
-  if (ground.source === 'authored-obstacle' || ground.source === 'physics-prop') {
+  if (ground.source === 'authored-obstacle' || ground.source === 'physics-prop' || ground.source === 'loose-rock') {
     return Number.isFinite(ground.y) ? ground.y : fallback;
   }
   if (Number.isFinite(ground.terrainY)) return ground.terrainY;
@@ -53,6 +57,9 @@ export function createFootContactRig({
   grounding,
 }) {
   const isDarwin = String(assetId).startsWith('darwin');
+  const legPlantRig = assetId === 'darwin5' ? createLegPlantRig(scene, groupRef) : null;
+  const terrainBalanceRig = assetId === 'darwin5' ? createTerrainBalanceRig(scene, groupRef) : null;
+  const bootGroundConstraint = assetId === 'darwin5' ? createBootGroundConstraint(scene, groupRef) : null;
   const footGrounding = {
     left: { bone: null, contact: 0, pulse: 0, wasDown: false },
     right: { bone: null, contact: 0, pulse: 0, wasDown: false },
@@ -70,7 +77,7 @@ export function createFootContactRig({
     });
   });
 
-  function applyVisualGrounding(delta, action, requestedClip) {
+  function applyVisualGrounding(delta, action, requestedClip, poseFeet) {
     const motionState = grounding?.motionRef?.current;
     const adapter = grounding?.collisionAdapter;
     const enabled = asset.visualGrounding === true;
@@ -102,7 +109,7 @@ export function createFootContactRig({
         if (ground.source === 'authored-obstacle') obstacleProbeCount += 1;
         const contactY = visibleGroundY(ground, probeWorld.y);
         const footGap = probeWorld.y - contactY;
-        const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width) : 0.5;
+        const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width, profile.cycles || 1) : 0.5;
         const proximity = THREE.MathUtils.clamp(1 - Math.abs(footGap) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
         sampled[side] = {
           groundY: contactY,
@@ -158,8 +165,14 @@ export function createFootContactRig({
       }
     }
 
+    const scramble = motionState?.rockScramble;
+    if (scramble) targetOffset = -0.3 * rockScrambleWeight(scramble.progress);
     visualGroundOffset = THREE.MathUtils.damp(visualGroundOffset, targetOffset, 18, delta);
     if (group) group.position.y = (asset.yOffset || 0) + visualGroundOffset;
+    poseFeet?.();
+    terrainBalanceRig?.update(motionState || {}, canGround);
+    legPlantRig?.update({ delta, canGround, motion: motionState || {}, adapter, clip: clip?.name || requestedClip, phase, profile });
+    bootGroundConstraint?.update({ enabled, motion: motionState || {}, adapter, zoneId: grounding?.zoneId, delta, phase, profile });
 
     if (isDarwin) {
       const contacts = {};
@@ -173,7 +186,7 @@ export function createFootContactRig({
           ? sample.groundY
           : visibleGroundY(ground, probeWorld.y);
         const proximity = THREE.MathUtils.clamp(1 - Math.abs(probeWorld.y - contactY) / VISUAL_GROUNDING_PROBE_RANGE, 0, 1);
-        const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width) : (sample.phaseContact ?? 0.5);
+        const phaseContact = profile ? footPhasePulse(phase, profile[side], profile.width, profile.cycles || 1) : (sample.phaseContact ?? 0.5);
         const rawContact = canGround ? proximity * (0.34 + phaseContact * 0.66) : 0;
         entry.contact = THREE.MathUtils.damp(entry.contact, rawContact, 20, delta);
         // Locomotion phase owns timing; ground projection owns placement. A
@@ -228,15 +241,18 @@ export function createFootContactRig({
           right: footGrounding.right.contact,
           lastStepId: footGrounding.stepId,
           canGround,
+          plants: legPlantRig?.debug(),
+          soles: bootGroundConstraint?.debug(),
         },
       };
     }
   }
 
   return {
-    update(delta, activeAction, activeRequest) {
-      applyVisualGrounding(delta, activeAction, activeRequest);
+    restorePose() { bootGroundConstraint?.restorePose(); legPlantRig?.restorePose(); terrainBalanceRig?.restorePose(); },
+    update(delta, activeAction, activeRequest, poseFeet) {
+      applyVisualGrounding(delta, activeAction, activeRequest, poseFeet);
     },
-    dispose() {},
+    dispose() { bootGroundConstraint?.dispose(); legPlantRig?.dispose(); terrainBalanceRig?.dispose(); },
   };
 }

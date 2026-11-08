@@ -1,0 +1,17 @@
+[
+  ["tool", "hands"],
+  ["eval", "(async()=>{api.teleport(-16.085,14.5,{heading:{x:0,z:-1}}); await api.waitForSettled(4000); api.setCameraYaw(1.55); window.__footingHealth=api.store('health').health; return api.getMotionState().position;})()"],
+  ["eval", "(async()=>{const [record]=await Promise.all([api.recordMotion([],{durationMs:6500}),new Promise(resolve=>setTimeout(resolve,250)).then(()=>api.walk(0,0.25,2400))]); window.__stoneWalk=record;return record.summary;})()"],
+  ["expect", "window.__stoneWalk.samples.some(s=>s.footing?.pulse>0.2)", {"equals":true}],
+  ["expect", "Math.max(...window.__stoneWalk.samples.map(s=>s.footing?.count||0))", {"equals":1}],
+  ["expect", "window.__stoneWalk.samples.filter(s=>s.footing?.pulse>0.1).every(s=>!s.locked && !s.airborne && !/stumble|trip|fall/i.test(s.action||''))", {"equals":true}],
+  ["expect", "window.__stoneWalk.samples.some(s=>s.footing?.pulse>0.1 && s.clip==='walk' && s.groundSpeed>0.8)", {"equals":true}],
+  ["expect", "api.store('health').health===window.__footingHealth", {"equals":true}],
+  ["expect", "api.getMotionState().terrainBalance.pulse", {"equals":0}],
+  ["expect", "window.__stoneWalk.samples.every(s=>s.foot?.soleProbes>=16 && s.foot.ls>=-0.003 && s.foot.rs>=-0.003)", {"equals":true}],
+  ["expect", "window.__stoneWalk.samples.filter(s=>s.t>5500).every(s=>s.foot.ls<0.025&&s.foot.rs<0.025)", {"equals":true}],
+  ["eval", "(async()=>{api.teleport(32.08,22.57,{heading:{x:0,z:-1}});await api.waitForSettled(4000);api.setCameraYaw(1.55);const [record]=await Promise.all([api.recordMotion([],{durationMs:2500}),api.walk(0,0.25,1900)]);window.__smoothWalk=record;return record.summary;})()"],
+  ["expect", "window.__smoothWalk.samples.every(s=>!s.footing?.count)", {"equals":true}],
+  ["expect", "window.__smoothWalk.samples.every(s=>s.foot?.soleProbes>=16 && s.foot.ls>=-0.003 && s.foot.rs>=-0.003)", {"equals":true}],
+  ["expect", "api.renderAudit().ok", {"equals":true}]
+]

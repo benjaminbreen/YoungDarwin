@@ -1,0 +1,9 @@
+[
+  ["tp", 32.08, 22.57],
+  ["eval", "window.__jumpTimingReview = await api.recordMotion([{at:300,down:['jump']},{at:400,up:['jump']},{at:1100,down:['jump']},{at:1200,up:['jump']}], {durationMs:2400})"],
+  ["expect", "window.__jumpTimingReview.samples.filter((s,i,a) => s.airborne && !a[i-1]?.airborne).length", {"equals":2}],
+  ["expect", "window.__jumpTimingReview.samples.filter(s => s.airborne).every(s => !s.locked)", {"equals":true}],
+  ["expect", "window.__jumpTimingReview.samples.slice(1).every((s,i) => window.__jumpTimingReview.samples[i].y-s.y < 0.35)", {"equals":true}],
+  ["expect", "api.getMotionState().airborne", {"equals":false}],
+  ["expect", "api.getMotionState().action", {"equals":null}]
+]

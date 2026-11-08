@@ -27,6 +27,8 @@ import { npcYieldsToSpecimen } from './attention';
 import { WARINESS, warinessFor, warinessTier } from '../../wildlife/wariness';
 import { normalizeWildlifeId } from '../../wildlife/wildlifeCatalog';
 import { gameClockMinutes } from '../../narrator/narratorEvents';
+import { beginFieldReach, FIELD_REACH_PROFILES, fieldReachApproach, takeFieldReachContact } from './fieldReach';
+import { beginHammerContact } from './toolContact';
 
 const EDGE_TRAVEL_HOLD_SECONDS = 0.55;
 
@@ -412,12 +414,15 @@ function resolveHandGrab({ now, stateRef, position, currentZoneId, zoneSpecimens
   const grab = stateRef.current.pendingHandGrab;
   if (!grab || now < grab.strikeAt) return;
   stateRef.current.pendingHandGrab = null;
+  if (grab.zoneId && (grab.zoneId !== currentZoneId || stateRef.current.action !== 'pickUp'
+    || !stateRef.current.fieldReach?.committed)) return;
   const specimen = zoneSpecimens.find(item => item && (item.instanceId || item.id) === grab.actorId);
   const pose = specimen ? liveSpecimenPose(currentZoneId, specimen) : null;
   if (!specimen || !pose) return;
   const endDistance = Math.hypot(pose.x - position.x, pose.z - position.z);
-  if (endDistance <= HAND_CATCH.closeReach) {
-    collectNearby(grab.actorId, { assured: true });
+  const reach = stateRef.current.fieldReach;
+  if (endDistance <= HAND_CATCH.closeReach && !reach?.failed) {
+    collectNearby(grab.actorId, fieldCollectionOptions(reach));
     return;
   }
   // A lunge that misses sends it off, and its kind here remember it.
@@ -438,6 +443,10 @@ function resolveHandGrab({ now, stateRef, position, currentZoneId, zoneSpecimens
       playerWasRunning: grab.wasRunning,
     }),
   });
+}
+
+function fieldCollectionOptions(reach) {
+  return { assured: true, labelAfter: reach?.groundStudy ? reach.endAt * 1000 : undefined };
 }
 
 export function updatePlayerInteractions({
@@ -473,6 +482,37 @@ export function updatePlayerInteractions({
     : null;
   const storeState = useThreeGameStore.getState();
   const interactionNow = performance.now() / 1000;
+  const reach = stateRef.current.fieldReach;
+  if (reach) {
+    if (reach.zoneId !== currentZoneId || reach.clip !== stateRef.current.action || interactionNow > reach.endAt
+      || reach.toolId !== storeState.activeToolId) {
+      stateRef.current.fieldReach = null;
+      stateRef.current.reachApproach = null;
+    } else {
+      if (reach.kind === 'hand' && interactionNow < reach.contactAt - 0.1) {
+        const subject = zoneSpecimens.find(item => (item.instanceId || item.id) === reach.actorId);
+        const pose = subject && liveSpecimenPose(currentZoneId, subject);
+        if (pose) Object.assign(reach.target, { x: pose.x, y: pose.y + (reach.trackOffset || 0), z: pose.z });
+      }
+      if (interactionNow < reach.contactAt - 0.1 && (reach.kind === 'sample' || reach.kind === 'carry')) {
+        const prompt = storeState.carryPrompt;
+        const id = reach.kind === 'sample' ? reach.payload?.sampleId : reach.payload?.id;
+        const point = prompt?.id === id ? (prompt.focus || prompt.sample?.position) : null;
+        if (point) Object.assign(reach.target, point);
+      }
+      const contact = takeFieldReachContact(reach, { now: interactionNow, action: stateRef.current.action, zoneId: currentZoneId, toolId: storeState.activeToolId });
+      if (contact) {
+        if (contact.failed) useThreeGameStore.setState({ message: 'Move a little closer for a clear reach.' });
+        else if (contact.kind === 'specimen') collectNearby(contact.actorId, fieldCollectionOptions(contact));
+        else if (contact.kind === 'sample') {
+          emitPropEvent('fieldwork-foley', { kind: 'stow-sample', material: contact.payload?.material, position: contact.target });
+          storeState.collectRockSample?.(contact.payload);
+        } else if (contact.kind === 'crop') storeState.harvestCrop?.(contact.payload);
+        else if (contact.kind === 'forage') storeState.consumeForageable?.(contact.payload);
+        else if (contact.kind === 'carry') setCarriedObject(contact.payload.id);
+      }
+    }
+  }
   const pendingCarryPickup = stateRef.current.pendingCarryPickup;
   if (pendingCarryPickup) {
     if (storeState.carriedObjectId === pendingCarryPickup.id) {
@@ -810,6 +850,38 @@ export function updatePlayerInteractions({
     currentState.setFieldAction?.(resolvedAction);
   }
 
+  const startContactAction = ({ clip, target, kind = 'specimen', actorId = null, payload = null, celebrate = false, studyGround = false }) => {
+    if (stateRef.current.modelAssetId !== 'darwin5' || !FIELD_REACH_PROFILES[clip] || !target) return null;
+    if (stateRef.current.action) return { blocked: true };
+    if (Math.hypot(target.x - position.x, target.z - position.z) > 1.85) {
+      useThreeGameStore.setState({ message: 'Step closer to reach it.' });
+      return { blocked: true };
+    }
+    const currentState = useThreeGameStore.getState();
+    const now = performance.now() / 1000;
+    const profile = FIELD_REACH_PROFILES[clip];
+    const approach = fieldReachApproach(position, target, profile.contact, studyGround ? 0.58 : 0.68);
+    // A live catch uses the same beats at a quicker pace.
+    const liveCatch = kind === 'hand';
+    const groundStudy = studyGround ? {
+      leadIn: liveCatch ? 0.16 + (approach?.distance || 0) * 0.36 : approach ? 0.23 + approach.distance * 0.5 : 0.2,
+      descent: liveCatch ? 0.39 : 0.48,
+      stepping: Boolean(approach),
+    } : null;
+    const reach = beginFieldReach({ clip, target, now, zoneId: currentZoneId, actorId, kind, payload, toolId: currentState.activeToolId, groundStudy });
+    if (!reach) return null;
+    startAction(clip, reach.endAt - now, { lockMovement: reach.releaseAt - now, ...(celebrate && !groundStudy ? { recoverAction: 'happyIdle' } : {}) });
+    stateRef.current.fieldReach = reach;
+    if (clip === 'heavyToolSwing') beginHammerContact(now, target);
+    stateRef.current.reachApproach = approach ? { ...approach, duration: groundStudy?.leadIn ?? approach.duration, startedAt: now, clip } : null;
+    stateRef.current.collectionFaceMotion = {
+      targetYaw: Math.atan2(target.x - position.x, target.z - position.z),
+      startedAt: now,
+      until: groundStudy ? now + groundStudy.leadIn : reach.contactAt,
+    };
+    return reach;
+  };
+
   const startSpecimenCollection = (currentState, specimen) => {
     if (!specimen || stateRef.current.action) return false;
     if (currentState.activeConstraint?.blockedTools?.includes(currentState.activeToolId)) {
@@ -861,6 +933,31 @@ export function updatePlayerInteractions({
       documented,
       handCatch: plan?.kind === 'hand',
     });
+    const contactClip = animation.clip === 'kneelInspect' ? 'gatherGround' : animation.clip;
+    if (target && FIELD_REACH_PROFILES[contactClip]) {
+      const point = livePose || target;
+      const contactTarget = { x: point.x, y: point.y + (specimen.pollinator ? 0 : Math.min(1.25, specimenInteractionHeight(specimen) * (contactClip === 'gatherChestHeight' ? 0.9 : 0.55))), z: point.z };
+      const studyGround = !documented && currentState.activeToolId === 'hands'
+        && (contactClip === 'gatherGround' || contactClip === 'pickUp')
+        && Math.abs(contactTarget.y - position.y) < 0.55;
+      if (studyGround && specimenKind(specimen).ontology === 'plant') {
+        // The root is the plant's origin. Pick from the near foliage so a
+        // solid stem or a thicket does not require reaching through its centre.
+        const dx = position.x - point.x, dz = position.z - point.z;
+        const distance = Math.hypot(dx, dz);
+        const fraction = Math.min(0.35, specimenInteractionHeight(specimen) * 0.3 / Math.max(0.1, distance));
+        contactTarget.x += dx * fraction;
+        contactTarget.z += dz * fraction;
+      }
+      const contact = startContactAction({ clip: contactClip, target: contactTarget, actorId, kind: plan?.kind === 'hand' ? 'hand' : 'specimen', celebrate: !alreadyCollected, studyGround });
+      if (contact) {
+        if (plan?.kind === 'hand' && !contact.blocked) {
+          contact.trackOffset = contactTarget.y - point.y;
+          stateRef.current.pendingHandGrab = { actorId, zoneId: currentZoneId, strikeAt: contact.contactAt + 0.025, startDistance, wasRunning: performance.now() / 1000 - (stateRef.current.lastRunAt ?? -Infinity) < 0.8 };
+        }
+        return true;
+      }
+    }
     if (animation.align && target) {
       const dx = target.x - position.x;
       const dz = target.z - position.z;
@@ -954,8 +1051,8 @@ export function updatePlayerInteractions({
     } else if (fieldAction.kind === 'collect' && target?.specimenId) {
       const sample = fieldSampleFor(target, currentZoneId);
       if (sample) {
-        startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
-        currentState.collectRockSample?.(sample);
+        const contact = startContactAction({ clip: 'gatherGround', target: sample.position || target.focus, kind: 'sample', payload: sample });
+        if (!contact) { startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true }); currentState.collectRockSample?.(sample); }
       }
     } else if (fieldAction.kind === 'observe' && !currentState.examineSession) {
       if (target.kind === 'specimen') openExamine(target.actorId);
@@ -1084,10 +1181,12 @@ export function updatePlayerInteractions({
       }
     } else if (currentState.carryPrompt) {
       if (currentState.carryPrompt.mode === 'collect-rock-sample') {
+        const sample = currentState.carryPrompt.sample;
+        const contact = startContactAction({ clip: 'gatherGround', target: currentState.carryPrompt.focus || sample?.position, kind: 'sample', payload: sample });
+        if (contact) { lastInteractRef.current = interactHeld; return; }
         if (!stateRef.current.action) {
           startAction('kneelInspect', ACTION_DURATION.kneelInspect, { lockMovement: true });
         }
-        const sample = currentState.carryPrompt.sample;
         emitPropEvent('fieldwork-foley', {
           kind: 'stow-sample',
           material: sample?.material || null,
@@ -1095,6 +1194,10 @@ export function updatePlayerInteractions({
         });
         currentState.collectRockSample?.(sample);
       } else if (currentState.carryPrompt.mode === 'harvest-crop') {
+        const crop = currentState.carryPrompt.crop;
+        const cropTarget = crop?.position && { ...crop.position, y: crop.position.y + (crop.pickClip === 'ground' ? 0.12 : 1.05) };
+        const contact = startContactAction({ clip: crop?.pickClip === 'ground' ? 'gatherGround' : 'gatherChestHeight', target: cropTarget, kind: 'crop', payload: crop });
+        if (contact) { lastInteractRef.current = interactHeld; return; }
         if (!stateRef.current.action) {
           const clip = currentState.carryPrompt.crop?.pickClip === 'ground' ? 'kneelInspect' : 'gatherChestHeight';
           startAction(clip, ACTION_DURATION[clip], { lockMovement: true });
@@ -1119,6 +1222,9 @@ export function updatePlayerInteractions({
             });
           }
         } else {
+          const forageTarget = forageable?.position && { ...forageable.position, y: forageable.position.y + 0.15 };
+          const contact = startContactAction({ clip: forageable?.pickClip === 'gatherChestHeight' ? 'gatherChestHeight' : 'gatherGround', target: forageTarget, kind: 'forage', payload: forageable });
+          if (contact) { lastInteractRef.current = interactHeld; return; }
           if (!stateRef.current.action) {
             const clip = forageable?.pickClip || 'gatherGround';
             startAction(clip, ACTION_DURATION[clip] || ACTION_DURATION.gatherGround, { lockMovement: true });
@@ -1129,6 +1235,8 @@ export function updatePlayerInteractions({
         emitPropEvent('toggle-syms-field-case', { id: currentState.carryPrompt.id });
       } else if (currentState.carryPrompt.mode === 'pickup') {
         if (!stateRef.current.action) {
+          const contact = startContactAction({ clip: 'pickUp', target: currentState.carryPrompt.focus, kind: 'carry', payload: { id: currentState.carryPrompt.id } });
+          if (contact) { lastInteractRef.current = interactHeld; return; }
           startAction('pickUp', ACTION_DURATION.pickUp, { lockMovement: true });
           stateRef.current.pendingCarryPickup = {
             id: currentState.carryPrompt.id,

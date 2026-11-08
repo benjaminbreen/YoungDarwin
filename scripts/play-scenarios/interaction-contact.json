@@ -1,0 +1,14 @@
+[
+  ["tool", "hands"],
+  ["zone", "PENAL_COLONY"],
+  ["tp", 6, 19],
+  ["expect", "api.store('carryPrompt').carryPrompt?.mode", {"equals":"harvest-crop"}],
+  ["eval", "(async () => { window.__reachCrop = api.store('carryPrompt').carryPrompt.crop.cropId; window.__reachCount = api.store('harvestedCropIds').harvestedCropIds.length; setTimeout(() => { window.__reachEarly = api.store('harvestedCropIds').harvestedCropIds.includes(window.__reachCrop); }, 400); window.__reachReview = await api.recordMotion([{at:200,down:['interact']},{at:300,up:['interact']},{at:1450,down:['backward']},{at:1900,up:['backward']}],{durationMs:2600}); return window.__reachReview.summary; })()"],
+  ["expect", "window.__reachEarly", {"equals":false}],
+  ["expect", "api.store('harvestedCropIds').harvestedCropIds.includes(window.__reachCrop)", {"equals":true}],
+  ["expect", "api.store('harvestedCropIds').harvestedCropIds.length - window.__reachCount", {"equals":1}],
+  ["expect", "window.__reachReview.samples.some(s => s.reach?.committed && s.reach.error < 0.2)", {"equals":true}],
+  ["expect", "window.__reachReview.samples.filter(s => s.reach?.committed).every(s => s.reach.contactAge >= 0.025)", {"equals":true}],
+  ["expect", "window.__reachReview.samples.some(s => s.t > 1500 && s.groundSpeed > 1 && !s.locked)", {"equals":true}],
+  ["expect", "api.renderAudit().ok", {"equals":true}]
+]

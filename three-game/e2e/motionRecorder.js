@@ -86,6 +86,21 @@ export async function recordMotion(steps = [], { durationMs = null } = {}) {
         foot = { lx: round(left.x), lz: round(left.z), lh: round(left.y - position.y) };
         const right = feet.right.getWorldPosition(footScratch);
         Object.assign(foot, { rx: round(right.x), rz: round(right.z), rh: round(right.y - position.y) });
+        const plants = window.__darwinFootDebug?.darwin5?.plants;
+        if (plants) {
+          const leftPlant = plants.find(plant => plant.side === 'left');
+          const rightPlant = plants.find(plant => plant.side === 'right');
+          foot.lp = round(leftPlant?.weight);
+          foot.rp = round(rightPlant?.weight);
+          foot.le = leftPlant?.planted ? round(Math.hypot(foot.lx - leftPlant.anchor[0], foot.lz - leftPlant.anchor[2])) : null;
+          foot.re = rightPlant?.planted ? round(Math.hypot(right.x - rightPlant.anchor[0], right.z - rightPlant.anchor[2])) : null;
+        }
+        const soles = window.__darwinFootDebug?.darwin5?.soles;
+        if (soles) {
+          foot.ls = round(soles.find(sole => sole.side === 'left')?.clearance, 4);
+          foot.rs = round(soles.find(sole => sole.side === 'right')?.clearance, 4);
+          foot.soleProbes = soles.reduce((sum, sole) => sum + sole.probes, 0);
+        }
       }
       samples.push({
         t: round(t, 0),
@@ -99,6 +114,12 @@ export async function recordMotion(steps = [], { durationMs = null } = {}) {
         body: round(motion.bodyYaw),
         cameraYaw: round(bridge.getCameraYaw()),
         action: motion.action,
+        scramble: motion.scramble,
+        footing: motion.terrainBalance ? { pulse: round(motion.terrainBalance.pulse), count: motion.terrainBalance.count,
+          rise: round(motion.terrainBalance.rise), forward: round(motion.terrainBalance.forwardGrade), cross: round(motion.terrainBalance.crossGrade), source: motion.terrainBalance.source } : undefined,
+        reach: motion.reach ? { kind: motion.reach.kind, committed: motion.reach.committed, error: motion.reach.hand?.error, contactAge: round(performance.now() / 1000 - motion.reach.contactAt) } : undefined,
+        hammerContact: motion.action === 'swingHammer' && window.__darwinHammerContact
+          ? { error: round(window.__darwinHammerContact.tip.error), weight: round(window.__darwinHammerContact.weight) } : undefined,
         jumpPhase: motion.jumpPhase,
         walking: motion.walking,
         running: motion.running,
