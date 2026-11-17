@@ -296,18 +296,18 @@ export function ExamineView() {
   };
   const subjectName = casualName(session);
   const collectButton = !plan
-    ? { label: session?.collectVerb, hint: 'Press C to collect.' }
+    ? { label: session?.collectVerb, hint: 'Press E to collect.' }
     : plan.kind === 'wrongTool'
       ? { label: `Take up the ${toolDisplayName(plan.bestToolId)}${slot(plan.bestToolId)}`, hint: plan.advice }
       : plan.kind === 'net'
-        ? { label: 'Net it', hint: `Press C to close this and swing the net. The ${subjectName} has to be within a couple of paces.` }
+        ? { label: 'Net it', hint: `Press E to close this and swing the net. The ${subjectName} has to be within a couple of paces.` }
         : plan.kind === 'hand'
-          ? { label: 'Grab it', hint: `Press C to close this and reach for the ${subjectName}. Come in at a walk; it must still be there when your hand closes.` }
+          ? { label: 'Grab it', hint: `Press E to close this and reach for the ${subjectName}. Come in at a walk; it must still be there when your hand closes.` }
           : plan.kind === 'shoot'
             ? { label: 'Close and shoot', hint: 'Hold F or the right mouse button to aim, then fire. Pick it up afterwards.' }
             : plan.kind === 'document'
-              ? { label: 'Document', hint: 'Press C to record it without taking it.' }
-              : { label: session?.collectVerb, hint: 'Press C to collect.' };
+              ? { label: 'Document', hint: 'Press E to record it without taking it.' }
+              : { label: session?.collectVerb, hint: 'Press E to collect.' };
 
   useEffect(() => {
     if (!open) {
@@ -427,13 +427,14 @@ export function ExamineView() {
     const onKeyDown = event => {
       const tag = event.target?.tagName;
       const typing = tag === 'INPUT' || tag === 'TEXTAREA';
-      if (!typing && event.code === 'KeyC' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
+      if (!typing && event.code === 'KeyE' && !event.metaKey && !event.ctrlKey && !event.altKey && collectReady) {
         event.preventDefault();
-        // C is also crouch. Taken in the capture phase and stopped here, so
-        // the game never sees it held and Darwin does not drop into a crouch
-        // as the view closes for a catch.
+        // E is the action key in the field too. Taken in the capture phase
+        // and stopped here, so the game never sees it held and does not act a
+        // second time as the view closes for a catch. A key still held from
+        // opening the view repeats; only a fresh press takes the subject.
         event.stopImmediatePropagation();
-        confirmCollection();
+        if (!event.repeat) confirmCollection();
       }
     };
     window.addEventListener('keydown', onKeyDown, true);

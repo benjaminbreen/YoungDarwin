@@ -29,6 +29,9 @@ export const FAUNA_POPULATIONS = {
     { speciesId: 'mediumgroundfinch', count: 1, center: [-31, 68], spread: [5, 4], habitat: [5.2, 3.2] },
     { speciesId: 'lavalizard', count: 2, center: [-47, 58], spread: [4, 7], habitat: [3.4, 2.6] },
     { speciesId: 'galapagospaintedlocust', count: 2, center: [30, 53], spread: [4, 3], habitat: [4.2, 3.2] },
+    // A pair near the landing approaches when Darwin stands still. Append
+    // new groups to preserve the actor IDs stored in existing saves.
+    { speciesId: 'floreanamockingbird', count: 2, center: [-3, 17], spread: [4, 3], habitat: [6.4, 4.4] },
   ],
   LAVA_FLATS: [
     { speciesId: 'lavalizard', count: 4, center: [7.6, -7.2], spread: [6, 5], habitat: [3.4, 2.6] },

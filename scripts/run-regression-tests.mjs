@@ -925,6 +925,12 @@ const {
 const { getNpcPlacement, getStationaryNpcsForZone } = loadModule('three-game/npcs/npcPlacements.js');
 const { DIRECTIVES, resolveDirective } = loadModule('three-game/directives.js');
 const {
+  SYMS_VISIT,
+  nextSymsVisit,
+  pickSymsVisitTarget,
+  symsLeadPoint,
+} = loadModule('three-game/npcs/symsVisits.js');
+const {
   distanceToWalkableBoundary,
   regionBoundaryIsRadialAt,
   regionEdgeRouteOpenAt,
@@ -979,10 +985,10 @@ test('staged control hints advance through each mode-specific control loop', () 
   assert.equal(nextControlHintPhase('finch', { ...basics, moved: true, ran: true, jumped: true }), 'animalActions');
   assert.equal(nextControlHintPhase('finch', { ...basics, moved: true, ran: true, jumped: true, animalAction: true }), 'camera');
   assert.equal(nextControlHintPhase('tortoise', { ...basics, moved: true, ran: true }), 'brace');
-  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true }), 'camera');
-  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true }), 'fieldAction');
-  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true, fieldAction: true }), 'worldAction');
-  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, jumped: true, camera: true, fieldAction: true, worldAction: true }), 'complete');
+  // Darwin's corner hint stops at getting about; the opening objectives teach
+  // the fieldwork keys on the banner.
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true }), 'camera');
+  assert.equal(nextControlHintPhase('darwin', { ...basics, moved: true, ran: true, camera: true }), 'complete');
 });
 
 test('control onboarding pauses behind blocking UI without losing completed steps', () => {
@@ -1223,17 +1229,18 @@ test('Post Office Bay wildlife is sparse near arrival and keeps lizards and barn
   const inland = specimens.filter(specimen => specimen.instanceId.includes(':post-office-') && specimen.spawnPoint[2] > 50);
   assert.equal(inland.length, 5);
   edgeSpecimens.push(...inland.filter(specimen => specimen.id !== 'scalesiavillosa'));
-  // The resident lizards around them keep to the edges as well.
+  // The opening mockingbirds are the only resident population near Darwin.
   const residents = everyone.filter(specimen => specimen.localInstanceId?.startsWith('population-'));
   assert.ok(residents.length > 0);
+  const openingBirds = [];
   for (const specimen of [...edgeSpecimens, ...residents]) {
     const [x, , z] = specimen.spawnPoint;
     assert.equal(isWalkableTerrain(x, z, 'POST_OFFICE_BAY'), true);
-    assert.ok(
-      Math.hypot(x - darwinStart.x, z - darwinStart.z) > 40,
-      `${specimen.instanceId} should stay far from the opening`,
-    );
+    if (Math.hypot(x - darwinStart.x, z - darwinStart.z) > 40) continue;
+    assert.equal(specimen.id, 'floreanamockingbird', `${specimen.instanceId} should stay far from the opening`);
+    openingBirds.push(specimen);
   }
+  assert.equal(openingBirds.length, 2);
   for (const crab of everyone.filter(specimen => specimen.id === 'hermitcrab')) {
     const [x, , z] = crab.spawnPoint;
     assert.ok(Math.hypot(x - darwinStart.x, z - darwinStart.z) > 14, crab.instanceId);
@@ -1542,6 +1549,64 @@ test('map-edge distance follows the real movement boundary, not the terrain rect
   assert.ok(inland > 0);
 });
 
+test('Covington walks over once per visit, only while it still helps', () => {
+  const base = {
+    activeDirectiveId: 'look',
+    playableModeId: 'darwin',
+    currentZoneId: 'POST_OFFICE_BAY',
+    symsZoneId: 'POST_OFFICE_BAY',
+    symsDirective: 'range',
+    symsVisitsDone: [],
+  };
+  assert.equal(nextSymsVisit(base, { playSeconds: 5 }), null, 'no visit in the first seconds');
+  assert.equal(nextSymsVisit(base, { playSeconds: SYMS_VISIT.firstVisitDelaySeconds })?.id, 'crabs');
+  assert.equal(nextSymsVisit({ ...base, symsVisitsDone: ['crabs'] }, { playSeconds: 120 }), null, 'each visit happens once');
+  assert.equal(nextSymsVisit({ ...base, activeDirectiveId: 'collect' }, { playSeconds: 120 }), null,
+    'a player who has already examined something is not told to');
+  assert.equal(nextSymsVisit({ ...base, activeDirectiveId: 'write-up' })?.id, 'labels');
+  assert.equal(nextSymsVisit({ ...base, activeDirectiveId: 'net' })?.id, 'net');
+  assert.equal(nextSymsVisit({ ...base, activeDirectiveId: 'travel' })?.id, 'inland');
+  assert.equal(nextSymsVisit({ ...base, activeDirectiveId: 'travel', symsDirective: 'follow' }), null,
+    'he does not offer to come along when he already is');
+
+  // Never while Darwin or Covington is busy, or Covington is elsewhere.
+  const due = { ...base, activeDirectiveId: 'net' };
+  assert.equal(nextSymsVisit({ ...due, examineSession: { kind: 'specimen' } }), null);
+  assert.equal(nextSymsVisit({ ...due, activeNpcEncounter: { npcId: 'syms_covington' } }), null);
+  assert.equal(nextSymsVisit({ ...due, symsGunErrand: { kind: 'fetch' } }), null);
+  assert.equal(nextSymsVisit({ ...due, symsDirective: 'wait' }), null);
+  assert.equal(nextSymsVisit({ ...due, symsZoneId: 'BEAGLE' }), null);
+  assert.equal(nextSymsVisit({ ...due, playableModeId: 'finch' }), null);
+  assert.equal(nextSymsVisit(due, { overlayOpen: true }), null);
+  assert.equal(nextSymsVisit({ ...due, symsVisit: { id: 'labels' } }), null, 'one visit at a time');
+  assert.equal(nextSymsVisit(due, { secondsSinceLastVisit: 2 }), null, 'visits do not run back to back');
+});
+
+test('Covington leads toward the nearest live subject of the kind he named', () => {
+  const crab = (id, x, z) => ({ id: 'hermitcrab', instanceId: id, spawnPoint: [x, 0, z] });
+  const specimens = [
+    crab('far', 30, 0),
+    crab('near', 6, 0),
+    crab('taken', 2, 0),
+    { id: 'lavalizard', instanceId: 'lizard', spawnPoint: [1, 0, 0] },
+  ];
+  const target = pickSymsVisitTarget({
+    kind: 'hermitcrab', specimens, collectedActorIds: ['taken'], from: { x: 0, z: 0 },
+  });
+  assert.equal(target.actorId, 'near', 'collected individuals and other species are skipped');
+  const moved = pickSymsVisitTarget({
+    kind: 'hermitcrab', specimens, collectedActorIds: ['taken'], from: { x: 0, z: 0 },
+    poses: new Map([['near', { x: 50, z: 0 }]]),
+  });
+  assert.equal(moved.actorId, 'far', 'a live pose wins over the spawn point');
+  assert.equal(pickSymsVisitTarget({ kind: 'hermitcrab', specimens: [], from: { x: 0, z: 0 } }), null);
+
+  const short = symsLeadPoint({ x: 0, z: 0 }, { x: 10, z: 0 });
+  assert.ok(Math.abs(short.x - (10 - SYMS_VISIT.leadStopShort)) < 1e-6, 'he stops short of the subject');
+  const capped = symsLeadPoint({ x: 0, z: 0 }, { x: 100, z: 0 });
+  assert.ok(Math.abs(capped.x - SYMS_VISIT.leadMaxDistance) < 1e-6, 'he never leads across the map');
+});
+
 test('objectives advance in order from real gameplay state', () => {
   const fieldRecord = (specimenId, location = 'Post Office Bay', condition = 'clean specimen') => ({
     authorship: 'field-record', specimenId, location, condition,
@@ -1551,28 +1616,50 @@ test('objectives advance in order from real gameplay state', () => {
     collectedSpecimenIds: [], collectedSpecimenActorIds: [], npcEncounterState: {},
     documentedSpecimenIds: [], visitedZoneIds: ['POST_OFFICE_BAY'], shipCollection: [], journal: [],
   };
-  assert.equal(resolveDirective(base), 'explore', 'a fresh expedition starts on the first objective');
+  assert.equal(resolveDirective(base), 'look', 'a fresh expedition starts on the first objective');
+  // Opening the examine view is enough; no saved note is needed.
+  const looked = { ...base, lookedAtTypeIds: ['hermitcrab'] };
+  assert.equal(resolveDirective(looked), 'collect');
+  const picked = { ...looked, collectedSpecimenIds: ['hermitcrab'] };
+  assert.equal(resolveDirective(picked, 'collect'), 'write-up');
+  const labelled = {
+    ...picked,
+    journal: [{ authorship: 'player', specimenId: 'hermitcrab', content: 'Grey shell, red legs.' }],
+  };
+  assert.equal(resolveDirective(labelled, 'write-up'), 'net');
+  const handCaught = { ...labelled, journal: [...labelled.journal, fieldRecord('hermitcrab')] };
+  assert.equal(resolveDirective(handCaught, 'net'), 'net', 'only a net catch finishes the net step');
+  const netted = {
+    ...handCaught,
+    journal: [...handCaught.journal, { ...fieldRecord('galapagossulphur'), toolId: 'insect_net' }],
+  };
+  assert.equal(resolveDirective(netted, 'net'), 'explore');
+  const oldSaveNet = {
+    ...handCaught,
+    journal: [...handCaught.journal, { ...fieldRecord('galapagossulphur'), method: 'Insect Net' }],
+  };
+  assert.equal(resolveDirective(oldSaveNet, 'net'), 'explore', 'journal entries from before toolId still count');
+  const failedNet = {
+    ...handCaught,
+    journal: [...handCaught.journal, { ...fieldRecord('galapagossulphur', 'Post Office Bay', 'failed'), toolId: 'insect_net' }],
+  };
+  assert.equal(resolveDirective(failedNet, 'net'), 'net', 'a missed swing is not a catch');
+
   const duplicateRecords = {
-    ...base,
-    journal: [fieldRecord('lavalizard'), fieldRecord('lavalizard'), fieldRecord('seaurchin')],
+    ...netted,
+    journal: [fieldRecord('lavalizard'), fieldRecord('lavalizard'), { ...fieldRecord('seaurchin'), toolId: 'insect_net' }],
   };
   assert.equal(resolveDirective(duplicateRecords, 'explore'), 'explore', 'the landing survey counts distinct specimen types');
   const surveyed = {
-    ...base,
-    journal: [fieldRecord('lavalizard'), fieldRecord('seaurchin'), fieldRecord('barnacle')],
+    ...netted,
+    journal: [...netted.journal, fieldRecord('lavalizard'), fieldRecord('seaurchin')],
   };
-  assert.equal(resolveDirective(surveyed, 'explore'), 'tool');
-  const armed = { ...surveyed, activeToolId: 'insect_net' };
-  assert.equal(resolveDirective(armed, 'tool'), 'examine');
+  assert.equal(resolveDirective(surveyed, 'explore'), 'travel');
 
   // Objectives already satisfied are skipped, never re-issued.
-  const ahead = {
-    ...surveyed,
-    activeToolId: 'insect_net',
-    examinedTypeIds: ['lavalizard'],
-    collectedSpecimenIds: ['lavalizard'],
-  };
-  assert.equal(resolveDirective(ahead, 'explore'), 'syms', 'satisfied objectives are skipped');
+  assert.equal(resolveDirective(surveyed), 'travel', 'satisfied objectives are skipped');
+  // A save whose objective id no longer exists re-resolves from the start.
+  assert.equal(resolveDirective(looked, 'syms'), 'collect');
 
   // The keystone comparison reads the journal's field-record entries (actor
   // ids broke on place-named authored spawns), so the same species collected

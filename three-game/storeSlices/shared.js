@@ -540,6 +540,7 @@ export function makeJournalEntry({ specimen, tool, result, documented = false, l
     latin: specimen.latin,
     location: location.name,
     method: tool.name,
+    toolId: tool.id,
     authorship: 'field-record',
     condition,
     content: `${specimen.name}: ${result.reason}`,
@@ -796,11 +797,25 @@ export function createExpeditionSlice() {
     // Species whose first nearby encounter has already fired the "new species
     // sighted" discovery beat, so each species announces itself once.
     sightedSpecimenIds: expedition.sightedSpecimenIds || [],
+    // Individual animals and plants Darwin has come near enough to notice.
+    // The local chart marks only these: it is a record of what he has found,
+    // not a guide to what is there.
+    chartedSpecimenActorIds: expedition.chartedSpecimenActorIds || [],
     specimenSighting: null,
     // Type-level examination record: a saved note on one finch marks the
     // species examined everywhere. No longer gates collection; it feeds the
     // final assessment's restraint ratio and the bare-hands Examine prompt.
     examinedTypeIds: expedition.examinedTypeIds || [],
+    // Every subject opened in the examine view, noted or not. The first
+    // objective ("Examine something nearby") is done on the first look, not
+    // the first saved note.
+    lookedAtTypeIds: expedition.lookedAtTypeIds || [],
+    // Covington's walk-over visits already made (npcs/symsVisits.js). Each
+    // happens once per expedition.
+    symsVisitsDone: expedition.symsVisitsDone || [],
+    symsVisit: null,
+    symsVisitEndedAt: 0,
+    symsCaption: null,
     // Every trait reading Darwin has taken, one record per individual and
     // trait (see examine/populationTraits.js). The journal's Measures tab
     // lays them out landing by landing.

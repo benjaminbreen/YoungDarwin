@@ -58,7 +58,10 @@ export const createExamineActions = (set, get) => ({
       }
     }
     if (!examinable) return {};
+    const lookedAt = state.lookedAtTypeIds || [];
+    const typeId = examinable.typeId || examinable.itemTypeId || examinable.actorId || 'subject';
     return {
+      ...(lookedAt.includes(typeId) ? {} : { lookedAtTypeIds: [...lookedAt, typeId] }),
       observationMode: false,
       examineSession: createExamineSession(examinable, {
         focus,

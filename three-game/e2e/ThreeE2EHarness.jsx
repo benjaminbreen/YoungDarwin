@@ -39,6 +39,7 @@ import { auditRenderIntegrity } from './renderIntegrity';
 import { recordMotion } from './motionRecorder';
 import { socialEntries } from '../fauna/behavior/socialField';
 import { activeBehaviorEpisodes } from '../fauna/behavior/behaviorEpisodes';
+import { getLooseRockStates } from '../physics/props/propRuntime';
 import { getBehaviorBrain } from '../fauna/behavior/behaviorBrain';
 import { environmentLookTuning, setEnvironmentLookTuning } from '../world/environmentLook';
 import { setSolarLookTuning, solarLookTuning } from '../world/solarLook';
@@ -787,6 +788,10 @@ function createHarnessApi() {
     },
     // Every animal in the landing as the behaviour brains see it: species,
     // what it is doing, whether it is alarmed, and where.
+    // Loose rocks in the zone (id, position, radii): what the 'Push rock'
+    // prompt and a held E act on.
+    looseRocks: () => [...getLooseRockStates(useThreeGameStore.getState().currentZoneId)]
+      .map(rock => ({ id: rock.id, x: rock.x, y: rock.y, z: rock.z, radii: rock.radii, mass: rock.mass })),
     animals: () => [...(socialEntries(useThreeGameStore.getState().currentZoneId)?.values() || [])]
       .map(entry => ({
         actorId: entry.actorId,

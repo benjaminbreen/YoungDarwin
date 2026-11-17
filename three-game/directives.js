@@ -70,40 +70,47 @@ function recordedByZone(state) {
 }
 
 export const DIRECTIVES = [
+  // Onboarding: one verb each, all within reach of the landing. Covington
+  // walks over at a few of these (npcs/symsVisits.js); the objectives
+  // themselves never speak in his voice.
   {
-    id: 'explore',
-    text: 'Record 3 different Post Office Bay specimens',
-    hint: 'Examine nearby specimens, then collect or document three different kinds.',
-    detail: 'Three distinct records make a useful first survey of the landing. The full regional record remains available for a more complete search.',
-    isDone: state => postOfficeBaySurveyProgress(state) >= POST_OFFICE_BAY_SURVEY_TARGET,
-  },
-  {
-    id: 'tool',
-    text: 'Take a tool in hand',
-    hint: 'Press 1-6, or click a slot on the toolbelt.',
-    detail: 'The tool in your hand sets what you can do with an animal. The net and the gun each give a different result, and the sketchbook takes nothing.',
-    isDone: state => Boolean(state.activeToolId) && state.activeToolId !== 'hands',
-  },
-  {
-    id: 'examine',
-    text: 'Examine something closely',
-    hint: 'Approach a specimen with bare hands and press Enter.',
-    detail: 'Examining adds an animal to your record. Henslow reads your written notes in the assessment at the end.',
-    isDone: state => (state.examinedTypeIds || []).length >= 1,
+    id: 'look',
+    text: 'Examine something nearby',
+    keys: ['E'],
+    hint: 'Walk up to an animal, a plant or an object and press E.',
+    detail: 'The examine view lets you study a subject before deciding whether to take it, note it, or leave it.',
+    isDone: state => (state.lookedAtTypeIds || []).length >= 1 || (state.examinedTypeIds || []).length >= 1,
   },
   {
     id: 'collect',
-    text: 'Collect your first specimen',
-    hint: 'Equip a tool and press E, or collect from the examine view.',
+    text: 'Pick up a specimen',
+    keys: ['E'],
+    hint: 'Hold E at it, or press E again in the examine view. Walk the last few steps to an animal; it bolts from a runner.',
     detail: 'Collected specimens are shipped to England. Collecting removes the animal from the island, and the field case only holds a few.',
     isDone: state => (state.collectedSpecimenIds || []).length >= 1,
   },
   {
-    id: 'syms',
-    text: 'Speak with Syms Covington',
-    hint: 'Your assistant is somewhere near the landing.',
-    detail: 'Covington is your assistant. He shoots and skins specimens for the collection.',
-    isDone: state => ((state.npcEncounterState || {}).syms_covington?.flags || []).length > 0,
+    id: 'write-up',
+    text: 'Write a label for a specimen',
+    hint: 'Type what you see on the label card, then press Ctrl or ⌘ and Enter. Drag on the card to sketch.',
+    detail: 'The final assessment reads the notes you write, not the automatic record entries.',
+    isDone: state => playerNotes(state).some(entry => entry.specimenId),
+  },
+  {
+    id: 'net',
+    text: 'Catch an insect with the net',
+    keys: ['F'],
+    hint: 'Get within two paces of a bee or butterfly in the flowering scrub and press F. Darwin takes up the net and swings.',
+    detail: 'A fast insect can only be taken whole in the net. Bare hands crush it or miss it.',
+    isDone: state => (state.journal || []).some(entry => isRecordedFieldEntry(entry)
+      && (entry.toolId === 'insect_net' || entry.method === 'Insect Net')),
+  },
+  {
+    id: 'explore',
+    text: 'Record 3 different Post Office Bay specimens',
+    hint: 'Collect or document three different kinds of animal or plant at the landing.',
+    detail: 'Three distinct records make a useful first survey of the landing. The full regional record remains available for a more complete search.',
+    isDone: state => postOfficeBaySurveyProgress(state) >= POST_OFFICE_BAY_SURVEY_TARGET,
   },
   {
     id: 'travel',
@@ -121,13 +128,6 @@ export const DIRECTIVES = [
   },
   // From here the objectives stop teaching and start suggesting. These are the
   // comparisons the expedition is actually for.
-  {
-    id: 'write-up',
-    text: 'Write a label for a specimen',
-    hint: 'Write a label when you catch or examine something.',
-    detail: 'The final assessment reads the notes you write, not the automatic record entries.',
-    isDone: state => playerNotes(state).some(entry => entry.specimenId),
-  },
   {
     id: 'watch-habits',
     text: 'Watch two animals deal with one another',

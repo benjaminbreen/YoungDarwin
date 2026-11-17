@@ -35,6 +35,7 @@ import {
   updateRuntimePlayerPose,
 } from './storeSlices/shared';
 import { FIRST_DIRECTIVE_ID, resolveDirective } from './directives';
+import { SYMS_VISIT, getSymsVisit } from './npcs/symsVisits';
 import {
   PERSISTED_STRING_ARRAY_FIELDS,
   PERSISTED_TOOLBAR_FIELDS,
@@ -190,6 +191,8 @@ export const useThreeGameStore = create((set, get) => ({
       ? GUN_HOLDERS.DARWIN
       : GUN_HOLDERS.SYMS;
     patch.symsGunErrand = null;
+    patch.symsVisit = null;
+    patch.symsCaption = null;
     patch.shotgunChoiceOpen = false;
     patch.weather = normalizeWeatherState(snapshot.weather, initial.weather);
     patch.inventory = Array.isArray(snapshot.inventory) ? snapshot.inventory : initial.inventory;
@@ -619,6 +622,11 @@ export const useThreeGameStore = create((set, get) => ({
   })),
   ...createNpcActions(set, get),
 
+  chartSpecimenActors: actorIds => set(state => {
+    const charted = new Set(state.chartedSpecimenActorIds || []);
+    const added = (actorIds || []).filter(id => id && !charted.has(id));
+    return added.length ? { chartedSpecimenActorIds: [...charted, ...added] } : state;
+  }),
   setNearbySpecimen: nearbySpecimenId => set(state => {
     if (state.nearbySpecimenId === nearbySpecimenId) return state;
     const patch = { nearbySpecimenId };
@@ -850,6 +858,45 @@ export const useThreeGameStore = create((set, get) => ({
   clearCompletedDirective: () => set(state => (
     state.directiveCompletedId ? { directiveCompletedId: null } : {}
   )),
+
+  // Covington's walk-over visits (npcs/symsVisits.js). The HUD's watcher
+  // starts one; SymsCovington walks it and calls deliver when he is close
+  // enough to speak, then end once he has finished leading and pointing.
+  startSymsVisit: visitId => set(state => {
+    if (state.symsVisit || !getSymsVisit(visitId)) return {};
+    if ((state.symsVisitsDone || []).includes(visitId)) return {};
+    return { symsVisit: { id: visitId, startedAt: Date.now(), delivered: false } };
+  }),
+  deliverSymsVisit: () => set(state => {
+    const visit = state.symsVisit && getSymsVisit(state.symsVisit.id);
+    if (!visit || state.symsVisit.delivered) return {};
+    return {
+      symsVisit: { ...state.symsVisit, delivered: true },
+      symsVisitsDone: [...(state.symsVisitsDone || []), visit.id],
+      symsCaption: { text: visit.line, until: Date.now() + SYMS_VISIT.captionSeconds * 1000 },
+      narratorLog: appendNarratorEvents(state.narratorLog, [createNarratorEvent({
+        kind: 'npcActivity',
+        speaker: 'Syms Covington',
+        text: visit.line,
+        day: state.day,
+        timeOfDay: state.timeOfDay,
+        source: 'syms-visit',
+        meta: { npcId: 'syms_covington', event: `visit:${visit.id}` },
+      })]),
+    };
+  }),
+  // A visit that could not reach Darwin is still spent, so he does not set
+  // off after him again and again.
+  endSymsVisit: () => set(state => {
+    if (!state.symsVisit) return {};
+    const id = state.symsVisit.id;
+    const done = state.symsVisitsDone || [];
+    return {
+      symsVisit: null,
+      symsVisitEndedAt: Date.now(),
+      ...(done.includes(id) ? {} : { symsVisitsDone: [...done, id] }),
+    };
+  }),
 
   ...createCaseActions(set, get),
 

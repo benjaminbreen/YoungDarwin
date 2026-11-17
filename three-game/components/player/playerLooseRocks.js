@@ -3,7 +3,7 @@ import { getLooseRockStates } from '../../physics/props/propRuntime';
 // Darwin and loose rocks (physics/props/LooseRocks.jsx). His capsule never
 // meets one in Rapier: he walks over a step-high rock on analytic support, a
 // taller one blocks him analytically (physics/looseRockContact.js), and he
-// moves it only on purpose (hold P at the 'Push rock' prompt) or through his
+// moves it only on purpose (hold E at the 'Push rock' prompt) or through his
 // own weight.
 
 // How far from the rock's rim his chest can be and still lean on it.

@@ -13,6 +13,14 @@ export function requestSpecimenCatch(actorId) {
   pending = actorId ? { actorId, at: Date.now() } : null;
 }
 
+// True while a catch is waiting to be carried out. The player controller ends
+// an idle flourish for it as it would for a key press: asked for from the
+// examine view, where Darwin has been standing still, a catch otherwise waited
+// behind the fidget he had drifted into and was dropped when it timed out.
+export function specimenCatchRequested() {
+  return Boolean(pending && Date.now() - pending.at <= REQUEST_LIFETIME_MS);
+}
+
 export function takeSpecimenCatchRequest() {
   const request = pending;
   pending = null;

@@ -43,6 +43,13 @@ import { GUN_HOLDERS, SYMS_GUN, SYMS_GUN_ERRANDS } from '../../npcs/symsGunErran
 import { getSpecimenRuntimePoses } from '../../world/specimenRuntime';
 import { getWildlifeInteractionHeight } from '../../wildlife/wildlifeCatalog';
 import { SHOTGUN } from '../../shooting/shotgunConfig';
+import {
+  SYMS_VISIT,
+  getSymsVisit,
+  pickSymsVisitTarget,
+  symsLeadPoint,
+} from '../../npcs/symsVisits';
+import { SymsCaption } from './SymsCaption';
 
 const POST_OFFICE_BAY = 'POST_OFFICE_BAY';
 const SYMS_GROUND_CLEARANCE = 0.04;
@@ -187,6 +194,8 @@ export function SymsCovington({ motionPaused = false }) {
   const aimPointRef = useRef(new THREE.Vector3());
   // Progress through the current gun errand (symsGunErrand in the store).
   const errandRef = useRef({ key: null, phase: 'approach', until: 0, deadline: 0, blockedSince: 0 });
+  // Progress through the current walk-over visit (symsVisit in the store).
+  const visitRef = useRef({ key: null, phase: 'approach', until: 0, deadline: 0, target: null, leadPoint: null });
   const activityPlan = useMemo(() => buildSymsPostOfficeBayPlan(), []);
   // Status drives the orb colour and the plate text. It is written from the
   // frame loop but only when the pair actually changes — a directive flip or a
@@ -628,6 +637,87 @@ export function SymsCovington({ motionPaused = false }) {
       return { movementSpeed: 0, animation: 'idle' };
     };
 
+    // A walk-over visit: come up to Darwin, say the line, then (for some
+    // visits) lead a few steps toward the subject and point at it.
+    const runVisit = (visitState, gameState) => {
+      const state = visitRef.current;
+      const key = `${visitState.id}:${visitState.startedAt}`;
+      if (state.key !== key) {
+        state.key = key;
+        state.phase = 'approach';
+        state.until = 0;
+        state.deadline = time + SYMS_VISIT.approachSeconds;
+        state.target = null;
+        state.leadPoint = null;
+      }
+      const finish = () => {
+        // Back to his own round of work from wherever he ended up.
+        motion.route = [];
+        motion.routeIndex = 0;
+        motion.targetSite = null;
+        motion.dwellUntil = 0;
+        state.key = null;
+        gameState.endSymsVisit();
+        return { movementSpeed: 0, animation: 'idle' };
+      };
+      const visit = getSymsVisit(visitState.id);
+      if (!visit) return finish();
+      const px = finiteOr(player.x, position.x);
+      const pz = finiteOr(player.z, position.z);
+
+      if (state.phase === 'approach') {
+        const dx = px - position.x;
+        const dz = pz - position.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance > SYMS_VISIT.speakDistance) {
+          if (time > state.deadline) return finish();
+          const stopShort = Math.min(distance, SYMS_VISIT.stopDistance);
+          const result = moveToward(
+            px - (dx / distance) * stopShort,
+            pz - (dz / distance) * stopShort,
+            distance > 9 ? SYMS_VISIT.hurrySpeed : SYMS_VISIT.walkSpeed,
+          );
+          return { movementSpeed: result.moved / dt, animation: 'idle' };
+        }
+        state.phase = 'speak';
+        state.until = time + SYMS_VISIT.speakSeconds;
+        gameState.deliverSymsVisit();
+      }
+
+      if (state.phase === 'speak') {
+        facePoint(px, pz);
+        if (time < state.until) return { movementSpeed: 0, animation: 'idle' };
+        const target = visit.leadTo
+          ? pickSymsVisitTarget({
+              kind: visit.leadTo,
+              specimens: zoneSpecimens,
+              poses: getSpecimenRuntimePoses(currentZoneId),
+              collectedActorIds: gameState.collectedSpecimenActorIds,
+              from: { x: px, z: pz },
+            })
+          : null;
+        if (!target) return finish();
+        state.target = target;
+        state.leadPoint = symsLeadPoint(position, target);
+        state.phase = 'lead';
+        state.deadline = time + SYMS_VISIT.leadSeconds;
+      }
+
+      if (state.phase === 'lead') {
+        const result = moveToward(state.leadPoint.x, state.leadPoint.z, SYMS_VISIT.leadSpeed);
+        if (result.remaining > 0.3 && time < state.deadline) {
+          return { movementSpeed: result.moved / dt, animation: 'idle' };
+        }
+        state.phase = 'point';
+        state.until = time + SYMS_VISIT.pointSeconds;
+      }
+
+      const live = getSpecimenRuntimePoses(currentZoneId)?.get(state.target.actorId);
+      facePoint(live?.x ?? state.target.x, live?.z ?? state.target.z);
+      if (time >= state.until) return finish();
+      return { movementSpeed: 0, animation: 'point' };
+    };
+
     let movementSpeed = 0;
     let stationaryAnimation = 'idle';
     let activeDirective = SYMS_DIRECTIVES.RANGE;
@@ -670,10 +760,19 @@ export function SymsCovington({ motionPaused = false }) {
         movementSpeed = outcome.movementSpeed;
         stationaryAnimation = outcome.animation;
       } else if (conversationOpen) {
+        // Talking to him outright supersedes whatever he was coming to say.
+        if (gameState.symsVisit) {
+          visitRef.current.key = null;
+          gameState.endSymsVisit();
+        }
         stationaryAnimation = 'idle';
         const faceX = finiteOr(player.x, position.x) - position.x;
         const faceZ = finiteOr(player.z, position.z) - position.z;
         if (Math.hypot(faceX, faceZ) > 0.1) motion.desiredYaw = Math.atan2(faceX, faceZ);
+      } else if (playableModeId === 'darwin' && gameState.symsVisit) {
+        const outcome = runVisit(gameState.symsVisit, gameState);
+        movementSpeed = outcome.movementSpeed;
+        stationaryAnimation = outcome.animation;
       } else if (nextDirective === SYMS_DIRECTIVES.FOLLOW) {
         const facingX = Number(playerPose?.facing?.x) || 0;
         const facingZ = Number(playerPose?.facing?.z) || -1;
@@ -802,6 +901,7 @@ export function SymsCovington({ motionPaused = false }) {
         opacity={0.42}
         zoneId={currentZoneId}
       />
+      <SymsCaption height={2.95} />
       <NpcStatusOrb
         status={statusState.status}
         activity={statusState.activity}

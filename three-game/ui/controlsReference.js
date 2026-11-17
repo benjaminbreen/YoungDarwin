@@ -48,18 +48,20 @@ function animalControlsSections(modeId, polished) {
   ];
 }
 
+// Darwin's corner hint covers only getting about: move, run, look. The
+// fieldwork keys (E, the tool slots, F) are taught by the opening objectives,
+// which show their keys on the banner line, so the two never run as competing
+// tutorials. Jumping is left to the full controls list.
 export function nextControlHintPhase(playableModeId, progress) {
   if (!progress.moved) return 'move';
   if (!progress.ran) return 'faster';
-  if (!progress.jumped) return playableModeId === 'finch' ? 'land' : playableModeId === 'tortoise' ? 'brace' : 'jump';
   if (playableModeId === 'finch' || playableModeId === 'tortoise') {
+    if (!progress.jumped) return playableModeId === 'finch' ? 'land' : 'brace';
     if (!progress.animalAction) return 'animalActions';
     if (!progress.camera) return 'camera';
     return 'complete';
   }
   if (!progress.camera) return 'camera';
-  if (!progress.fieldAction) return 'fieldAction';
-  if (!progress.worldAction) return 'worldAction';
   return 'complete';
 }
 
@@ -74,15 +76,13 @@ export function controlsSections({ polished = true, includeNarratorCommands = tr
       'Shift: run',
       'Space: jump',
       'C: crouch (while running: slide)',
-      'Q: climb up or down a wall or boulder',
-      'P (hold): push a loose rock when the prompt shows',
     ]],
     ['Camera', CAMERA_CONTROLS],
     ['Fieldwork', [
-      'E or Enter: the action on screen — examine, collect, speak, pick up, read',
-      'Hold E at a region’s edge: travel on',
-      '1-6: take a tool in hand',
-      'F: use the tool in hand — the net and hammer swing at the marked subject',
+      'E or Enter: the action on screen — examine, collect, speak, pick up, read, climb',
+      'Hold E: take a creature without examining it first, push a loose rock, or travel on at a region’s edge',
+      'F: use a tool on what is in front of you — Darwin takes up the net, the hammer or his hands as it needs',
+      '1-6: take a tool in hand yourself; the same number again puts it away',
       'Shotgun: hold F or right mouse to aim; tap F or click to fire',
       'R: halt and rest — two hours, one provision',
       'Hold G: gestures — sit, point, look around, kneel, write, pray',

@@ -4,6 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useReducer, useRef, useSt
 import { getInventoryItem } from '../../data/inventoryItems';
 import { FieldNotebook } from '../../field-notebook/FieldNotebook';
 import { getThreeSpecimens, threeTools } from '../data';
+import { catchPlan } from '../catchRules';
 import {
   TOGGLE_COMPASS_EVENT,
   TOOL_USE_EVENT,
@@ -42,6 +43,7 @@ import {
   nextControlHintPhase,
 } from './controlsReference';
 import { isOverlayOpen, useDismissableOverlay } from './useDismissableOverlay';
+import { nextSymsVisit } from '../npcs/symsVisits';
 import { isTextEntryTarget } from '../input/gameKeys';
 import { GestureWheel } from './GestureWheel';
 import { animalAwarenessValue, animalRisk } from './animalVitals';
@@ -907,6 +909,7 @@ function DirectiveTracker() {
     state.visitedLocalCellIds?.length || 0,
     state.activeToolId,
     state.examinedTypeIds?.length || 0,
+    state.lookedAtTypeIds?.length || 0,
     state.collectedSpecimenIds?.length || 0,
     (state.npcEncounterState?.syms_covington?.flags || []).length,
     state.visitedZoneIds?.length || 0,
@@ -918,6 +921,31 @@ function DirectiveTracker() {
     refreshDirective();
   }, [refreshDirective, signature]);
 
+  return null;
+}
+
+// Starts Covington's walk-over visits (npcs/symsVisits.js) when one is due.
+// Counts only seconds of actual play (no menu, no hidden tab) toward the
+// first visit's delay.
+const SYMS_VISIT_TICK_MS = 1000;
+
+function SymsVisitTracker() {
+  const startSymsVisit = useThreeGameStore(state => state.startSymsVisit);
+  useEffect(() => {
+    let playSeconds = 0;
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      const overlayOpen = isOverlayOpen();
+      const state = useThreeGameStore.getState();
+      if (!overlayOpen && !state.examineSession) playSeconds += SYMS_VISIT_TICK_MS / 1000;
+      const secondsSinceLastVisit = state.symsVisitEndedAt
+        ? (Date.now() - state.symsVisitEndedAt) / 1000
+        : Infinity;
+      const visit = nextSymsVisit(state, { playSeconds, secondsSinceLastVisit, overlayOpen });
+      if (visit) startSymsVisit(visit.id);
+    }, SYMS_VISIT_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [startSymsVisit]);
   return null;
 }
 
@@ -1214,7 +1242,18 @@ function PolishedTopObjective({ objective, className = '' }) {
                       {formatBannerObjective(completedDirective.text)}
                     </span>
                   </span>
-                ) : formatBannerObjective(shown.text)}
+                ) : (
+                  <>
+                    {formatBannerObjective(shown.text)}
+                    {/* The keys for an onboarding step sit on the line itself,
+                        so the banner can be read without expanding it. */}
+                    {shown.keys?.length > 0 && (
+                      <span className="ml-2 inline-flex translate-y-[-1px] gap-1 align-middle">
+                        {shown.keys.map(key => <ControlHintKey key={key}>{key}</ControlHintKey>)}
+                      </span>
+                    )}
+                  </>
+                )}
               </span>
               {/* A single gold rule sweeps the width once, then stops. */}
               {completedDirective && (
@@ -1497,6 +1536,27 @@ function SpecimenCaseTally({ inventory, caseCapacity, onOpenCase }) {
   );
 }
 
+const HEALTH_BAR_BELOW = 90;
+const FATIGUE_BAR_LEAD = 20;
+const VITAL_CHANGE_SHOW_MS = 6000;
+
+// True for a few seconds after `value` moves by at least `step` in one go.
+function useRecentChange(value, step) {
+  const previousRef = useRef(value);
+  const timerRef = useRef(null);
+  const [changed, setChanged] = useState(false);
+  useEffect(() => {
+    const previous = previousRef.current;
+    previousRef.current = value;
+    if (Math.abs(value - previous) < step) return;
+    setChanged(true);
+    window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setChanged(false), VITAL_CHANGE_SHOW_MS);
+  }, [step, value]);
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+  return changed;
+}
+
 function PolishedVitalStatusPanel({ onOpenCase }) {
   const health = useThreeGameStore(state => state.health);
   const fatigue = useThreeGameStore(state => state.fatigue);
@@ -1513,6 +1573,15 @@ function PolishedVitalStatusPanel({ onOpenCase }) {
     ? animalAwarenessValue(playableMode.id, animalRisk(animalModeNpcEncounter, playableMode.id))
     : 0;
   const displayName = animalMode ? playableMode.label : 'Charles Darwin';
+  // Darwin's bars stay off the screen while they have nothing to say: full
+  // health, and fatigue well short of the point where it slows him. A sudden
+  // change shows the bar for a few seconds whatever the level. The status view
+  // (the name above) always has both. Animal modes keep their bars: there the
+  // vitals are the game.
+  const healthChanged = useRecentChange(health, 4);
+  const fatigueChanged = useRecentChange(fatigue, 8);
+  const showHealth = animalMode || health < HEALTH_BAR_BELOW || healthChanged;
+  const showFatigue = animalMode || fatigue >= PLAYER.tiredRunFatigue - FATIGUE_BAR_LEAD || fatigueChanged;
   // Only worth a word when it is not the default: "Steady" is the state the
   // three bars underneath already describe. The two fatigue words are the
   // player's only notice of thresholds the controller already enforces, so
@@ -1552,17 +1621,23 @@ function PolishedVitalStatusPanel({ onOpenCase }) {
           <CameraModeButton />
         </div>
         <div className="grid gap-2">
-          <button type="button" {...statusProps} className="block w-full text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70">
+          {(showHealth || showFatigue || animalMode) && (
+          <button type="button" {...statusProps} data-testid="hud-vitals-rows" className="block w-full text-left transition hover:brightness-110 focus:outline-none focus-visible:ring-1 focus-visible:ring-expedition-gold/70">
             <span className="grid gap-2">
-            <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
-            <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
+            {showHealth && (
+              <PolishedStatRow icon={HeartIcon} label={animalMode ? 'Vitality' : 'Health'} value={health} fill={vitalsGradient('health')} />
+            )}
+            {showFatigue && (
+              <PolishedStatRow icon={FatigueIcon} label={animalMode ? 'Energy' : 'Fatigue'} value={animalMode ? energy : fatigue} fill={vitalsGradient('fatigue')} />
+            )}
             {animalMode && (
               <PolishedStatRow icon={CuriosityIcon} label={playableMode.id === 'tortoise' ? 'Composure' : 'Alertness'} value={awareness} fill={vitalsGradient('curiosity')} />
             )}
             </span>
           </button>
+          )}
           {!animalMode && (
-            <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-end gap-2 border-t border-expedition-brass/25 pt-2">
+            <div className={`grid grid-cols-[5.2rem_minmax(0,1fr)] items-end gap-2 ${showHealth || showFatigue ? 'border-t border-expedition-brass/25 pt-2' : ''}`}>
               <button
                 type="button"
                 {...statusProps}
@@ -1734,6 +1809,8 @@ const SpecimenMarker = memo(function SpecimenMarker({
   const actorId = specimen.instanceId || specimen.id;
   const runtime = useThreeGameStore(state => state.specimenRuntimePositions?.[zone.id]?.[actorId]);
   const isActorCollected = useThreeGameStore(state => state.collectedSpecimenActorIds?.includes(actorId) || false);
+  // Marked only once Darwin has come near it (playerInteractions charts it).
+  const isCharted = useThreeGameStore(state => state.chartedSpecimenActorIds?.includes(actorId) || false);
   const isCollected = useThreeGameStore(state => state.collectedSpecimenIds.includes(specimen.id));
   const isDocumented = useThreeGameStore(state => state.documentedSpecimenIds.includes(specimen.id));
   const isSelected = useThreeGameStore(state => (
@@ -1744,7 +1821,7 @@ const SpecimenMarker = memo(function SpecimenMarker({
     x: Number.isFinite(runtime?.x) ? runtime.x : x,
     z: Number.isFinite(runtime?.z) ? runtime.z : z,
   }, zone);
-  if (isActorCollected) return null;
+  if (isActorCollected || !isCharted) return null;
   if (point.x <= -4 || point.x >= 104 || point.y <= -4 || point.y >= 104) return null;
   const isKnown = isCollected || isDocumented;
   if ((isKnown && !showKnown) || (!isKnown && !showNew)) return null;
@@ -1981,15 +2058,17 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
   const collectedSpecimenIds = useThreeGameStore(state => state.collectedSpecimenIds);
   const documentedSpecimenIds = useThreeGameStore(state => state.documentedSpecimenIds);
   const collectedSpecimenActorIds = useThreeGameStore(state => state.collectedSpecimenActorIds);
+  const chartedSpecimenActorIds = useThreeGameStore(state => state.chartedSpecimenActorIds);
   const nearestUnrecordedActorId = useMemo(() => {
     const recordedTypes = new Set([...(collectedSpecimenIds || []), ...(documentedSpecimenIds || [])]);
     const collectedActors = new Set(collectedSpecimenActorIds || []);
+    const chartedActors = new Set(chartedSpecimenActorIds || []);
     const runtimePositions = useThreeGameStore.getState().specimenRuntimePositions?.[zone.id] || {};
     let nearest = null;
     let nearestDistance = Infinity;
     for (const specimen of specimens) {
       const actorId = specimen.instanceId || specimen.id;
-      if (recordedTypes.has(specimen.id) || collectedActors.has(actorId)) continue;
+      if (recordedTypes.has(specimen.id) || collectedActors.has(actorId) || !chartedActors.has(actorId)) continue;
       const [spawnX, , spawnZ] = specimen.spawnPoint || [0, 0, 0];
       const runtime = runtimePositions[actorId];
       const specimenX = Number.isFinite(runtime?.x) ? runtime.x : spawnX;
@@ -2001,7 +2080,7 @@ function MapOverlays({ zone, showKnown = true, showNew = true, surveyStyle = fal
       }
     }
     return nearest;
-  }, [collectedSpecimenActorIds, collectedSpecimenIds, documentedSpecimenIds, playerPose.x, playerPose.z, specimens, zone.id]);
+  }, [chartedSpecimenActorIds, collectedSpecimenActorIds, collectedSpecimenIds, documentedSpecimenIds, playerPose.x, playerPose.z, specimens, zone.id]);
   const handleToggleMarker = useCallback(id => {
     setActiveMarkerId(current => (current === id ? null : id));
   }, []);
@@ -3151,9 +3230,13 @@ function PolishedFieldRail({
         <div className="flex items-start justify-between gap-2 px-0.5 pb-1.5">
           <div className="min-w-0">
             <div className="text-[9px] font-semibold uppercase tracking-[0.18em] text-expedition-gold">Local chart</div>
-            <div className="mt-0.5 truncate text-[15px] font-semibold leading-tight tracking-[0.01em] text-expedition-parchment">
-              {interior?.label || zone.shortName || zone.name}
-            </div>
+            {/* The region is named once, in the banner at the top. Only a
+                place inside it (a hut, the ship's cabin) is named here. */}
+            {interior?.label && (
+              <div className="mt-0.5 truncate text-[15px] font-semibold leading-tight tracking-[0.01em] text-expedition-parchment">
+                {interior.label}
+              </div>
+            )}
           </div>
           <div className="flex shrink-0 gap-1.5">
             <button
@@ -4099,7 +4182,7 @@ const HINT_TEXT = {
   [HINT_TAKE]: 'E takes what is already loose.',
   [HINT_NPC]: 'Type what you want to say.',
   [HINT_SKETCH]: 'The sketchbook (6) records a creature without taking it.',
-  [HINT_EXAMINE]: 'E examines a creature. Henslow reads your notes at the end.',
+  [HINT_EXAMINE]: 'Tap E to look closely. Hold E to take it.',
 };
 
 function promptActionText(value) {
@@ -4343,6 +4426,19 @@ function SpecimenInteractionCard({
     ? fieldAction.label
     : fieldAction?.shortLabel || (canCollect ? 'Collect' : 'Examine');
 
+  // An unexamined creature: a tap looks closely, a hold takes it. The verb is
+  // the one the catch rules will use; the gun is not offered this way.
+  const toolbarOrder = useThreeGameStore(state => state.toolbarOrder);
+  const holdVerb = useMemo(() => {
+    if (fieldAction?.kind !== 'observe') return null;
+    let plan = catchPlan({ specimen, toolId: activeToolId, toolbarOrder });
+    if (plan?.kind === 'wrongTool') {
+      if (plan.bestToolId === 'shotgun') return null;
+      plan = catchPlan({ specimen, toolId: plan.bestToolId, toolbarOrder });
+    }
+    return plan?.kind === 'net' ? 'Net' : plan?.kind === 'hand' ? 'Grab' : plan?.kind === 'take' ? 'Take' : null;
+  }, [activeToolId, fieldAction?.kind, specimen, toolbarOrder]);
+
   const onAction = useCallback(() => {
     if (canCollect) collectNearby();
     else if (fieldAction?.kind === 'observe') openExamine(specimen.instanceId || specimen.id);
@@ -4374,6 +4470,12 @@ function SpecimenInteractionCard({
               <span className="text-[14px] font-semibold leading-none text-expedition-parchment">{actionLabel}</span>
             </button>
           </div>
+          {holdVerb && (
+            <div data-testid="specimen-hold-action" className="mt-1.5 flex items-center justify-end gap-1.5 pr-1.5 text-[11px] leading-none text-expedition-faded">
+              <PromptKey>Hold E</PromptKey>
+              <span>{holdVerb}</span>
+            </div>
+          )}
           {hint && (
             <div className="mt-1.5 text-center text-[10px] leading-snug text-expedition-faded/85">{hint}</div>
           )}
@@ -4437,6 +4539,12 @@ function InteractionPrompt() {
   const seenHints = useThreeGameStore(state => state.seenHints);
   const markHintSeen = useThreeGameStore(state => state.markHintSeen);
   const fieldAction = useThreeGameStore(state => state.fieldAction);
+  // What a held E does when the prompt on screen is an examine: lean into a
+  // loose rock, or climb (playerInteractions decides the same way).
+  const holdAlternative = useThreeGameStore(state => (
+    state.contextPromptCandidates?.push ? 'Push rock'
+      : state.contextPromptCandidates?.traversal?.label || null
+  ));
   const observationMode = useThreeGameStore(state => state.observationMode);
   const beginZoneTransition = useThreeGameStore(state => state.beginZoneTransition);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
@@ -4661,6 +4769,9 @@ function InteractionPrompt() {
         <CompactAction keyLabel={renderedContextPrompt.keyLabel} primary onClick={onClick}>
           {renderedContextPrompt.label}
         </CompactAction>
+        {renderedContextPrompt.source === 'field' && holdAlternative && !fieldAction?.target?.readable && (
+          <CompactAction keyLabel="Hold E">{holdAlternative}</CompactAction>
+        )}
         {HINT_TEXT[renderedContextPrompt.hintId] && renderedContextPrompt.hintId !== HINT_STUDY && (
           <span className="w-full px-1 pb-0.5 text-center text-[10px] leading-snug text-expedition-faded/85">
             {HINT_TEXT[renderedContextPrompt.hintId]}
@@ -4737,7 +4848,7 @@ function InteractionPrompt() {
     return (
       <CompactPrompt visible={contextPromptVisible} testId="context-action-prompt">
         <CompactAction
-          keyLabel={renderedContextPrompt.keyLabel || 'Q'}
+          keyLabel={renderedContextPrompt.keyLabel || 'E'}
           primary
           // One-shot: consumeTouchControls clears `climb` each frame after
           // playerInputState reads it.
@@ -5610,6 +5721,7 @@ export function ThreeHUD({
       <div className={`transition-opacity duration-300 ${statusViewOpen || examineOpen || readableBookOpen || npcEncounterOpen || hudHidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}>
       <TopChronometer className="hud-stage-gate hud-stage-1" />
       <DirectiveTracker />
+      <SymsVisitTracker />
       <PolishedTopObjective objective={objective} className="hud-stage-gate hud-stage-1" />
 
       <MobileVitalsPanel />

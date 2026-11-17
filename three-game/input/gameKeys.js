@@ -21,12 +21,11 @@ export const KEYBOARD_MAP = [
   { name: 'jump', keys: ['Space'] },
   // One action key. E and Enter do the same thing: whatever the on-screen
   // prompt says — examine, collect, speak, pick up, read, open.
+  // Climbing and pushing a loose rock are on this key too, when their prompt
+  // shows (playerInteractions routes the press).
   { name: 'interact', keys: ['KeyE', 'Enter', 'NumpadEnter'] },
   { name: 'useTool', keys: ['KeyF'] },
   { name: 'crouch', keys: ['KeyC'] },
-  { name: 'climb', keys: ['KeyQ'] },
-  // Held beside a loose rock: lean into it (the 'Push rock' prompt).
-  { name: 'push', keys: ['KeyP'] },
   { name: 'rest', keys: ['KeyR'] },
   // Held: opens the gesture wheel (sit, point, look around, pray...).
   { name: 'gestures', keys: ['KeyG'] },

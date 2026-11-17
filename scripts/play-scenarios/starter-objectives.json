@@ -1,0 +1,13 @@
+[
+  ["expect", "api.store('activeDirectiveId').activeDirectiveId", { "equals": "look" }],
+  ["expect", "document.querySelector('[data-hud=objective-line]')?.textContent", { "match": "^Examine something nearbyE$" }],
+  ["wait", 33000],
+  ["expect", "(() => { const s = api.store('symsVisit', 'symsVisitsDone'); return s.symsVisit?.id === 'crabs' || s.symsVisitsDone.includes('crabs'); })()", { "equals": true }],
+  ["expect", "(async () => { for (let i = 0; i < 60; i += 1) { const text = api.store('symsCaption').symsCaption?.text; if (text) return text; await new Promise(r => setTimeout(r, 500)); } return null; })()", { "match": "crabs down by the wash" }],
+  ["tool", "hands"],
+  ["near", "hermitcrab", 0.9],
+  ["examine"],
+  ["expect", "api.store('activeDirectiveId').activeDirectiveId", { "equals": "collect" }],
+  ["close"],
+  ["errors"]
+]

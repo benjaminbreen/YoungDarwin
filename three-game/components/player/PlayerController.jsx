@@ -61,6 +61,7 @@ import { usePlayerActions } from './playerActions';
 import { triggerDirectPlayerActions } from './playerActionTriggers';
 import { shouldRunInPlaceAtTravelEdge, updatePlayerInteractions } from './playerInteractions';
 import { pulseEquippedToolOnUse, readPlayerInput } from './playerInputState';
+import { specimenCatchRequested } from './catchRequest';
 import { findLooseRockPushTarget } from './playerLooseRocks';
 import { MAX_WALK_STEP_HEIGHT } from '../../physics/looseRockContact';
 import { findRockScrambleTarget, isRockSupport, resolvePlayerRockSupport } from './playerRockTraversal';
@@ -1493,7 +1494,7 @@ export function PlayerController({
       anyDirectActionPressed,
       lateralOnlyInput,
     } = readPlayerInput(keys, touch, frameScratch.input);
-    pulseEquippedToolOnUse(keys, lastButtons);
+    pulseEquippedToolOnUse(keys, lastButtons, zoneSpecimens);
     const propPushContact = latestPropPushContact.current;
     if (
       moving
@@ -1667,7 +1668,10 @@ export function PlayerController({
     }
     // The action keys cut short a stop or idle flourish too: E pressed the
     // moment Darwin halts used to land during stopWalking and be dropped.
-    const actionKeyPressed = Boolean(keys.interact || keys.useTool || touch.interact || touch.fieldAction);
+    const actionKeyPressed = Boolean(
+      keys.interact || keys.useTool || touch.interact || touch.fieldAction
+      || specimenCatchRequested() || stateRef.current.actClimbRequest,
+    );
     if (climbPressed || dodgePressed || jumpPressed || crouchPressed || riflePressed || anyDirectActionPressed || actionKeyPressed) {
       interruptAction(CONTROL_INTERRUPTIBLE_ACTIONS);
     }
@@ -1900,6 +1904,23 @@ export function PlayerController({
       }
       return climbOpportunity;
     };
+    // A drop just past his toes that he can let himself down: far enough to
+    // need hands, not so far it is a fall, and landing on dry ground.
+    const findClimbDown = () => {
+      if (stateRef.current.airborne || !group.current) return null;
+      const here = group.current.position;
+      const forward = frameScratch.forwardFacing.copy(facing.current).setY(0).normalize();
+      for (const distance of [0.8, 1.3, 1.9]) {
+        const ahead = collisionAdapter.groundInfo(
+          frameScratch.terrainProbe.set(here.x + forward.x * distance, here.y, here.z + forward.z * distance),
+        );
+        const drop = here.y - ahead.y;
+        if (drop >= 0.95 && drop <= 6.5) {
+          return ahead.y > WATER_LEVEL ? { distance, drop, y: ahead.y } : null;
+        }
+      }
+      return null;
+    };
     const climbPromptProbe = stateRef.current.climbPromptProbe;
     if (!climbOpportunityEligible) {
       if (climbPromptProbe.published) {
@@ -1922,7 +1943,7 @@ export function PlayerController({
           id: `climb:${currentZoneId}:${opportunity.kind}`,
           kind: opportunity.kind,
           label,
-          keyLabel: 'Q',
+          keyLabel: 'E',
           priority: 40,
           dwellMs: 280,
           repeatCooldownMs: 1250,
@@ -1930,12 +1951,29 @@ export function PlayerController({
           distance: opportunity.distance,
         });
         climbPromptProbe.published = true;
+      } else if (findClimbDown()) {
+        // A ledge to let himself down from gets the same prompt as one to
+        // climb, so the way down is not a key the player has to be told about.
+        publishContextPrompt('traversal', {
+          id: `climb-down:${currentZoneId}`,
+          kind: 'descent',
+          label: 'Climb down',
+          keyLabel: 'E',
+          priority: 40,
+          dwellMs: 420,
+          repeatCooldownMs: 1250,
+        });
+        climbPromptProbe.published = true;
       } else if (climbPromptProbe.published) {
         climbPromptProbe.published = false;
         clearContextPrompt('traversal');
       }
     }
-    if (climbOpportunityEligible && climbPressed && !lastButtons.current.climb) {
+    // E asks for a climb through the interaction loop (playerInteractions),
+    // which runs after this, so the request is picked up a frame later.
+    const actClimbRequested = Boolean(stateRef.current.actClimbRequest);
+    stateRef.current.actClimbRequest = false;
+    if (climbOpportunityEligible && ((climbPressed && !lastButtons.current.climb) || actClimbRequested)) {
       const opportunity = sampleClimbOpportunity();
       if (opportunity?.kind === 'obstacle') {
         const target = opportunity.target;
@@ -1970,9 +2008,6 @@ export function PlayerController({
         // the cliff face, so the same traversal works across authored regions.
         const forward = frameScratch.forwardFacing.copy(facing.current).setY(0).normalize();
         const here = group.current.position;
-        const sample = (distance) => collisionAdapter.groundInfo(
-          frameScratch.terrainProbe.set(here.x + forward.x * distance, here.y, here.z + forward.z * distance),
-        );
         const climbYaw = Math.atan2(forward.x, forward.z);
         let handled = false;
         const terrainClimbTarget = opportunity?.kind === 'terrain' ? opportunity.target : null;
@@ -1989,24 +2024,23 @@ export function PlayerController({
           handled = true;
         }
         if (!handled) {
-          for (const distance of [0.8, 1.3, 1.9]) {
-            const ahead = sample(distance);
-            const drop = here.y - ahead.y;
-            if (drop >= 0.95 && drop <= 6.5) {
-              const end = frameScratch.climbEnd.clone().set(here.x + forward.x * distance, ahead.y + 0.04, here.z + forward.z * distance);
-              beginClimbMotion('climbingDownWall', end, -drop, climbYaw, drop > 3 ? 1.3 : 1);
-              handled = true;
-              break;
-            }
+          const descent = findClimbDown();
+          if (descent) {
+            const end = frameScratch.climbEnd.clone().set(here.x + forward.x * descent.distance, descent.y + 0.04, here.z + forward.z * descent.distance);
+            beginClimbMotion('climbingDownWall', end, -descent.drop, climbYaw, descent.drop > 3 ? 1.3 : 1);
+            handled = true;
           }
         }
-        if (!handled) startAction('teeter', 0.95, { lockMovement: false });
+        // The key alone, with nothing to climb, shows him testing the edge. E
+        // only ever asks for a climb when one is on offer.
+        if (!handled && !actClimbRequested) startAction('teeter', 0.95, { lockMovement: false });
       }
     }
     lastButtons.current.climb = climbPressed;
-    // Loose rocks: Darwin walks over them by default; P at the prompt leans
+    // Loose rocks: Darwin walks over them by default; E held at the prompt leans
     // into one instead. His capsule never touches them, so this is the push.
     const pushProbe = stateRef.current.pushPromptProbe;
+    const pushHeld = pushPressed || Boolean(stateRef.current.actPushHeld);
     const pushEligible = climbOpportunityEligible && !stateRef.current.airborne;
     if (!pushEligible) {
       pushProbe.target = null;
@@ -2014,7 +2048,7 @@ export function PlayerController({
         pushProbe.published = false;
         clearContextPrompt('push');
       }
-    } else if (now - pushProbe.lastAt >= 0.14 || (pushPressed && !pushProbe.target)) {
+    } else if (now - pushProbe.lastAt >= 0.14 || (pushHeld && !pushProbe.target)) {
       pushProbe.lastAt = now;
       pushProbe.target = findLooseRockPushTarget(
         currentZoneId,
@@ -2026,7 +2060,7 @@ export function PlayerController({
         publishContextPrompt('push', {
           id: `push:${pushProbe.target.key}`,
           label: 'Push rock',
-          keyLabel: 'P',
+          keyLabel: 'Hold E',
           priority: CONTEXT_PROMPT_PRIORITY.push,
           dwellMs: 180,
         });
@@ -2036,7 +2070,7 @@ export function PlayerController({
         clearContextPrompt('push');
       }
     }
-    if (pushEligible && pushPressed && pushProbe.target) {
+    if (pushEligible && pushHeld && pushProbe.target) {
       const target = pushProbe.target;
       emitPropEvent('player-push-loose-rock', {
         rockKey: target.key,

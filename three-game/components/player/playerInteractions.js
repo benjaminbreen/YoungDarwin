@@ -31,6 +31,11 @@ import { beginFieldReach, FIELD_REACH_PROFILES, fieldReachApproach, takeFieldRea
 import { beginHammerContact } from './toolContact';
 
 const EDGE_TRAVEL_HOLD_SECONDS = 0.55;
+// E held this long does the hands-on thing at a subject (take it, climb it,
+// push it) where a tap would examine it.
+export const HOLD_ACT_SECONDS = 0.35;
+// How near Darwin has to come before an animal or plant is marked on the chart.
+export const CHART_NOTICE_RANGE_M = 16;
 
 export function oppositeEdge(edge) {
   return EDGE_DIRECTIONS[edge]?.opposite || null;
@@ -283,6 +288,16 @@ function runtimeSpecimenPosition(specimen, runtimePositions, fallbackY = 0) {
 function netAimHeight(specimen) {
   if (specimen?.pollinator) return 0;
   return Math.min(0.35, specimenInteractionHeight(specimen) * 0.5);
+}
+
+// The animal a field target names. The individual first: matching on kind
+// alone returned the first of its species in the region, which is rarely the
+// one in front of Darwin, and the catch was then refused as out of reach.
+export function specimenForTarget(zoneSpecimens, target) {
+  if (!target) return null;
+  return (zoneSpecimens || []).find(item => item && (item.instanceId || item.id) === target.actorId)
+    || (zoneSpecimens || []).find(item => item && item.id === target.typeId)
+    || null;
 }
 
 function liveSpecimenPose(zoneId, specimen) {
@@ -574,18 +589,67 @@ export function updatePlayerInteractions({
       && storeState.edgePrompt.toRegionId
     );
     const thresholdReady = edgeOpen && storeState.edgePrompt?.thresholdReady === true;
-    stateRef.current.actRoute = hasInteractTarget ? 'interact'
+    let route = hasInteractTarget ? 'interact'
       : thresholdReady ? 'edge'
         : hasFieldTarget ? 'field'
           : storeState.edgePrompt?.requiresHold ? 'hold-return'
             : edgeOpen ? 'edge'
               : 'field';
+    // Climbing and pushing ride the same key. When their prompt is the one on
+    // screen, or nothing else is in reach, the press does it outright. When a
+    // subject to examine is also there, a tap examines and a hold does it.
+    let holdAct = null;
+    if (route === 'field' && allowSpecimenInteractions) {
+      const fieldAction = storeState.fieldAction;
+      const downedAhead = Boolean(storeState.nearbySpecimenId && storeState.downedSpecimenActors?.[storeState.nearbySpecimenId]);
+      const pushAhead = Boolean(stateRef.current.pushPromptProbe?.target);
+      const climbAhead = Boolean(stateRef.current.climbPromptProbe?.published);
+      const shown = storeState.nearbySpecimenId ? null : storeState.contextPrompt?.source;
+      if (shown === 'push' && pushAhead) route = 'push';
+      else if (shown === 'traversal' && climbAhead) route = 'climb';
+      else if (!hasFieldTarget) route = pushAhead ? 'push' : climbAhead ? 'climb' : 'field';
+      else if (downedAhead) holdAct = null;
+      else if (fieldAction?.kind === 'observe' && fieldAction.target?.kind === 'specimen') {
+        // A creature within reach is what a hold is for. One merely nearby
+        // (the card shows from several paces off) must not take the key from
+        // a rock Darwin is standing against.
+        const pose = (pushAhead || climbAhead)
+          ? liveSpecimenPose(currentZoneId, specimenForTarget(zoneSpecimens, fieldAction.target) || {})
+          : null;
+        const beyondReach = pose && Math.hypot(pose.x - position.x, pose.z - position.z) > NET_START_REACH;
+        holdAct = beyondReach ? (pushAhead ? 'push' : 'climb') : 'take';
+      } else if (!fieldAction?.target?.readable) holdAct = pushAhead ? 'push' : climbAhead ? 'climb' : null;
+    }
+    stateRef.current.actRoute = route;
+    stateRef.current.actHoldAct = holdAct;
+    stateRef.current.actFired = false;
     stateRef.current.actStartedAt = interactionNow;
-  } else if (!actHeld) {
+    if (route === 'climb') stateRef.current.actClimbRequest = true;
+  }
+  // A tap is read when the key comes up, and only where a hold would have
+  // meant something else; everywhere else E still acts on the press.
+  let tapReleased = false;
+  let holdFired = null;
+  if (!actHeld) {
+    tapReleased = stateRef.current.actRoute === 'field'
+      && Boolean(stateRef.current.actHoldAct)
+      && !stateRef.current.actFired;
     stateRef.current.actRoute = null;
+    stateRef.current.actHoldAct = null;
+  } else if (stateRef.current.actRoute === 'field'
+    && stateRef.current.actHoldAct
+    && !stateRef.current.actFired
+    && interactionNow - (stateRef.current.actStartedAt || interactionNow) >= HOLD_ACT_SECONDS) {
+    stateRef.current.actFired = true;
+    holdFired = stateRef.current.actHoldAct;
+    if (holdFired === 'climb') stateRef.current.actClimbRequest = true;
   }
   const actRoute = stateRef.current.actRoute;
-  const examineHeld = Boolean(touch.fieldAction || (actHeld && actRoute === 'field'));
+  stateRef.current.actPushHeld = actHeld && (
+    actRoute === 'push'
+    || (actRoute === 'field' && stateRef.current.actHoldAct === 'push' && stateRef.current.actFired)
+  );
+  const examineHeld = Boolean(touch.fieldAction || (actHeld && actRoute === 'field' && !stateRef.current.actHoldAct));
   const interactHeld = Boolean(touch.interact || (actHeld && actRoute === 'interact'));
   // Leaving a region on the action key takes a short hold, so pressing E to
   // examine something near the shore cannot carry you off the map by mistake.
@@ -762,6 +826,25 @@ export function updatePlayerInteractions({
     clearToolTarget();
   }
 
+  // Whatever Darwin comes near enough to notice goes on the local chart.
+  const chartProbe = stateRef.current.chartProbe || { lastAt: -10 };
+  stateRef.current.chartProbe = chartProbe;
+  if (interactionNow - chartProbe.lastAt >= 0.5) {
+    chartProbe.lastAt = interactionNow;
+    const charted = storeState.chartedSpecimenActorIds || [];
+    let found = null;
+    for (const specimen of zoneSpecimens) {
+      if (!specimen?.id || specimen.population) continue;
+      const actorId = specimen.instanceId || specimen.id;
+      if (charted.includes(actorId)) continue;
+      const runtime = specimenRuntimePositions[actorId];
+      const x = runtime?.x ?? specimen.spawnPoint?.[0];
+      const z = runtime?.z ?? specimen.spawnPoint?.[2];
+      if (Math.hypot(position.x - x, position.z - z) <= CHART_NOTICE_RANGE_M) (found ||= []).push(actorId);
+    }
+    if (found) storeState.chartSpecimenActors?.(found);
+  }
+
   const fieldActionProbe = stateRef.current.fieldActionProbe || { lastAt: -10 };
   stateRef.current.fieldActionProbe = fieldActionProbe;
   if (interactionNow - fieldActionProbe.lastAt >= 0.14) {
@@ -882,7 +965,7 @@ export function updatePlayerInteractions({
     return reach;
   };
 
-  const startSpecimenCollection = (currentState, specimen) => {
+  const startSpecimenCollection = (currentState, specimen, retried = false) => {
     if (!specimen || stateRef.current.action) return false;
     if (currentState.activeConstraint?.blockedTools?.includes(currentState.activeToolId)) {
       currentState.reportConstraintBlockedTool?.(currentState.activeToolId);
@@ -904,6 +987,12 @@ export function updatePlayerInteractions({
     if (plan?.kind === 'wrongTool') {
       setActiveTool(plan.bestToolId);
       useThreeGameStore.setState({ message: plan.switchedLine });
+      // The gun has to be fetched and aimed. Any other tool is simply taken
+      // up, and the same press goes on to use it.
+      const changed = useThreeGameStore.getState();
+      if (!retried && plan.bestToolId !== 'shotgun' && changed.activeToolId === plan.bestToolId) {
+        return startSpecimenCollection(changed, specimen, true);
+      }
       return true;
     }
     if (plan?.kind === 'shoot') {
@@ -1008,12 +1097,22 @@ export function updatePlayerInteractions({
   // lens, where the player may click/tap any semantically tagged piece of
   // scenery.
   const examinePressed = examineHeld;
-  if (constraintLocksInteractions && examinePressed && !lastExamineRef.current) {
+  const examineEdge = (examinePressed && !lastExamineRef.current) || tapReleased;
+  const freeToAct = !stateRef.current.action || CONTROL_INTERRUPTIBLE_ACTIONS.has(stateRef.current.action);
+  if (holdFired === 'take') {
+    // E held on a creature not yet examined: take it without the close look.
+    const currentState = useThreeGameStore.getState();
+    const target = currentState.fieldAction?.target;
+    const specimen = target?.kind === 'specimen' ? specimenForTarget(zoneSpecimens, target) : null;
+    if (constraintLocksInteractions) currentState.reportConstraintBlockedAction?.();
+    else if (allowSpecimenInteractions && specimen && freeToAct && !currentState.examineSession) {
+      startSpecimenCollection(currentState, specimen);
+    }
+  } else if (constraintLocksInteractions && examineEdge) {
     useThreeGameStore.getState().reportConstraintBlockedAction?.();
   } else if (
     allowSpecimenInteractions
-    && examinePressed
-    && !lastExamineRef.current
+    && examineEdge
     // A stop or idle flourish that began this same frame must not eat the
     // press: E tapped as W is released landed on stopWalking and vanished.
     && (!stateRef.current.action || CONTROL_INTERRUPTIBLE_ACTIONS.has(stateRef.current.action))
@@ -1024,9 +1123,7 @@ export function updatePlayerInteractions({
     }
     const fieldAction = currentState.fieldAction;
     const target = fieldAction?.target;
-    const specimen = target?.kind === 'specimen'
-      ? zoneSpecimens.find(item => item && ((item.instanceId || item.id) === target.actorId || item.id === target.typeId))
-      : null;
+    const specimen = target?.kind === 'specimen' ? specimenForTarget(zoneSpecimens, target) : null;
     // A shot animal owns the field action outright. The ambient probe can
     // otherwise resolve to the scrub the carcass is lying in, so Enter took a
     // sample of the grass instead of opening the specimen.
@@ -1274,12 +1371,16 @@ export function updatePlayerInteractions({
       if (toolId === 'compass') {
         setActiveTool(toolId);
         triggerToolUse(toolId);
-      } else if (useThreeGameStore.getState().activeToolId === toolId || getAnimalAction(toolId)) {
+      } else if (getAnimalAction(toolId)) {
         // Animal slots are direct actions, matching their large HUD buttons:
         // the first press eats/sleeps/defecates instead of merely selecting a
         // verb and requiring a second, unexplained press.
         setActiveTool(toolId);
         triggerToolUse(toolId);
+      } else if (useThreeGameStore.getState().activeToolId === toolId) {
+        // The number of the tool in hand puts it away. Bare hands are what
+        // Darwin has when nothing is out; F is the key that uses a tool.
+        if (toolId !== 'hands') setActiveTool('hands');
       } else {
         setActiveTool(toolId);
       }

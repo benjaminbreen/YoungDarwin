@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { triggerToolUse } from '../../input/touchControls';
 import { useThreeGameStore } from '../../store';
+import { catchPlan } from '../../catchRules';
+import { requestSpecimenCatch } from './catchRequest';
 
 export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   // The on-screen joystick publishes an analog vector (touch.moveX/moveY);
@@ -57,15 +59,71 @@ export function readPlayerInput(keys, touch, target = new THREE.Vector3()) {
   };
 }
 
-export function pulseEquippedToolOnUse(keys, lastButtonsRef) {
+// What F should do about the subject in front of Darwin, when the tool in
+// hand is not the one for it: `catch` hands a creature to the interaction loop
+// (which takes up the right tool and uses it in the same press), `swing` names
+// the tool to change to before swinging. Null leaves F to the tool in hand.
+function toolForSubject(state, zoneSpecimens) {
+  if (state.playableModeId !== 'darwin' || state.examineSession) return null;
+  const activeToolId = state.activeToolId;
+  if (activeToolId === 'sketch') return null;
+  const target = state.fieldAction?.target;
+  if (!target) return null;
+  if (target.kind === 'specimen') {
+    const specimen = (zoneSpecimens || []).find(item => item && (item.instanceId || item.id) === target.actorId)
+      || (zoneSpecimens || []).find(item => item && item.id === target.typeId);
+    if (!specimen) return null;
+    const plan = catchPlan({
+      specimen,
+      toolId: activeToolId,
+      downed: Boolean(state.downedSpecimenActors?.[target.actorId]),
+      alreadyCollected: state.collectedSpecimenIds?.includes(specimen.id),
+      toolbarOrder: state.toolbarOrder,
+    });
+    if (plan?.kind === 'wrongTool' && plan.bestToolId !== 'shotgun') return { catch: target.actorId };
+    // Bare hands have no swing of their own: F reaches for the creature.
+    if (activeToolId === 'hands' && (plan?.kind === 'hand' || plan?.kind === 'take' || plan?.kind === 'pickup')) {
+      return { catch: target.actorId };
+    }
+    return null;
+  }
+  if (target.kind === 'obstacle' && target.category === 'Geology'
+    && activeToolId !== 'hammer' && (state.toolbarOrder || []).includes('hammer')) {
+    return { swing: 'hammer' };
+  }
+  return null;
+}
+
+// A swing waits this long after the tool is taken up, so the marker has
+// settled on the subject (toolTargeting solves it for the tool in hand).
+const TOOL_CHANGE_SWING_DELAY_MS = 160;
+
+export function pulseEquippedToolOnUse(keys, lastButtonsRef, zoneSpecimens = null) {
   // "Use tool" command (F key / clicking the equipped tool): pulse the
   // control mapped to the active tool; triggerAction picks it up next frame.
   // The shotgun reads F itself (playerEquipmentState): a tap fires and a
   // hold shoulders it, so it cannot fire on the press.
   const useToolPressed = Boolean(keys.useTool);
-  const activeToolId = useThreeGameStore.getState().activeToolId;
+  const state = useThreeGameStore.getState();
+  const activeToolId = state.activeToolId;
+  const pending = lastButtonsRef.current.pendingToolSwing;
+  if (pending && performance.now() >= pending.at) {
+    lastButtonsRef.current.pendingToolSwing = null;
+    if (activeToolId === pending.toolId) triggerToolUse(pending.toolId);
+  }
   if (useToolPressed && !lastButtonsRef.current.useTool && activeToolId !== 'shotgun') {
-    triggerToolUse(activeToolId);
+    const choice = toolForSubject(state, zoneSpecimens);
+    if (choice?.catch) {
+      requestSpecimenCatch(choice.catch);
+    } else if (choice?.swing) {
+      state.setActiveTool(choice.swing);
+      lastButtonsRef.current.pendingToolSwing = {
+        toolId: choice.swing,
+        at: performance.now() + TOOL_CHANGE_SWING_DELAY_MS,
+      };
+    } else {
+      triggerToolUse(activeToolId);
+    }
   }
   lastButtonsRef.current.useTool = useToolPressed;
 }
