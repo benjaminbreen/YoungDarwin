@@ -7697,13 +7697,39 @@ test('automatic graphics quality is conservative for unknown and integrated GPUs
     hardwareConcurrency: 4,
     renderer: 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 600)',
   }), 'low');
-  // Phones keep the tuned mobile tier even with little memory.
+  // Other touch devices keep the tuned Light tier even with little memory.
   assert.equal(classifyAutomaticGraphicsQuality({
     deviceMemory: 4,
     hardwareConcurrency: 6,
     compactTouch: true,
     renderer: 'Apple GPU',
   }), 'mobile');
+  assert.equal(classifyAutomaticGraphicsQuality({ appleMobile: true, compactTouch: true }), 'low');
+  assert.equal(classifyAutomaticGraphicsQuality({ appleMobile: true, renderer: 'Apple GPU' }), 'low');
+});
+
+test('Apple mobile detection covers iPhone and iPad desktop mode', () => {
+  const { isAppleMobileDevice } = loadModule('three-game/world/constrainedDevice.js');
+  assert.equal(isAppleMobileDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0)' }), true);
+  assert.equal(isAppleMobileDevice({ platform: 'MacIntel', maxTouchPoints: 5 }), true);
+  assert.equal(isAppleMobileDevice({ platform: 'MacIntel', maxTouchPoints: 0 }), false);
+  assert.equal(isAppleMobileDevice({ userAgent: 'Mozilla/5.0 (Linux; Android 16)' }), false);
+});
+
+test('shader warmup settles when a material is disposed during a readiness poll', async () => {
+  const { waitForWarmPrograms } = loadModule('three-game/world/settledPrewarmRuntime.js');
+  const material = {};
+  const materials = new Set([material]);
+  const properties = new Map([[material, {
+    currentProgram: { isReady: () => { properties.delete(material); return false; } },
+  }]]);
+  const renderer = {
+    properties,
+    extensions: new Set(['KHR_parallel_shader_compile']),
+    getContext: () => ({ isContextLost: () => false }),
+  };
+  await waitForWarmPrograms(renderer, materials, 1000);
+  assert.equal(materials.size, 0);
 });
 
 test('every graphics choice maps onto a preset and the low tier cuts real work', () => {
@@ -10083,7 +10109,7 @@ let failed = false;
 
 for (const { name, fn } of tests) {
   try {
-    fn();
+    await fn();
     console.log(`ok - ${name}`);
   } catch (error) {
     failed = true;

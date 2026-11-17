@@ -412,4 +412,4 @@ export function moundGeometry({ rx = 1, rz = 1, height = 0.2, rings = 8, sectors
   return geometry;
 }
 
-export { mergeAll, projectUVs };
+export { mergeAll };

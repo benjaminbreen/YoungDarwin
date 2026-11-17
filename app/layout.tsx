@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { Caveat, EB_Garamond, Geist, Geist_Mono, Lora, Meddon } from "next/font/google";
+import { EB_Garamond, Geist, Geist_Mono, Lora, Meddon } from "next/font/google";
+import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
@@ -27,10 +28,13 @@ const lora = Lora({
   style: ["normal", "italic"],
 });
 
-const caveat = Caveat({
+// Google can return Caveat URLs that Turbopack cannot resolve at build time.
+const caveat = localFont({
+  src: "./fonts/caveat/Caveat.woff2",
   variable: "--font-caveat",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: "400 700",
+  display: "swap",
+  preload: false,
 });
 
 const meddon = Meddon({

@@ -11,10 +11,8 @@
 //    prefetched into a cache and the loader reads that cache synchronously — a
 //    prefetch that lands after the material is built buys nothing.
 //
-//    That is why detection does not wait for the R3F renderer. KTX2Loader only
-//    reads `renderer.extensions.has()`, so a throwaway WebGL2 context answers
-//    it at import time, seconds before the canvas exists. Waiting for the real
-//    renderer was measured: every terrain texture still came out uncompressed.
+//    The mounted renderer reports which compressed formats it can upload.
+//    Reuse it to avoid allocating a second WebGL context at launch.
 //
 // 2. Every outcome that is not "cached and transcoded" falls back to the
 //    original WebP: no WebGL2, no supported block format, a slow prefetch, a
@@ -30,41 +28,22 @@ let started = false;
 const cache = new Map();
 const inFlight = new Map();
 
-// A minimal stand-in for WebGLRenderer.extensions — the only thing
-// detectSupport() touches on the WebGL path.
-function detectionShim() {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl2');
-  if (!gl) return null;
-  const extensions = {
-    has: name => Boolean(gl.getExtension(name)),
-    get: name => gl.getExtension(name),
-  };
-  return {
-    extensions,
-    release: () => gl.getExtension('WEBGL_lose_context')?.loseContext(),
-  };
-}
-
-function ensureLoader() {
+function ensureLoader(renderer) {
+  if (!renderer) return null;
   if (started) return loader;
   started = true;
-  const shim = detectionShim();
-  if (!shim) return null;
   try {
-    loader = new KTX2Loader().setTranscoderPath(TRANSCODER_PATH).detectSupport(shim);
+    loader = new KTX2Loader().setTranscoderPath(TRANSCODER_PATH).detectSupport(renderer);
   } catch {
     loader = null;
   }
-  shim.release();
   return loader;
 }
 
 // Failures are cached as null rather than retried: one 404, or one device with
 // no supported block format, is a permanent answer for the session.
-export function prefetchKtx2Textures(urls) {
-  const active = ensureLoader();
+export function prefetchKtx2Textures(urls, renderer) {
+  const active = ensureLoader(renderer);
   if (!active) return Promise.resolve();
   const pending = [];
   for (const url of urls) {
@@ -114,12 +93,12 @@ export function disposeKtx2Loader() {
 // warms the baked set. Main thread only — importing this module from the
 // terrain worker's graph kills the worker, which is why the loader asks for a
 // provider instead of importing one.
-export function installKtx2TerrainProvider() {
+export function installKtx2TerrainProvider(renderer) {
   if (typeof window === 'undefined') return;
   setCompressedTextureProvider(url => {
     const ktx2Url = ktx2UrlFor(url);
     return ktx2Url ? takeKtx2Texture(ktx2Url) : null;
   });
-  prefetchKtx2Textures([...KTX2_BAKED_TEXTURES].map(base => `${base}.ktx2`));
+  prefetchKtx2Textures([...KTX2_BAKED_TEXTURES].map(base => `${base}.ktx2`), renderer);
   window.__darwinKtx2 = ktx2CacheStats;
 }

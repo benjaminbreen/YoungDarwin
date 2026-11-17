@@ -17,9 +17,9 @@ import {
   setGpuResourceCacheLimit,
   sweepInactiveGpuResources,
 } from './world/gpuResourceCache';
-import { isConstrainedMemoryDevice } from './world/constrainedDevice';
+import { isAppleMobileDevice, isConstrainedMemoryDevice } from './world/constrainedDevice';
 import { warmGateRuntime } from './world/warmGateRuntime';
-import { settledPrewarmRuntime } from './world/settledPrewarmRuntime';
+import { settledPrewarmRuntime, waitForWarmPrograms } from './world/settledPrewarmRuntime';
 import {
   isPerfCaptureRecording,
   notePerfAdaptiveDprState,
@@ -235,11 +235,6 @@ const EXAMINE_WATCH_CLOCK_RATE = 0.25;
 // its stable enum value rather than import from a non-direct dependency.
 const SMAA_PRESET_ULTRA = 3;
 const WATER_QUALITY_MODES = ['performance', 'polished', 'cinematic'];
-const SETTLED_ASSET_PROGRESS = Object.freeze({
-  active: false,
-  progress: 100,
-  total: 0,
-});
 const AUDIO_PREFERENCE_KEY = 'darwin-soundscape-enabled';
 const LAUNCH_MENU_STATES = new Set(['menu', 'character', 'settings', 'controls', 'about', 'load']);
 
@@ -591,11 +586,15 @@ function recommendedQualityFromDevice() {
   const cores = Number(window.navigator?.hardwareConcurrency);
   const compactTouch = window.matchMedia?.('(pointer: coarse)').matches
     && Math.min(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight) <= 1024;
+  const appleMobile = isAppleMobileDevice(window.navigator);
   cachedAutomaticQualityRecommendation = classifyAutomaticGraphicsQuality({
+    appleMobile,
     deviceMemory: memory,
     hardwareConcurrency: cores,
     compactTouch,
-    renderer: probeWebGLRendererName(window.document),
+    // These devices have a known starting tier. Avoid allocating a probe
+    // context before the real game canvas takes its place.
+    renderer: appleMobile || compactTouch ? '' : probeWebGLRendererName(window.document),
   });
   return cachedAutomaticQualityRecommendation;
 }
@@ -612,6 +611,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
     ? requestedQuality
     : automaticQuality;
   const base = { ...DEFAULT_PERF_SETTINGS, ...QUALITY_PRESETS[quality], quality };
+  const appleMobileLowPower = quality === 'low' && isAppleMobileDevice();
   const defaultWaterQuality = requestedQuality
     ? base.waterQuality
     : quality === 'mobile' || quality === 'low' || quality === 'desktopLight'
@@ -653,7 +653,7 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
     ao,
     postHalfFloat,
     stats: false,
-    contextAntialias: base.contextAntialias !== false,
+    contextAntialias: !appleMobileLowPower && base.contextAntialias !== false,
     shadows: settingEnabled(params, base.shadows, ['shadows'], ['noShadows']),
     water: settingEnabled(params, base.water, ['water'], ['noWater']),
     reflections,
@@ -683,7 +683,9 @@ function settingsFromUrlSearch(search, automaticQuality = 'performance') {
       ? Number(params.get('foliageDrawScale'))
       : base.foliageDrawScale,
     terrainSegmentCap,
-    adaptiveDpr: !params.has('noAdaptiveDpr'),
+    // Keep the low-power phone canvas at 1x instead of reallocating it when
+    // a brief frame-rate dip or a region transition changes the adaptive rung.
+    adaptiveDpr: !appleMobileLowPower && !params.has('noAdaptiveDpr'),
   };
 }
 
@@ -1698,22 +1700,14 @@ function OpeningVisualReadySignal({
     if (compiledSequenceRef.current !== sequenceId) {
       if (compilingSequenceRef.current !== sequenceId) {
         compilingSequenceRef.current = sequenceId;
-        let compileTimeoutId = null;
         Promise.resolve()
-          .then(() => Promise.race([
-            withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
-              ? gl.compileAsync(scene, camera)
-              : Promise.resolve(gl.compile(scene, camera)))),
-            new Promise(resolve => {
-              compileTimeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
-            }),
-          ]))
+          .then(() => precompileScene(gl, scene, camera))
           .catch(() => {
             // The renderer surfaces shader errors itself. Launch must still
             // settle onto authored fallbacks on unusual drivers.
           })
           .then(() => {
-            if (compileTimeoutId != null) window.clearTimeout(compileTimeoutId);
+            if (activeSequenceRef.current !== sequenceId) return;
             compiledSequenceRef.current = sequenceId;
             if (compilingSequenceRef.current === sequenceId) compilingSequenceRef.current = null;
           });
@@ -1897,14 +1891,17 @@ function prewarmCompileTarget() {
   if (!_compileColorTarget) _compileColorTarget = new WebGLRenderTarget(1, 1);
   return _compileColorTarget;
 }
-function withLinearCompileTarget(gl, run) {
+function precompileScene(gl, scene, camera, targetScene = null) {
+  if (gl.getContext().isContextLost()) return;
   const previous = gl.getRenderTarget();
   gl.setRenderTarget(prewarmCompileTarget());
+  let materials;
   try {
-    return run();
+    materials = gl.compile(scene, camera, targetScene);
   } finally {
     gl.setRenderTarget(previous);
   }
+  return waitForWarmPrograms(gl, materials, TRANSITION_COMPILE_TIMEOUT_MS);
 }
 
 function withForcedWarmVisibility(objects, run) {
@@ -2162,25 +2159,14 @@ function SettledContentPrewarm({ zoneId, contentPhase, contentTarget, sequenceKe
     const subject = new Object3D();
     subject.children = objects;
     runningRef.current = true;
-    let timeoutId = null;
     const prewarmZoneId = zoneId;
     Promise.resolve()
-      .then(() => Promise.race([
-        withForcedWarmVisibility(objects, () => (
-          withLinearCompileTarget(gl, () => (typeof gl.compileAsync === 'function'
-            ? gl.compileAsync(subject, camera, scene)
-            : Promise.resolve(gl.compile(subject, camera, scene))))
-        )),
-        new Promise(resolve => {
-          timeoutId = window.setTimeout(resolve, TRANSITION_COMPILE_TIMEOUT_MS);
-        }),
-      ]))
+      .then(() => withForcedWarmVisibility(objects, () => precompileScene(gl, subject, camera, scene)))
       .catch(() => {
         // The renderer reports shader errors itself. A driver that cannot
         // precompile must not wedge gameplay.
       })
       .then(() => {
-        if (timeoutId != null) window.clearTimeout(timeoutId);
         subject.children = [];
         runningRef.current = false;
         if (zoneRef.current !== prewarmZoneId) return;
@@ -2448,11 +2434,11 @@ function waterResourceDescriptor(zoneId, quality) {
   };
 }
 
-function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
+function DestinationIntentPrefetch({ segmentCap, waterQuality, constrained }) {
   const edgeDestinationId = useThreeGameStore(state => state.edgePrompt?.toRegionId || null);
   const transitionDestinationId = useThreeGameStore(state => state.transition?.zoneId || null);
   const currentZoneId = useThreeGameStore(state => state.currentZoneId);
-  const destinationId = transitionDestinationId || edgeDestinationId;
+  const destinationId = transitionDestinationId || (constrained ? null : edgeDestinationId);
   useEffect(() => {
     setEcologyAssetPrefetchPaused(Boolean(transitionDestinationId));
     return () => setEcologyAssetPrefetchPaused(false);
@@ -2462,12 +2448,12 @@ function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
   // runs during the aerial cinematic — the job startupPrefetch.js was written
   // for; after travel it is a cheap no-op safety net (the pump dedupes).
   useEffect(() => {
-    if (currentZoneId) prefetchStartupContentAssets(currentZoneId);
-  }, [currentZoneId]);
+    if (!constrained && currentZoneId) prefetchStartupContentAssets(currentZoneId);
+  }, [constrained, currentZoneId]);
   useEffect(() => {
     if (!destinationId) return;
     prefetchIslandMapImage();
-    prefetchRegionTerrainTextures(destinationId);
+    if (!constrained) prefetchRegionTerrainTextures(destinationId);
     const waterResource = waterResourceDescriptor(destinationId, waterQuality);
     if (!waterResource.skip) {
       prepareWaterTextureResource(destinationId, waterResource.bakeRes, waterResource.options);
@@ -2477,12 +2463,13 @@ function DestinationIntentPrefetch({ segmentCap, waterQuality }) {
     // Queue the destination's props/specimens/ship/NPC GLBs alongside its
     // ecology, so arrival mounts read from a warm cache instead of parsing
     // mid-transition.
-    prefetchStartupContentAssets(destinationId);
+    if (!constrained) prefetchStartupContentAssets(destinationId);
     prepareRegionEcologyResource(destinationId).then(resource => {
+      if (constrained) return;
       const destination = resource.definitions.find(definition => definition.zoneId === destinationId);
       prefetchEcologyAssets(destination?.ecology);
     });
-  }, [destinationId, segmentCap, waterQuality]);
+  }, [constrained, destinationId, segmentCap, waterQuality]);
   return null;
 }
 
@@ -4381,29 +4368,20 @@ export default function ThreeDarwinGame({
   const [rendererInfo, setRendererInfo] = useState(null);
   const closeAudioDebug = useCallback(() => setShowAudioDebug(false), []);
   const handleWebGLContextLost = useCallback(() => {
+    setWebglContextLost(true);
+    if (e2eMode || screenshotMode || !sceneReady) return;
     try {
       useThreeGameStore.getState().saveSession();
     } catch {
       // Recovery UI still matters if storage is unavailable.
     }
-    setWebglContextLost(true);
-  }, []);
+  }, [e2eMode, sceneReady, screenshotMode]);
   const handleWebGLContextRestored = useCallback(() => {
     setWebglContextLost(false);
   }, []);
   const reloadAfterWebGLFailure = useCallback(() => {
-    try {
-      useThreeGameStore.getState().saveSession();
-    } finally {
-      window.location.reload();
-    }
+    window.location.reload();
   }, []);
-  // Loading progress only drives the launch overlay. Once the initial scene is
-  // ready, keep this subscriber's snapshot stable so render-time texture starts
-  // in newly mounted regions cannot schedule a parent React update.
-  const assetProgress = useProgress(state => (
-    sceneReady ? SETTLED_ASSET_PROGRESS : state
-  ));
   const bootStartedAt = useRef(0);
   const loaderQuietSince = useRef(0);
   const initialModeAppliedRef = useRef(false);
@@ -4524,7 +4502,7 @@ export default function ThreeDarwinGame({
     const timer = window.setTimeout(() => setLibraryCanvasPaused(true), 420);
     return () => window.clearTimeout(timer);
   }, [libraryOpen]);
-  const canvasPaused = transitionCanvasPaused || libraryCanvasPaused;
+  const canvasPaused = transitionCanvasPaused || libraryCanvasPaused || webglContextLost;
   const activeContentPhase = transitionMountingDestination
     ? transitionContentPhase
     : startupContentPhase;
@@ -4538,6 +4516,7 @@ export default function ThreeDarwinGame({
     : STARTUP_OPENING_CONTENT_PHASE;
   useEffect(() => {
     if (!DEV_TOOLS_ENABLED) return undefined;
+    const assetProgress = useProgress.getState();
     window.__threeLaunchDebug = {
       launchState,
       sceneReady,
@@ -4560,12 +4539,6 @@ export default function ThreeDarwinGame({
     };
     return undefined;
   }, [
-    assetProgress.active,
-    assetProgress.errors,
-    assetProgress.item,
-    assetProgress.loaded,
-    assetProgress.progress,
-    assetProgress.total,
     displayedProgress,
     historicalPrologueAccepted,
     historicalPrologueVisible,
@@ -4898,7 +4871,11 @@ export default function ThreeDarwinGame({
 
   useEffect(() => {
     if (!gameStarted || sceneReady) return undefined;
+    let lastLoaded = null;
     const tick = () => {
+      // Three's loader can notify synchronously as an R3F child mounts. A
+      // React subscription here can re-enter Canvas while it is committing.
+      const assetProgress = useProgress.getState();
       const now = performance.now();
       const elapsed = now - bootStartedAt.current;
       const rawProgress = Math.max(0, Math.min(100, assetProgress.progress || 0));
@@ -4908,10 +4885,11 @@ export default function ThreeDarwinGame({
         loaderQuietSince.current = 0;
         setLoadersStable(false);
       } else {
-        if (!loaderQuietSince.current) loaderQuietSince.current = now;
+        if (!loaderQuietSince.current || lastLoaded !== assetProgress.loaded) loaderQuietSince.current = now;
         const quietFor = now - loaderQuietSince.current;
         setLoadersStable(quietFor >= BOOT_LOADER_STABLE_MS && elapsed >= BOOT_MIN_LOADING_MS);
       }
+      lastLoaded = assetProgress.loaded;
 
       // The floor the bar fills over regardless of real load. It exists so a
       // warm cache does not flash the bar; it is not a measurement, so it is
@@ -4938,14 +4916,7 @@ export default function ThreeDarwinGame({
     const handle = window.setInterval(tick, 80);
     tick();
     return () => window.clearInterval(handle);
-  }, [
-    assetProgress.active,
-    assetProgress.loaded,
-    assetProgress.progress,
-    assetProgress.total,
-    gameStarted,
-    sceneReady,
-  ]);
+  }, [gameStarted, sceneReady]);
 
   useEffect(() => {
     if (
@@ -5331,7 +5302,7 @@ export default function ThreeDarwinGame({
     let cancelled = false;
     let idleHandle = null;
     let timeoutHandle = null;
-    const specimenAssetIds = getThreeSpecimens(currentZoneId)
+    const specimenAssetIds = (isConstrainedMemoryDevice() ? [] : getThreeSpecimens(currentZoneId))
       .map(getSpecimenPreloadAssetId)
       .filter(Boolean);
     const ids = Array.from(new Set(['syms', ...specimenAssetIds]));
@@ -5485,6 +5456,7 @@ export default function ThreeDarwinGame({
       />
       {gameStarted && (
         <DestinationIntentPrefetch
+          constrained={isConstrainedMemoryDevice()}
           segmentCap={scenePerfSettings.terrainSegmentCap}
           waterQuality={scenePerfSettings.waterQuality || 'polished'}
         />
@@ -5693,7 +5665,7 @@ export default function ThreeDarwinGame({
             <div className="max-w-md rounded-xl border border-amber-100/25 bg-black/45 p-6 shadow-2xl backdrop-blur">
               <h2 className="font-serif text-2xl">Graphics paused</h2>
               <p className="mt-3 text-sm leading-relaxed text-amber-50/80">
-                The browser ran out of graphics resources. Your expedition was saved and the game is trying to restore the view.
+                The browser lost the graphics connection. The game is trying to restore the view. You can also reload and continue from your latest save.
               </p>
               <button
                 type="button"

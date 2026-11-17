@@ -29,6 +29,7 @@ import {
   WILDLIFE_FIELDWORK_AUDIO_URLS,
 } from './audioAssets';
 import { getPlayerPreferences } from '../playerPreferences';
+import { isConstrainedMemoryDevice } from '../world/constrainedDevice';
 
 const AUDIO_DEBUG_TRACKS = Object.freeze([
   { key: 'surf', label: 'Ocean surf', group: 'Environment loops', kind: 'ambient', url: ISLAND_AMBIENCE_AUDIO.surf, diagnosticGain: 0.55 },
@@ -253,6 +254,7 @@ const DEFERRED_AUDIO_BANKS = Object.freeze([
 ]);
 let deferredAudioPreload = null;
 let toolFoleyPreload = null;
+let constrainedDecodeQueue = Promise.resolve();
 
 const audioState = {
   context: null,
@@ -760,19 +762,21 @@ async function loadAudioBuffer(url) {
   if (!context) return null;
   if (audioState.buffers.has(url)) return audioState.buffers.get(url);
   if (!audioState.bufferPromises.has(url)) {
-    const promise = fetch(url)
+    const decode = () => fetch(url)
       .then(response => {
         if (!response.ok) throw new Error(`Audio request failed (${response.status}): ${url}`);
         return response.arrayBuffer();
       })
-      .then(arrayBuffer => context.decodeAudioData(arrayBuffer))
+      .then(arrayBuffer => context.decodeAudioData(arrayBuffer));
+    const constrained = isConstrainedMemoryDevice();
+    const pending = constrained ? constrainedDecodeQueue.then(decode) : decode();
+    const promise = pending
       .then(buffer => {
         audioState.buffers.set(url, buffer);
         exposeDebugState();
         return buffer;
       })
       .catch(error => {
-        audioState.bufferPromises.delete(url);
         audioState.debug.lastLoadError = {
           url,
           message: String(error?.message || error),
@@ -781,7 +785,11 @@ async function loadAudioBuffer(url) {
         exposeDebugState();
         if (process.env.NODE_ENV !== 'production') console.warn('[audio] Unable to load field recording', error);
         return null;
+      })
+      .finally(() => {
+        if (audioState.bufferPromises.get(url) === promise) audioState.bufferPromises.delete(url);
       });
+    if (constrained) constrainedDecodeQueue = promise;
     audioState.bufferPromises.set(url, promise);
   }
   return audioState.bufferPromises.get(url);
@@ -903,6 +911,7 @@ function waitForAudioPreloadWindow() {
 }
 
 export function preloadSoundscapeEffects() {
+  if (isConstrainedMemoryDevice()) return Promise.resolve(false);
   if (deferredAudioPreload) return deferredAudioPreload;
   deferredAudioPreload = (async () => {
     // Decode one related bank per idle window. Fetch/decode for every effect
@@ -931,6 +940,9 @@ export function preloadSoundscapeEffects() {
 }
 
 export function preloadSoundscapeToolEffects() {
+  // On phones the requested effect will load when its cue plays. A single
+  // tool contact shouldn't start decoding the entire fieldwork library.
+  if (isConstrainedMemoryDevice()) return Promise.resolve(false);
   if (toolFoleyPreload) return toolFoleyPreload;
   toolFoleyPreload = Promise.all(
     [...TOOL_FOLEY_AUDIO_URLS, ...HAMMER_STRIKE_AUDIO_URLS, ...FIELD_FOLEY_AUDIO_URLS, ...INTERACTION_AUDIO_URLS].map(loadAudioBuffer),
@@ -940,6 +952,11 @@ export function preloadSoundscapeToolEffects() {
     return ready;
   });
   return toolFoleyPreload;
+}
+
+function startupAmbientKeys() {
+  // Wind and rain can load from setAmbientAudioTargets when they are audible.
+  return Object.keys(isConstrainedMemoryDevice() ? LAUNCH_AMBIENCE_TARGETS : ISLAND_AMBIENCE_AUDIO);
 }
 
 export async function activatePostOfficeBayAudio({ preloadEffects = false } = {}) {
@@ -954,7 +971,7 @@ export async function activatePostOfficeBayAudio({ preloadEffects = false } = {}
     }
   }
   await Promise.all(
-    Object.entries(ISLAND_AMBIENCE_AUDIO).map(([key, url]) => ensureAmbientTrack(key, url)),
+    startupAmbientKeys().map(key => ensureAmbientTrack(key, ISLAND_AMBIENCE_AUDIO[key])),
   );
   if (preloadEffects) await preloadSoundscapeEffects();
   exposeDebugState();
@@ -1056,6 +1073,10 @@ export function setSpatialAudioTarget(key, {
     routeSpatialTrack(track, target);
     rampValue(track.source.playbackRate, target.playbackRate, 0.16);
     rampValue(track.filter?.frequency, target.filterHz, Math.max(0.2, timeConstant));
+  } else if (target.gain > 0 && audioState.enabled && audioState.context?.state === 'running'
+    && isConstrainedMemoryDevice()) {
+    const definition = AUDIO_DEBUG_TRACK_BY_KEY.get(key);
+    if (definition?.kind === 'spatial') void ensureSpatialTrack(key, definition.url);
   }
   exposeDebugState();
 }
@@ -1069,12 +1090,14 @@ export function audioSpriteReady(sprite, { family = null, priority = false } = {
     || !context
     || context.state !== 'running'
     || !sprite?.url
-    || !audioState.buffers.get(sprite.url)
     // Footfalls now carry a foliage brush and cloth layer, so a run through
     // scrub holds several short voices at once; the old cap of 7 started
     // dropping the footsteps themselves.
-    || audioState.voices.size >= (priority ? 12 : 10)) return false;
-  return debugAllowsTrack(family);
+    || audioState.voices.size >= (priority ? 12 : 10)
+    || !debugAllowsTrack(family)) return false;
+  if (audioState.buffers.has(sprite.url)) return true;
+  if (isConstrainedMemoryDevice()) void loadAudioBuffer(sprite.url);
+  return false;
 }
 
 export function playAudioSprite(sprite, {
@@ -1310,7 +1333,7 @@ export function soundscapeAudioIsRunning() {
 
 export function soundscapeAmbientIsReady() {
   return soundscapeAudioIsRunning()
-    && Object.keys(ISLAND_AMBIENCE_AUDIO).every(key => audioState.ambient.has(key));
+    && startupAmbientKeys().every(key => audioState.ambient.has(key));
 }
 
 function reapplyDebugControl(timeConstant = 0.08) {

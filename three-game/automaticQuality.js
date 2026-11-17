@@ -35,6 +35,7 @@ export function buildEffectiveDprLadder(maxDpr, deviceDpr) {
 }
 
 export function classifyAutomaticGraphicsQuality({
+  appleMobile = false,
   deviceMemory,
   hardwareConcurrency,
   compactTouch = false,
@@ -44,8 +45,8 @@ export function classifyAutomaticGraphicsQuality({
   const cores = Number(hardwareConcurrency);
   const rendererName = String(renderer || '').trim();
 
-  // Phones keep the tuned mobile tier: its SMAA and 1.25x were chosen because
-  // 1x with no screen-space AA read as jagged at phone viewing distance.
+  // Apple's mobile browsers share WebKit and the tighter phone GPU budget.
+  if (appleMobile) return 'low';
   if (compactTouch) return 'mobile';
   // A 4 GB / 4-core machine is the classroom Chromebook; a software renderer
   // runs every pixel on the CPU. Both need the work cut, not just resolution.

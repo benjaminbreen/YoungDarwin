@@ -20,7 +20,7 @@ import { ActiveZoneContent } from '../zones/ActiveZoneContent';
 import { PhysicsProvider } from '../physics/PhysicsProvider';
 import { useThreeGameStore } from '../store';
 import { getInteriorDefinition } from '../interiors/interiorRegistry';
-import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler';
+import { FaunaFrameScheduler } from '../fauna/FaunaFrameScheduler.jsx';
 import { AudioListenerSync } from '../audio/AudioListenerSync';
 import { ObservationWatcher } from '../fauna/behavior/ObservationWatcher';
 import { TargetBracketProjector } from './player/TargetBracketProjector';

@@ -4,8 +4,8 @@
 // will be killed for crossing a memory ceiling? iOS Safari gives a tab
 // ~1.4GB including GPU allocations, and a single zone's full-resolution
 // terrain sets decode to ~440MB — most of the budget before gameplay
-// exists. Same signals as recommendedQualityFromDevice (Safari exposes no
-// deviceMemory, so coarse pointer + compact screen carries iPhones).
+// exists. Apple mobile devices also omit deviceMemory and iPadOS can report
+// a desktop user agent and a screen wider than the compact touch threshold.
 //
 // `?constrainedMemory=1` / `=0` overrides for testing either path anywhere.
 
@@ -19,6 +19,12 @@ export const CONSTRAINED_HERO_TEXTURE_MAX_DIM = 1024;
 
 let cached = null;
 
+export function isAppleMobileDevice(navigatorRef = globalThis.navigator) {
+  if (!navigatorRef) return false;
+  return /iPhone|iPad|iPod/i.test(navigatorRef.userAgent || '')
+    || (navigatorRef.platform === 'MacIntel' && navigatorRef.maxTouchPoints > 1);
+}
+
 export function isConstrainedMemoryDevice() {
   if (cached !== null) return cached;
   if (typeof window === 'undefined') return false;
@@ -31,7 +37,8 @@ export function isConstrainedMemoryDevice() {
   const cores = Number(window.navigator?.hardwareConcurrency);
   const compactTouch = Boolean(window.matchMedia?.('(pointer: coarse)').matches)
     && Math.min(window.screen?.width || window.innerWidth, window.screen?.height || window.innerHeight) <= 1024;
-  cached = compactTouch
+  cached = isAppleMobileDevice(window.navigator)
+    || compactTouch
     || (Number.isFinite(memory) && memory > 0 && memory <= 4)
     || (Number.isFinite(cores) && cores > 0 && cores <= 4);
   return cached;

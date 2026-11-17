@@ -18,7 +18,7 @@ export const QUALITY_CHOICES = Object.freeze([
   {
     id: 'auto',
     label: 'Automatic',
-    note: 'Low-power on modest hardware, Light on most laptops, Balanced with a discrete graphics card.',
+    note: 'Low-power on iPhone, iPad and modest hardware, Light on most laptops, Balanced with a discrete graphics card.',
   },
   {
     id: 'low',
